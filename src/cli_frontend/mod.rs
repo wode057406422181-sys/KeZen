@@ -1,0 +1,24 @@
+pub mod render;
+pub mod repl;
+
+use tokio::sync::mpsc;
+
+use crate::config::AppConfig;
+use crate::engine::InfiniEngine;
+use crate::engine::events::{EngineEvent, UserAction};
+
+/// Launch the CLI frontend: spawn the Engine and run the REPL.
+pub async fn run_cli(config: AppConfig, prompt: Option<String>) -> anyhow::Result<()> {
+    let (action_tx, action_rx) = mpsc::channel::<UserAction>(32);
+    let (event_tx, event_rx) = mpsc::channel::<EngineEvent>(32);
+
+    let engine = InfiniEngine::new(config.clone(), action_rx, event_tx)?;
+
+    // Spawn the engine loop in a background task
+    tokio::spawn(async move {
+        engine.run().await;
+    });
+
+    // Run the REPL on the main task (blocking readline)
+    repl::run_repl(config, action_tx, event_rx, prompt).await
+}

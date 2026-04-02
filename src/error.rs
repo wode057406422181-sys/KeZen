@@ -12,6 +12,21 @@ pub enum InfiniError {
     #[error("Authentication error: no API key configured")]
     NoApiKey,
 
+    #[error(
+        "No model configured. Please specify a model via --model, INFINI_MODEL, or config file."
+    )]
+    NoModel,
+
+    #[error("Stream error: {0}")]
+    Stream(String),
+
+    #[allow(dead_code)]
+    #[error("Server error: {0}")]
+    Server(String),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("Network error: {0}")]
     Network(#[from] reqwest::Error),
 

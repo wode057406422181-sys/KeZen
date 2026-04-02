@@ -20,13 +20,23 @@ clap = { version = "4", features = ["derive", "env", "color"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+futures = "0.3"
+async-trait = "0.1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# HTTP client
+# HTTP client & SSE
 reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest-eventsource = "0.6"
+eventsource-stream = "0.2"
+
+# HTTP Server
+axum = "0.8"
+tower = "0.5"
 
 # Error handling
 anyhow = "1"
@@ -36,12 +46,11 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
-# Terminal UI
+# Terminal UI & Output
 crossterm = "0.28"
-ratatui = "0.29"
-
-# Colored terminal output
 colored = "3"
+rustyline = "15"
+termimad = "0.31"
 
 # Configuration
 toml = "0.8"
