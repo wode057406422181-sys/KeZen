@@ -8,6 +8,8 @@ use crate::api::debug_logger;
 use crate::api::types::{Message, Role, StreamEvent, Usage};
 use crate::api::{BoxStream, LlmClient};
 use crate::config::AppConfig;
+use crate::constants::api::{ANTHROPIC_VERSION, CONTENT_TYPE_JSON};
+use crate::constants::defaults::DEFAULT_MAX_TOKENS;
 use crate::error::InfiniError;
 
 pub struct AnthropicClient {
@@ -32,15 +34,16 @@ impl AnthropicClient {
             HeaderValue::from_str(api_key)
                 .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
         );
-        // Some Anthropic-compatible endpoints (e.g. DashScope Coding Plan) require
-        // Bearer auth instead of / in addition to x-api-key.
         headers.insert(
             "authorization",
             HeaderValue::from_str(&format!("Bearer {}", api_key))
                 .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
         );
-        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
-        headers.insert("content-type", HeaderValue::from_static("application/json"));
+        headers.insert(
+            "anthropic-version",
+            HeaderValue::from_static(ANTHROPIC_VERSION),
+        );
+        headers.insert("content-type", HeaderValue::from_static(CONTENT_TYPE_JSON));
         // Identify as a coding agent (required by some Anthropic-compatible endpoints)
         headers.insert(
             "user-agent",
@@ -57,7 +60,7 @@ impl AnthropicClient {
         Ok(Self {
             client,
             model,
-            max_tokens: config.max_tokens.unwrap_or(8192),
+            max_tokens: config.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
             base_url,
         })
     }

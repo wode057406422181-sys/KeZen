@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::constants::defaults::{
+    DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT,
+};
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
@@ -61,7 +65,7 @@ impl Default for AppConfig {
             api_url: None,
             api_key: None,
             model: None,
-            max_tokens: Some(8192),
+            max_tokens: Some(DEFAULT_MAX_TOKENS),
             thinking: false,
             user_agent: None,
         }
@@ -143,13 +147,13 @@ impl AppConfig {
     /// Get the base URL for the configured provider
     pub fn base_url(&self) -> &str {
         self.api_url.as_deref().unwrap_or(match self.provider {
-            Provider::Anthropic => "https://api.anthropic.com",
-            Provider::OpenAi => "https://api.openai.com",
+            Provider::Anthropic => DEFAULT_ANTHROPIC_BASE_URL,
+            Provider::OpenAi => DEFAULT_OPENAI_BASE_URL,
         })
     }
 
     /// Get User-Agent string (configurable, defaults to "infini/1.0.0")
     pub fn user_agent(&self) -> &str {
-        self.user_agent.as_deref().unwrap_or("infini/1.0.0")
+        self.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT)
     }
 }

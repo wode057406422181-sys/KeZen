@@ -2,6 +2,7 @@ mod api;
 mod cli;
 mod cli_frontend;
 mod config;
+mod constants;
 mod engine;
 mod error;
 mod prompts;
