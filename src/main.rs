@@ -55,7 +55,11 @@ async fn main() -> Result<()> {
         Some(Command::Init) => {
             println!("Initializing Infini in current directory...");
             config.save()?;
-            println!("Configuration saved to ~/.config/infini/config.toml");
+            if let Ok(path) = config::AppConfig::config_path() {
+                println!("Configuration saved to {}", path.display());
+            } else {
+                println!("Configuration saved successfully");
+            }
             Ok(())
         }
         Some(Command::Config { key, set }) => {

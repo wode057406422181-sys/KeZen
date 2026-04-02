@@ -27,7 +27,7 @@ impl fmt::Display for Provider {
 /// 1. CLI arguments (--model, --api-key, etc.)
 /// 2. INFINI_* environment variables
 /// 3. ANTHROPIC_API_KEY / OPENAI_API_KEY (auto-detect provider)
-/// 4. Config file (~/.config/infini/config.toml)
+/// 4. Config file (~/.infini/config/config.toml)
 /// 5. Defaults (only max_tokens = 8192; model has no default)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -130,9 +130,9 @@ impl AppConfig {
     }
 
     /// Get the default configuration file path
-    fn config_path() -> Result<PathBuf> {
+    pub fn config_path() -> Result<PathBuf> {
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        Ok(home.join(".config").join("infini").join("config.toml"))
+        Ok(home.join(".infini").join("config").join("config.toml"))
     }
 
     /// Get the base URL for the configured provider
