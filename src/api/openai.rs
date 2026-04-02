@@ -32,6 +32,12 @@ impl OpenAiClient {
             HeaderValue::from_str(&format!("Bearer {}", api_key))
                 .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
         );
+        // Also send x-api-key for compatibility with endpoints that check it
+        headers.insert(
+            "x-api-key",
+            HeaderValue::from_str(api_key)
+                .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
+        );
         headers.insert("content-type", HeaderValue::from_static("application/json"));
         headers.insert(
             "user-agent",
