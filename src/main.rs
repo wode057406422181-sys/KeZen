@@ -45,6 +45,12 @@ async fn main() -> Result<()> {
         config.max_tokens = Some(t);
     }
 
+    // Enable API debug logging if --verbose
+    if cli.verbose {
+        api::debug_logger::enable_debug_logging();
+        eprintln!("  🔍 API debug logging enabled → ~/.infini/logs/");
+    }
+
     match cli.command {
         Some(Command::Serve { port, host }) => server::run_server(config, host, port).await,
         Some(Command::Chat { prompt }) => {

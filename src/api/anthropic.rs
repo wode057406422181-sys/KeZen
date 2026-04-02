@@ -4,6 +4,7 @@ use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 
+use crate::api::debug_logger;
 use crate::api::types::{Message, Role, StreamEvent, Usage};
 use crate::api::{BoxStream, LlmClient};
 use crate::config::AppConfig;
@@ -75,11 +76,14 @@ impl LlmClient for AnthropicClient {
             body["system"] = json!(sys_prompt);
         }
 
+        debug_logger::log_request("anthropic", &url, &body);
+
         let response = self.client.post(&url).json(&body).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
+            debug_logger::log_error_response("anthropic", status.as_u16(), &text);
             return Err(InfiniError::Api(format!(
                 "Anthropic API error {}: {}",
                 status, text
@@ -92,6 +96,7 @@ impl LlmClient for AnthropicClient {
         let event_stream = stream.filter_map(|event_result| async {
             match event_result {
                 Ok(event) => {
+                    debug_logger::log_sse_event("anthropic", &event.event, &event.data);
                     let parsed = match event.event.as_str() {
                         "message_start" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {

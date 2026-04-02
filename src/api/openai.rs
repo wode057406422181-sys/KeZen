@@ -4,6 +4,7 @@ use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 
+use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{BoxStream, LlmClient};
 use crate::config::AppConfig;
@@ -104,11 +105,14 @@ impl LlmClient for OpenAiClient {
             }
         });
 
+        debug_logger::log_request("openai", &url, &body);
+
         let response = self.client.post(&url).json(&body).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
+            debug_logger::log_error_response("openai", status.as_u16(), &text);
             return Err(InfiniError::Api(format!(
                 "OpenAI API error {}: {}",
                 status, text
@@ -120,6 +124,7 @@ impl LlmClient for OpenAiClient {
         let event_stream = stream.filter_map(|event_result| async {
             match event_result {
                 Ok(event) => {
+                    debug_logger::log_sse_event("openai", "message", &event.data);
                     // OpenAI signals end of stream with [DONE]
                     if event.data == "[DONE]" {
                         return Some(Ok(StreamEvent::MessageStop));

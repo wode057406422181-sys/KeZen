@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod debug_logger;
 pub mod openai;
 pub mod types;
 

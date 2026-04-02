@@ -4,8 +4,9 @@ pub mod session;
 use futures::StreamExt;
 use tokio::sync::mpsc;
 
+use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
-use crate::api::{LlmClient, create_client};
+use crate::api::{self, LlmClient};
 use crate::config::AppConfig;
 use crate::prompts::build_system_prompt;
 
@@ -34,7 +35,7 @@ impl InfiniEngine {
         action_rx: mpsc::Receiver<UserAction>,
         event_tx: mpsc::Sender<EngineEvent>,
     ) -> Result<Self, crate::error::InfiniError> {
-        let client = create_client(&config)?;
+        let client = api::create_client(&config)?;
         Ok(Self {
             config,
             client,
@@ -140,6 +141,11 @@ impl InfiniEngine {
 
                 // Update session with usage
                 self.session.update_usage(&turn_usage);
+                debug_logger::log_stream_end(
+                    &self.config.provider.to_string(),
+                    turn_usage.input_tokens,
+                    turn_usage.output_tokens,
+                );
                 let _ = self
                     .event_tx
                     .send(EngineEvent::CostUpdate(turn_usage))
