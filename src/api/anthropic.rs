@@ -32,8 +32,20 @@ impl AnthropicClient {
             HeaderValue::from_str(api_key)
                 .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
         );
+        // Some Anthropic-compatible endpoints (e.g. DashScope Coding Plan) require
+        // Bearer auth instead of / in addition to x-api-key.
+        headers.insert(
+            "authorization",
+            HeaderValue::from_str(&format!("Bearer {}", api_key))
+                .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
+        );
         headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
         headers.insert("content-type", HeaderValue::from_static("application/json"));
+        // Identify as a coding agent (required by some Anthropic-compatible endpoints)
+        headers.insert(
+            "user-agent",
+            HeaderValue::from_static("claude-cli/1.0.0 (cli)"),
+        );
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
