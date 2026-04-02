@@ -33,6 +33,11 @@ impl OpenAiClient {
                 .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
         );
         headers.insert("content-type", HeaderValue::from_static("application/json"));
+        headers.insert(
+            "user-agent",
+            HeaderValue::from_str(config.user_agent())
+                .map_err(|e| InfiniError::Config(format!("Invalid User-Agent format: {}", e)))?,
+        );
 
         let client = reqwest::Client::builder()
             .default_headers(headers)

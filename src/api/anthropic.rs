@@ -44,7 +44,8 @@ impl AnthropicClient {
         // Identify as a coding agent (required by some Anthropic-compatible endpoints)
         headers.insert(
             "user-agent",
-            HeaderValue::from_static("claude-cli/1.0.0 (cli)"),
+            HeaderValue::from_str(config.user_agent())
+                .map_err(|e| InfiniError::Config(format!("Invalid User-Agent format: {}", e)))?,
         );
 
         let client = reqwest::Client::builder()

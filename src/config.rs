@@ -49,6 +49,9 @@ pub struct AppConfig {
     /// Enable extended thinking (Anthropic only)
     #[serde(default)]
     pub thinking: bool,
+
+    /// Custom User-Agent header (useful for Coding Plan endpoints)
+    pub user_agent: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -60,6 +63,7 @@ impl Default for AppConfig {
             model: None,
             max_tokens: Some(8192),
             thinking: false,
+            user_agent: None,
         }
     }
 }
@@ -142,5 +146,10 @@ impl AppConfig {
             Provider::Anthropic => "https://api.anthropic.com",
             Provider::OpenAi => "https://api.openai.com",
         })
+    }
+
+    /// Get User-Agent string (configurable, defaults to "infini/1.0.0")
+    pub fn user_agent(&self) -> &str {
+        self.user_agent.as_deref().unwrap_or("infini/1.0.0")
     }
 }
