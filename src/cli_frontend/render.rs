@@ -9,7 +9,7 @@ pub fn print_welcome(config: &AppConfig) {
     println!(
         "\n  {} {}",
         "⚡".bold(),
-        "Infini v0.1.0".bright_cyan().bold()
+        "Infini".bright_cyan().bold()
     );
     println!(
         "  Provider: {} | Model: {}",
