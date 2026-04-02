@@ -131,9 +131,8 @@ impl AppConfig {
 
     /// Get the default configuration file path
     fn config_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine config directory"))?;
-        Ok(config_dir.join("infini").join("config.toml"))
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        Ok(home.join(".config").join("infini").join("config.toml"))
     }
 
     /// Get the base URL for the configured provider
