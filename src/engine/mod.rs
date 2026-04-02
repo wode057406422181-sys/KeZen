@@ -66,7 +66,7 @@ impl InfiniEngine {
             content: vec![ContentBlock::Text { text: content }],
         });
 
-        let system_prompt = build_system_prompt();
+        let system_prompt = build_system_prompt(self.config.model.as_deref());
         // Clone messages to avoid borrow conflict with session
         let messages = self.session.messages();
 

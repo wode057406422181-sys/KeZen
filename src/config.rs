@@ -131,7 +131,8 @@ impl AppConfig {
 
     /// Get the default configuration file path
     pub fn config_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let home =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
         Ok(home.join(".infini").join("config").join("config.toml"))
     }
 
