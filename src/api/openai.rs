@@ -213,19 +213,24 @@ impl LlmClient for OpenAiClient {
 
         let stream = response.bytes_stream().eventsource();
 
-        let event_stream = stream.filter_map(|event_result| async {
-            match event_result {
+        let event_stream = stream.flat_map(|event_result| {
+            // Each SSE chunk may produce zero, one, or multiple StreamEvents
+            // (e.g. parallel tool calls in a single delta). We collect them into
+            // a Vec and emit via `futures::stream::iter`.
+            let events: Vec<Result<StreamEvent, InfiniError>> = match event_result {
                 Ok(event) => {
                     debug_logger::log_sse_event("openai", "message", &event.data);
                     // OpenAI signals end of stream with [DONE]
                     if event.data == "[DONE]" {
-                        return Some(Ok(StreamEvent::MessageStop));
+                        return futures::stream::iter(vec![Ok(StreamEvent::MessageStop)]);
                     }
 
                     let v: serde_json::Value = match serde_json::from_str(&event.data) {
                         Ok(v) => v,
-                        Err(e) => return Some(Err(InfiniError::Json(e))),
+                        Err(e) => return futures::stream::iter(vec![Err(InfiniError::Json(e))]),
                     };
+
+                    let mut out: Vec<Result<StreamEvent, InfiniError>> = Vec::new();
 
                     // Extract usage from the final chunk (when choices is empty)
                     if v["usage"].is_object() && !v["usage"].is_null() {
@@ -233,32 +238,36 @@ impl LlmClient for OpenAiClient {
                             input_tokens: v["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
                             output_tokens: v["usage"]["completion_tokens"].as_u64().unwrap_or(0),
                         };
-                        // If this chunk also has no delta content, just return usage via MessageDelta
                         let has_content = v["choices"].as_array().is_some_and(|c| {
                             !c.is_empty() && c[0]["delta"]["content"].as_str().is_some()
                         });
                         if !has_content {
-                            return Some(Ok(StreamEvent::MessageDelta {
+                            out.push(Ok(StreamEvent::MessageDelta {
                                 stop_reason: None,
                                 usage: Some(usage),
                             }));
+                            return futures::stream::iter(out);
                         }
                     }
 
-                    // Extract text delta or tool calls from choices
+                    // Extract text delta, tool calls, and finish_reason from choices
                     if let Some(choices) = v["choices"].as_array()
                         && !choices.is_empty()
                     {
-                        // Check for tool calls delta
+                        // Emit events for ALL tool calls in this chunk, not just the first.
+                        // OpenAI may send multiple tool_calls entries when the model
+                        // requests parallel tool use.
                         if let Some(tool_calls) = choices[0]["delta"]["tool_calls"].as_array() {
                             for t in tool_calls {
                                 if let Some(f) = t.get("function") {
                                     if let Some(name) = f.get("name").and_then(|n| n.as_str()) {
                                         let id = t.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                                        return Some(Ok(StreamEvent::ToolUseStart { id, name: name.to_string() }));
+                                        out.push(Ok(StreamEvent::ToolUseStart { id, name: name.to_string() }));
                                     }
                                     if let Some(args) = f.get("arguments").and_then(|a| a.as_str()) {
-                                        return Some(Ok(StreamEvent::ToolUseInputDelta { text: args.to_string() }));
+                                        if !args.is_empty() {
+                                            out.push(Ok(StreamEvent::ToolUseInputDelta { text: args.to_string() }));
+                                        }
                                     }
                                 }
                             }
@@ -266,7 +275,7 @@ impl LlmClient for OpenAiClient {
 
                         // Check for finish_reason
                         if let Some(reason) = choices[0]["finish_reason"].as_str() {
-                            return Some(Ok(StreamEvent::MessageDelta {
+                            out.push(Ok(StreamEvent::MessageDelta {
                                 stop_reason: Some(reason.to_string()),
                                 usage: None,
                             }));
@@ -275,16 +284,18 @@ impl LlmClient for OpenAiClient {
                         if let Some(content) = choices[0]["delta"]["content"].as_str()
                             && !content.is_empty()
                         {
-                            return Some(Ok(StreamEvent::TextDelta {
+                            out.push(Ok(StreamEvent::TextDelta {
                                 text: content.to_string(),
                             }));
                         }
                     }
 
-                    None // skip chunks with no useful content
+                    out
                 }
-                Err(e) => Some(Err(InfiniError::Stream(e.to_string()))),
-            }
+                Err(e) => vec![Err(InfiniError::Stream(e.to_string()))],
+            };
+
+            futures::stream::iter(events)
         });
 
         Ok(Box::pin(event_stream))
