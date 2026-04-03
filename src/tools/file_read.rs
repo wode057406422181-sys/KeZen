@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::json;
-use std::fs;
 use std::path::PathBuf;
+use tokio::fs;
 
 use super::{Tool, ToolResult};
 
@@ -53,17 +53,19 @@ impl Tool for FileReadTool {
         let limit = input.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
 
         let path = PathBuf::from(file_path_str);
-        if !path.exists() {
-            return ToolResult {
-                content: format!("File does not exist: {}", file_path_str),
-                is_error: true,
-            };
-        }
 
-        let content = match fs::read_to_string(&path) {
+        // Use tokio::fs for async metadata check instead of blocking path.exists()
+        let content = match fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(e) => {
-                if let Ok(bytes) = fs::read(&path) {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    return ToolResult {
+                        content: format!("File does not exist: {}", file_path_str),
+                        is_error: true,
+                    };
+                }
+                // Try reading as bytes to check if binary
+                if let Ok(bytes) = fs::read(&path).await {
                     if bytes.windows(2).any(|w| w == b"\0\0") {
                         return ToolResult {
                             content: format!("Cannot read binary file: {}", file_path_str),

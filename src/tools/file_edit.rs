@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::json;
-use std::fs;
 use std::path::PathBuf;
+use tokio::fs;
 
 use super::{Tool, ToolResult};
 
@@ -76,26 +76,27 @@ impl Tool for FileEditTool {
         let replace_all = input.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
 
         let path = PathBuf::from(file_path);
+        let file_exists = fs::metadata(&path).await.is_ok();
         
-        let content = match fs::read_to_string(&path) {
+        let content = match fs::read_to_string(&path).await {
             Ok(c) => c,
-            Err(e) => {
-                if !path.exists() && old_string.is_empty() {
+            Err(_) => {
+                if !file_exists && old_string.is_empty() {
                     String::new()
                 } else {
                     return ToolResult {
-                        content: format!("Failed to read file: {}", e),
+                        content: format!("Failed to read file: {}", file_path),
                         is_error: true,
                     };
                 }
             }
         };
 
-        if old_string.is_empty() && !path.exists() {
+        if old_string.is_empty() && !file_exists {
             if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
+                let _ = fs::create_dir_all(parent).await;
             }
-            if let Err(e) = fs::write(&path, new_string) {
+            if let Err(e) = fs::write(&path, new_string).await {
                 return ToolResult {
                     content: format!("Failed to write new file: {}", e),
                     is_error: true,
@@ -128,7 +129,7 @@ impl Tool for FileEditTool {
             content.replacen(old_string, new_string, 1)
         };
 
-        if let Err(e) = fs::write(&path, updated_content) {
+        if let Err(e) = fs::write(&path, updated_content).await {
             return ToolResult {
                 content: format!("Failed to write updated file: {}", e),
                 is_error: true,

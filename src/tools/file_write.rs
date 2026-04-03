@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::json;
-use std::fs;
 use std::path::PathBuf;
+use tokio::fs;
 
 use super::{Tool, ToolResult};
 
@@ -57,7 +57,7 @@ impl Tool for FileWriteTool {
 
         let path = PathBuf::from(file_path);
         if let Some(parent) = path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
+            if let Err(e) = fs::create_dir_all(parent).await {
                 return ToolResult {
                     content: format!("Failed to create parent directories: {}", e),
                     is_error: true,
@@ -65,9 +65,10 @@ impl Tool for FileWriteTool {
             }
         }
 
-        let is_create = !path.exists();
+        // Use async metadata check instead of blocking path.exists()
+        let is_create = fs::metadata(&path).await.is_err();
 
-        match fs::write(&path, content) {
+        match fs::write(&path, content).await {
             Ok(_) => ToolResult {
                 content: if is_create {
                     format!("File created successfully at: {}", file_path)
