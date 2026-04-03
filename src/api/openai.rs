@@ -67,6 +67,22 @@ impl OpenAiClient {
     }
 }
 
+/// Normalise an OpenAI-compatible base URL to a full chat-completions endpoint.
+///
+/// Accepts any of:
+/// - bare root:              `https://api.openai.com`
+/// - with `/v1`:             `https://api.openai.com/v1`
+/// - already full endpoint:  `https://api.openai.com/v1/chat/completions`
+pub(crate) fn normalize_openai_url(base: &str) -> String {
+    if base.ends_with("/v1/chat/completions") {
+        base.to_string()
+    } else if base.ends_with("/v1") {
+        format!("{}/chat/completions", base)
+    } else {
+        format!("{}/v1/chat/completions", base)
+    }
+}
+
 #[async_trait]
 impl LlmClient for OpenAiClient {
     async fn stream(
@@ -74,13 +90,7 @@ impl LlmClient for OpenAiClient {
         messages: &[Message],
         system_prompt: Option<&str>,
     ) -> Result<BoxStream<'_, StreamEvent>, InfiniError> {
-        let url = if self.base_url.ends_with("/v1/chat/completions") {
-            self.base_url.clone()
-        } else if self.base_url.ends_with("/v1") {
-            format!("{}/chat/completions", self.base_url)
-        } else {
-            format!("{}/v1/chat/completions", self.base_url)
-        };
+        let url = normalize_openai_url(&self.base_url);
 
         // Convert internal message format to OpenAI format
         let mut oai_messages = Vec::new();
@@ -203,5 +213,62 @@ impl LlmClient for OpenAiClient {
         });
 
         Ok(Box::pin(event_stream))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_openai_url;
+
+    #[test]
+    fn bare_root_gets_full_path() {
+        assert_eq!(
+            normalize_openai_url("https://api.openai.com"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn v1_suffix_appends_chat_completions() {
+        assert_eq!(
+            normalize_openai_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn already_full_url_is_unchanged() {
+        assert_eq!(
+            normalize_openai_url("https://api.openai.com/v1/chat/completions"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn dashscope_bare_root() {
+        assert_eq!(
+            normalize_openai_url("https://dashscope.aliyuncs.com/compatible-mode"),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn dashscope_with_v1() {
+        assert_eq!(
+            normalize_openai_url("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        );
+    }
+
+    /// Regression: documents the current behaviour when a non-v1 path is passed.
+    /// The contract is that `base_url` must be a root URL; this test makes the
+    /// limitation visible so it doesn't regress silently.
+    #[test]
+    fn nonstandard_path_documents_known_limitation() {
+        // /v2 is not a recognised suffix → /v1/chat/completions is appended.
+        assert_eq!(
+            normalize_openai_url("https://example.com/v2"),
+            "https://example.com/v2/v1/chat/completions"
+        );
     }
 }

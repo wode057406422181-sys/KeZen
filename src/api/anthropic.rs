@@ -66,6 +66,23 @@ impl AnthropicClient {
     }
 }
 
+
+/// Normalise an Anthropic-compatible base URL to the messages endpoint.
+///
+/// Accepts any of:
+/// - bare root: `https://api.anthropic.com`
+/// - with `/v1`: `https://api.anthropic.com/v1`
+/// - already full: `https://api.anthropic.com/v1/messages`
+pub(crate) fn normalize_anthropic_url(base: &str) -> String {
+    if base.ends_with("/v1/messages") {
+        base.to_string()
+    } else if base.ends_with("/v1") {
+        format!("{}/messages", base)
+    } else {
+        format!("{}/v1/messages", base)
+    }
+}
+
 #[async_trait]
 impl LlmClient for AnthropicClient {
     async fn stream(
@@ -73,13 +90,7 @@ impl LlmClient for AnthropicClient {
         messages: &[Message],
         system_prompt: Option<&str>,
     ) -> Result<BoxStream<'_, StreamEvent>, InfiniError> {
-        let url = if self.base_url.ends_with("/v1/messages") {
-            self.base_url.clone()
-        } else if self.base_url.ends_with("/v1") {
-            format!("{}/messages", self.base_url)
-        } else {
-            format!("{}/v1/messages", self.base_url)
-        };
+        let url = normalize_anthropic_url(&self.base_url);
 
         // Strip Thinking blocks from history: Anthropic's Messages API requires
         // thinking blocks in multi-turn history to carry a `signature` field
@@ -258,5 +269,50 @@ impl LlmClient for AnthropicClient {
         });
 
         Ok(Box::pin(event_stream))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_anthropic_url;
+
+    #[test]
+    fn bare_root_gets_v1_messages() {
+        assert_eq!(
+            normalize_anthropic_url("https://api.anthropic.com"),
+            "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn v1_suffix_appends_messages() {
+        assert_eq!(
+            normalize_anthropic_url("https://api.anthropic.com/v1"),
+            "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn already_full_url_is_unchanged() {
+        assert_eq!(
+            normalize_anthropic_url("https://api.anthropic.com/v1/messages"),
+            "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn custom_proxy_bare_root() {
+        assert_eq!(
+            normalize_anthropic_url("https://my-proxy.internal"),
+            "https://my-proxy.internal/v1/messages"
+        );
+    }
+
+    #[test]
+    fn custom_proxy_with_v1() {
+        assert_eq!(
+            normalize_anthropic_url("https://my-proxy.internal/v1"),
+            "https://my-proxy.internal/v1/messages"
+        );
     }
 }

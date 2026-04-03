@@ -188,3 +188,114 @@ impl fmt::Debug for AppConfig {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_config() -> AppConfig {
+        AppConfig::default()
+    }
+
+    // ── Defaults ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn default_provider_is_anthropic() {
+        assert_eq!(default_config().provider, Provider::Anthropic);
+    }
+
+    #[test]
+    fn default_max_tokens_is_8192() {
+        assert_eq!(default_config().max_tokens, Some(DEFAULT_MAX_TOKENS));
+    }
+
+    #[test]
+    fn default_thinking_is_false() {
+        assert!(!default_config().thinking);
+    }
+
+    #[test]
+    fn default_include_stream_usage_is_true() {
+        assert!(default_config().include_stream_usage);
+    }
+
+    // ── base_url resolution ───────────────────────────────────────────────────
+
+    #[test]
+    fn base_url_returns_anthropic_default_when_no_override() {
+        let config = AppConfig {
+            provider: Provider::Anthropic,
+            ..AppConfig::default()
+        };
+        assert_eq!(config.base_url(), DEFAULT_ANTHROPIC_BASE_URL);
+    }
+
+    #[test]
+    fn base_url_returns_openai_default_for_openai_provider() {
+        let config = AppConfig {
+            provider: Provider::OpenAi,
+            ..AppConfig::default()
+        };
+        assert_eq!(config.base_url(), DEFAULT_OPENAI_BASE_URL);
+    }
+
+    #[test]
+    fn base_url_returns_custom_override_regardless_of_provider() {
+        let config = AppConfig {
+            provider: Provider::Anthropic,
+            api_url: Some("https://my-proxy.example.com".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(config.base_url(), "https://my-proxy.example.com");
+    }
+
+    // ── user_agent ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn user_agent_falls_back_to_default() {
+        let config = AppConfig {
+            user_agent: None,
+            ..AppConfig::default()
+        };
+        assert_eq!(config.user_agent(), DEFAULT_USER_AGENT);
+    }
+
+    #[test]
+    fn user_agent_returns_custom_value() {
+        let config = AppConfig {
+            user_agent: Some("my-bot/2.0".to_string()),
+            ..AppConfig::default()
+        };
+        assert_eq!(config.user_agent(), "my-bot/2.0");
+    }
+
+    // ── Debug redaction ───────────────────────────────────────────────────────
+
+    #[test]
+    fn debug_output_redacts_api_key() {
+        let config = AppConfig {
+            api_key: Some("sk-secret-key-1234".to_string()),
+            ..AppConfig::default()
+        };
+        let debug_str = format!("{:?}", config);
+        assert!(
+            !debug_str.contains("sk-secret-key-1234"),
+            "API key must not appear in Debug output"
+        );
+        assert!(
+            debug_str.contains("[REDACTED]"),
+            "Debug output should contain [REDACTED] placeholder"
+        );
+    }
+
+    #[test]
+    fn debug_output_shows_none_for_missing_key() {
+        let config = AppConfig {
+            api_key: None,
+            ..AppConfig::default()
+        };
+        let debug_str = format!("{:?}", config);
+        // None api_key → map(|_| "[REDACTED]") → None, shown as "None"
+        assert!(debug_str.contains("api_key: None"));
+    }
+}
