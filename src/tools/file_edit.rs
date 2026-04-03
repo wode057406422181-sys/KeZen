@@ -77,7 +77,7 @@ impl Tool for FileEditTool {
 
         let path = PathBuf::from(file_path);
         let file_exists = fs::metadata(&path).await.is_ok();
-        
+
         let content = match fs::read_to_string(&path).await {
             Ok(c) => c,
             Err(_) => {
@@ -92,7 +92,14 @@ impl Tool for FileEditTool {
             }
         };
 
-        if old_string.is_empty() && !file_exists {
+        if old_string.is_empty() {
+            if file_exists {
+                return ToolResult {
+                    content: "Error: old_string cannot be empty for an existing file. Use FileWrite to overwrite the entire file, or provide a non-empty old_string to target a specific section.".to_string(),
+                    is_error: true,
+                };
+            }
+            // Create new file
             if let Some(parent) = path.parent() {
                 let _ = fs::create_dir_all(parent).await;
             }
@@ -166,7 +173,7 @@ mod tests {
             "new_string": "rust",
             "replace_all": false
         })).await;
-        
+
         assert!(!result.is_error);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello rust");
     }
@@ -185,7 +192,7 @@ mod tests {
             "new_string": "orange",
             "replace_all": false
         })).await;
-        
+
         assert!(result.is_error);
         assert!(result.content.contains("Found 2 matches"));
     }
@@ -204,7 +211,7 @@ mod tests {
             "new_string": "baz",
             "replace_all": true
         })).await;
-        
+
         assert!(!result.is_error);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "baz bar baz");
     }
@@ -222,7 +229,7 @@ mod tests {
             "old_string": "world",
             "new_string": "rust"
         })).await;
-        
+
         assert!(result.is_error);
         assert!(result.content.contains("not found in file"));
     }

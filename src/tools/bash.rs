@@ -71,10 +71,10 @@ impl Tool for BashTool {
             Ok(Ok(output)) => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                
+
                 let mut content = format!("{}{}", stdout, stderr);
                 let is_error = !output.status.success();
-                
+
                 if is_error {
                     if !content.ends_with('\n') && !content.is_empty() {
                         content.push('\n');

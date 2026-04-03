@@ -116,7 +116,7 @@ impl LlmClient for OpenAiClient {
             // Join text blocks into single content string and check for tools
             let mut text_content = String::new();
             let mut tool_calls = Vec::new();
-            let mut tool_result_id = None;
+            let mut tool_results = Vec::new();
 
             for block in &msg.content {
                 match block {
@@ -133,19 +133,26 @@ impl LlmClient for OpenAiClient {
                             }
                         }));
                     }
-                    ContentBlock::ToolResult { tool_use_id, content: result_content, is_error: _ } => {
-                        text_content.push_str(result_content);
-                        tool_result_id = Some(tool_use_id.clone());
+                    ContentBlock::ToolResult { tool_use_id, content: result_content, is_error } => {
+                        let prefixed = if *is_error {
+                            format!("Error: {}", result_content)
+                        } else {
+                            result_content.clone()
+                        };
+                        tool_results.push((tool_use_id.clone(), prefixed));
                     }
                 }
             }
 
-            if let Some(tid) = tool_result_id {
-                oai_messages.push(json!({
-                    "role": "tool",
-                    "tool_call_id": tid,
-                    "content": text_content
-                }));
+            // Each tool result must be its own "tool" message with the correct tool_call_id.
+            if !tool_results.is_empty() {
+                for (tid, content) in tool_results {
+                    oai_messages.push(json!({
+                        "role": "tool",
+                        "tool_call_id": tid,
+                        "content": content
+                    }));
+                }
             } else if !tool_calls.is_empty() {
                 oai_messages.push(json!({
                     "role": role_str,

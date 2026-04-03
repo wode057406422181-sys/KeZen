@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::Tool;
 
@@ -7,7 +8,7 @@ use super::Tool;
 /// The engine uses this to look up tools requested by the LLM and to
 /// generate the combined JSON schema array sent with each API call.
 pub struct ToolRegistry {
-    tools: HashMap<String, Box<dyn Tool>>,
+    tools: HashMap<String, Arc<dyn Tool>>,
 }
 
 impl ToolRegistry {
@@ -18,13 +19,13 @@ impl ToolRegistry {
     }
 
     /// Add a tool to the registry, keyed by its `name()`.
-    pub fn register(&mut self, tool: Box<dyn Tool>) {
+    pub fn register(&mut self, tool: Arc<dyn Tool>) {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
     /// Look up a tool by name. Returns `None` if not registered.
-    pub fn get(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.get(name).map(|t| t.as_ref())
+    pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
+        self.tools.get(name).cloned()
     }
 
     /// Generate the JSON tool schemas array for the LLM API request.
@@ -48,12 +49,12 @@ impl Default for ToolRegistry {
 /// Create a registry pre-loaded with all built-in tools.
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
-    registry.register(Box::new(super::bash::BashTool));
-    registry.register(Box::new(super::file_read::FileReadTool));
-    registry.register(Box::new(super::file_write::FileWriteTool));
-    registry.register(Box::new(super::file_edit::FileEditTool));
-    registry.register(Box::new(super::grep::GrepTool));
-    registry.register(Box::new(super::glob::GlobTool));
+    registry.register(Arc::new(super::bash::BashTool));
+    registry.register(Arc::new(super::file_read::FileReadTool));
+    registry.register(Arc::new(super::file_write::FileWriteTool));
+    registry.register(Arc::new(super::file_edit::FileEditTool));
+    registry.register(Arc::new(super::grep::GrepTool));
+    registry.register(Arc::new(super::glob::GlobTool));
     registry
 }
 
@@ -64,7 +65,7 @@ mod tests {
     #[test]
     fn test_registry_register_and_get() {
         let mut registry = ToolRegistry::new();
-        registry.register(Box::new(crate::tools::bash::BashTool));
+        registry.register(Arc::new(crate::tools::bash::BashTool));
         assert!(registry.get("Bash").is_some());
         assert!(registry.get("Unknown").is_none());
     }
@@ -72,7 +73,7 @@ mod tests {
     #[test]
     fn test_registry_schemas() {
         let mut registry = ToolRegistry::new();
-        registry.register(Box::new(crate::tools::bash::BashTool));
+        registry.register(Arc::new(crate::tools::bash::BashTool));
         let schemas = registry.schemas();
         assert_eq!(schemas.len(), 1);
         let schema = &schemas[0];

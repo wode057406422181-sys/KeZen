@@ -53,7 +53,6 @@ impl Tool for GlobTool {
             let search_pattern = format!("{}/{}", path_str, pattern);
 
             let mut results = Vec::new();
-            let mut num_files = 0;
 
             match glob::glob(&search_pattern) {
                 Ok(paths) => {
@@ -64,9 +63,8 @@ impl Tool for GlobTool {
                         }
 
                         results.push(path_lossy);
-                        num_files += 1;
 
-                        if num_files >= 100 {
+                        if results.len() >= 100 {
                             break;
                         }
                     }
@@ -86,10 +84,11 @@ impl Tool for GlobTool {
                 };
             }
 
-            let mut content = format!("Found {} file{}:\n", num_files, if num_files == 1 { "" } else { "s" });
+            let count = results.len();
+            let mut content = format!("Found {} file{}:\n", count, if count == 1 { "" } else { "s" });
             content.push_str(&results.join("\n"));
 
-            if num_files >= 100 {
+            if count >= 100 {
                 content.push_str("\n(Results are truncated. Consider using a more specific path or pattern.)");
             }
 

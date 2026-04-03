@@ -64,9 +64,10 @@ impl Tool for FileReadTool {
                         is_error: true,
                     };
                 }
-                // Try reading as bytes to check if binary
+                // Try reading as bytes to check if binary (check first 8KB for null bytes, like git)
                 if let Ok(bytes) = fs::read(&path).await {
-                    if bytes.windows(2).any(|w| w == b"\0\0") {
+                    let check_len = bytes.len().min(8192);
+                    if bytes[..check_len].contains(&0) {
                         return ToolResult {
                             content: format!("Cannot read binary file: {}", file_path_str),
                             is_error: true,
@@ -134,7 +135,7 @@ mod tests {
         let tool = FileReadTool;
         let result = tool.call(json!({"file_path": "/path/to/nonexistent/file_12345.txt"})).await;
         assert!(result.is_error);
-        assert!(result.content.contains("Does not exist") || result.content.contains("doe not exist") || result.content.contains("does not exist"));
+        assert!(result.content.contains("File does not exist:"));
     }
 
     #[tokio::test]

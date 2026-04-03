@@ -215,7 +215,7 @@ impl InfiniEngine {
                     for (id, name, input) in &pending_tools {
                         blocks.push(ContentBlock::ToolUse { id: id.clone(), name: name.clone(), input: input.clone() });
                     }
-                    
+
                     if !blocks.is_empty() {
                         self.session.add_message(Message { role: Role::Assistant, content: blocks });
                     }
@@ -226,23 +226,46 @@ impl InfiniEngine {
                         break;
                     }
 
-                    // Execute each requested tool and collect results.
-                    let mut tool_results = Vec::new();
-                    for (id, name, input) in pending_tools {
-                        let result = match self.registry.get(&name) {
-                            Some(tool) => tool.call(input).await,
-                            None => crate::tools::ToolResult {
-                                content: format!("Tool {} not found", name),
-                                is_error: true,
+                    // Execute requested tools concurrently.
+                    let mut join_set = tokio::task::JoinSet::new();
+                    for (idx, (id, name, input)) in pending_tools.into_iter().enumerate() {
+                        match self.registry.get(&name) {
+                            Some(tool) => {
+                                // Arc<dyn Tool> is cheaply cloneable and Send + Sync,
+                                // so we can move it into the spawned future directly.
+                                join_set.spawn(async move {
+                                    let result = tool.call(input).await;
+                                    (idx, id, name, result)
+                                });
                             }
-                        };
-                        
+                            None => {
+                                join_set.spawn(async move {
+                                    (idx, id.clone(), name.clone(), crate::tools::ToolResult {
+                                        content: format!("Tool {} not found", name),
+                                        is_error: true,
+                                    })
+                                });
+                            }
+                        }
+                    }
+
+                    // Collect results and sort by original index to preserve order.
+                    let mut indexed_results = Vec::new();
+                    while let Some(join_result) = join_set.join_next().await {
+                        if let Ok(r) = join_result {
+                            indexed_results.push(r);
+                        }
+                    }
+                    indexed_results.sort_by_key(|(idx, _, _, _)| *idx);
+
+                    let mut tool_results = Vec::new();
+                    for (_idx, id, _name, result) in indexed_results {
                         let _ = self.event_tx.send(EngineEvent::ToolResult {
                             id: id.clone(),
                             output: result.content.clone(),
                             is_error: result.is_error,
                         }).await;
-                        
+
                         tool_results.push(ContentBlock::ToolResult {
                             tool_use_id: id,
                             content: result.content,

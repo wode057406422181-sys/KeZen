@@ -7,6 +7,7 @@ mod engine;
 mod error;
 mod prompts;
 mod server;
+pub mod tools;
 
 use anyhow::Result;
 use clap::Parser;
@@ -83,4 +84,3 @@ async fn main() -> Result<()> {
         }
     }
 }
-pub mod tools;

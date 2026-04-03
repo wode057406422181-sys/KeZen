@@ -64,8 +64,13 @@ pub fn print_tool_use(name: &str, input: &serde_json::Value) {
 pub fn print_tool_result(output: &str, is_error: bool) {
     let limit = 100;
     let single_line = output.replace('\n', " ");
-    let preview = if single_line.len() > limit {
-        format!("{}...", &single_line[..limit])
+    let preview = if single_line.chars().count() > limit {
+        let byte_end = single_line
+            .char_indices()
+            .nth(limit)
+            .map(|(i, _)| i)
+            .unwrap_or(single_line.len());
+        format!("{}...", &single_line[..byte_end])
     } else {
         single_line
     };

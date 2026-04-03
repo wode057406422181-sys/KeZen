@@ -1,7 +1,6 @@
 use crate::api::types::Usage;
 
 /// Events sent from Engine to Frontend
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
     /// Incremental AI text response
@@ -15,8 +14,19 @@ pub enum EngineEvent {
     /// Current turn is complete
     Done,
     /// Tool execution started
-    ToolUseStart { id: String, name: String, input: serde_json::Value },
-    ToolResult { id: String, output: String, is_error: bool },
+    ToolUseStart {
+        #[allow(dead_code)] // reserved for permission gating
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    /// Tool execution result
+    ToolResult {
+        #[allow(dead_code)] // reserved for permission gating
+        id: String,
+        output: String,
+        is_error: bool,
+    },
     // PermissionRequest { id: String, tool: String, desc: String },
 }
 
