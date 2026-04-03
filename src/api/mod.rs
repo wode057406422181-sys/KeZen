@@ -28,6 +28,7 @@ pub trait LlmClient: Send + Sync {
         &self,
         messages: &[Message],
         system_prompt: Option<&str>,
+        tools: Option<&[serde_json::Value]>,
     ) -> Result<BoxStream<'_, StreamEvent>, InfiniError>;
 }
 

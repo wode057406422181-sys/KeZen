@@ -58,9 +58,14 @@ pub fn build_system_prompt(model: Option<&str>) -> String {
     let elements = [
         get_simple_intro_section(),
         SYSTEM_BASE.to_string(),
+        SYSTEM_TOOLS_PHASE2.to_string(),
         DOING_TASKS.to_string(),
+        ACTIONS_PHASE2.to_string(),
+        USING_TOOLS_PHASE2.to_string(),
         TONE_AND_STYLE_BASE.to_string(),
+        TONE_AND_STYLE_TOOLS_PHASE2.to_string(),
         OUTPUT_EFFICIENCY.to_string(),
+        SESSION_GUIDANCE_PHASE2.to_string(),
         SYSTEM_PROMPT_DYNAMIC_BOUNDARY.to_string(),
         compute_env_info(model),
     ];

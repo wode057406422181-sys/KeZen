@@ -49,6 +49,7 @@ pub struct Usage {
 ///
 /// These events are consumed by the Engine to build EngineEvents
 /// for the frontend. Some fields are reserved for Phase 2 (tool use).
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     /// Incremental text content
@@ -57,28 +58,28 @@ pub enum StreamEvent {
     ThinkingDelta { text: String },
     /// A content block started (index + type for Phase 2 routing)
     ContentBlockStart {
-        #[allow(dead_code)]
         index: usize,
-        #[allow(dead_code)]
         block_type: String,
     },
     /// A content block ended
     ContentBlockStop {
-        #[allow(dead_code)]
         index: usize,
     },
     /// Message started (role + initial usage from Anthropic)
     MessageStart {
-        #[allow(dead_code)]
         role: Role,
         usage: Option<Usage>,
     },
     /// Message delta (stop reason for Phase 2 tool loop + final usage)
     MessageDelta {
-        #[allow(dead_code)]
         stop_reason: Option<String>,
         usage: Option<Usage>,
     },
     /// Message stream fully ended
     MessageStop,
+
+    // Phase 2 tool use streaming
+    ToolUseStart { id: String, name: String },
+    ToolUseInputDelta { text: String },
+    ToolUseInputDone,
 }

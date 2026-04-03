@@ -53,3 +53,26 @@ pub fn print_cost(usage: &Usage) {
         .dimmed()
     );
 }
+
+/// Print tool call indicator
+pub fn print_tool_use(name: &str, input: &serde_json::Value) {
+    let input_str = serde_json::to_string(input).unwrap_or_default();
+    println!("\n  {} {} {}", "🔧".blue(), name.bold(), input_str.dimmed());
+}
+
+/// Print tool result preview
+pub fn print_tool_result(output: &str, is_error: bool) {
+    let limit = 100;
+    let single_line = output.replace('\n', " ");
+    let preview = if single_line.len() > limit {
+        format!("{}...", &single_line[..limit])
+    } else {
+        single_line
+    };
+
+    if is_error {
+        println!("  {} {}", "✖".red(), preview.red());
+    } else {
+        println!("  {} {}", "✓".green(), preview.dimmed());
+    }
+}

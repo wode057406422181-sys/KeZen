@@ -9,6 +9,7 @@ use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{self, LlmClient};
 use crate::config::AppConfig;
 use crate::prompts::build_system_prompt;
+use crate::tools::registry::ToolRegistry;
 
 use self::events::{EngineEvent, UserAction};
 use self::session::Session;
@@ -30,6 +31,7 @@ pub struct InfiniEngine {
     system_prompt: String,
     action_rx: mpsc::Receiver<UserAction>,
     event_tx: mpsc::Sender<EngineEvent>,
+    registry: ToolRegistry,
 }
 
 impl InfiniEngine {
@@ -37,6 +39,7 @@ impl InfiniEngine {
         config: AppConfig,
         action_rx: mpsc::Receiver<UserAction>,
         event_tx: mpsc::Sender<EngineEvent>,
+        registry: ToolRegistry,
     ) -> Result<Self, crate::error::InfiniError> {
         let client = api::create_client(&config)?;
         // Build the system prompt once at construction.
@@ -51,6 +54,7 @@ impl InfiniEngine {
             system_prompt,
             action_rx,
             event_tx,
+            registry,
         })
     }
 
@@ -70,135 +74,176 @@ impl InfiniEngine {
 
     /// Handle a user message: send to LLM, stream response, accumulate history.
     async fn handle_send_message(&mut self, content: String) {
-        // Add user message to session
         self.session.add_message(Message {
             role: Role::User,
             content: vec![ContentBlock::Text { text: content }],
         });
 
-        // Borrow messages as a slice — no clone needed.
-        // Rust's split borrows allow &self.session (immutable) and &self.client
-        // (immutable) to coexist since they are separate struct fields.
-        let messages = self.session.messages();
+        let mut iterations = 0;
+        let max_iterations = 25;
 
-        let stream_result = self
-            .client
-            .stream(messages, Some(&self.system_prompt))
-            .await;
+        loop {
+            if iterations >= max_iterations {
+                let _ = self.event_tx.send(EngineEvent::Error { message: "Max tool loop iterations reached".into() }).await;
+                break;
+            }
+            iterations += 1;
 
-        match stream_result {
-            Ok(mut stream) => {
-                let mut assistant_text = String::new();
-                let mut thinking_text = String::new();
-                let mut turn_usage = Usage::default();
+            let schemas = self.registry.schemas();
+            let tools_arg = if schemas.is_empty() { None } else { Some(schemas.as_slice()) };
 
-                loop {
-                    tokio::select! {
-                        biased;
+            let stream_result = self
+                .client
+                .stream(self.session.messages(), Some(&self.system_prompt), tools_arg)
+                .await;
 
-                        // Check for cancel / channel-close first (biased priority).
-                        cancel_action = self.action_rx.recv() => {
-                            match cancel_action {
-                                // User cancelled: notify frontend then stop streaming.
-                                Some(UserAction::Cancel) | None => {
-                                    let _ = self.event_tx.send(EngineEvent::Done).await;
-                                    return;
+            let mut assistant_text = String::new();
+            let mut thinking_text = String::new();
+            let mut turn_usage = Usage::default();
+
+            let mut pending_tools = Vec::new();
+            let mut current_tool: Option<(String, String, String)> = None;
+            let mut stream_interrupted = false;
+
+            match stream_result {
+                Ok(mut stream) => {
+                    loop {
+                        tokio::select! {
+                            biased;
+
+                            cancel_action = self.action_rx.recv() => {
+                                match cancel_action {
+                                    Some(UserAction::Cancel) | None => {
+                                        stream_interrupted = true;
+                                        break;
+                                    }
+                                    Some(_) => {}
                                 }
-                                // Any other action during streaming is ignored.
-                                Some(_) => {}
                             }
-                        }
 
-                        evt_opt = stream.next() => {
-                            match evt_opt {
-                                Some(Ok(evt)) => {
-                                    match evt {
-                                        StreamEvent::TextDelta { text } => {
-                                            assistant_text.push_str(&text);
-                                            let _ = self.event_tx.send(
-                                                EngineEvent::TextDelta { text }
-                                            ).await;
-                                        }
-                                        StreamEvent::ThinkingDelta { text } => {
-                                            thinking_text.push_str(&text);
-                                            let _ = self.event_tx.send(
-                                                EngineEvent::ThinkingDelta { text }
-                                            ).await;
-                                        }
-                                        StreamEvent::MessageStart { usage: Some(u), .. } => {
-                                            turn_usage.input_tokens = u.input_tokens;
-                                        }
-                                        StreamEvent::MessageDelta { usage: Some(u), .. } => {
-                                            // MessageDelta usage often has output_tokens
-                                            if u.output_tokens > 0 {
-                                                turn_usage.output_tokens = u.output_tokens;
+                            evt_opt = stream.next() => {
+                                match evt_opt {
+                                    Some(Ok(evt)) => {
+                                        match evt {
+                                            StreamEvent::TextDelta { text } => {
+                                                assistant_text.push_str(&text);
+                                                let _ = self.event_tx.send(EngineEvent::TextDelta { text }).await;
                                             }
-                                            if u.input_tokens > 0 {
+                                            StreamEvent::ThinkingDelta { text } => {
+                                                thinking_text.push_str(&text);
+                                                let _ = self.event_tx.send(EngineEvent::ThinkingDelta { text }).await;
+                                            }
+                                            StreamEvent::ToolUseStart { id, name } => {
+                                                current_tool = Some((id, name, String::new()));
+                                            }
+                                            StreamEvent::ToolUseInputDelta { text } => {
+                                                if let Some((_, _, ref mut input)) = current_tool {
+                                                    input.push_str(&text);
+                                                }
+                                            }
+                                            StreamEvent::ToolUseInputDone | StreamEvent::ContentBlockStop { .. } => {
+                                                if let Some((id, name, input_str)) = current_tool.take() {
+                                                    let input = serde_json::from_str(&if input_str.is_empty() { "{}".to_string() } else { input_str.clone() }).unwrap_or(serde_json::json!({}));
+                                                    let _ = self.event_tx.send(EngineEvent::ToolUseStart { id: id.clone(), name: name.clone(), input: input.clone() }).await;
+                                                    pending_tools.push((id, name, input));
+                                                }
+                                            }
+                                            StreamEvent::MessageStart { usage: Some(u), .. } => {
                                                 turn_usage.input_tokens = u.input_tokens;
                                             }
+                                            StreamEvent::MessageDelta { usage, .. } => {
+                                                if let Some(u) = usage {
+                                                    if u.output_tokens > 0 { turn_usage.output_tokens = u.output_tokens; }
+                                                    if u.input_tokens > 0 { turn_usage.input_tokens = u.input_tokens; }
+                                                }
+                                            }
+                                            StreamEvent::MessageStop => {
+                                                if let Some((id, name, input_str)) = current_tool.take() {
+                                                    let input = serde_json::from_str(&if input_str.is_empty() { "{}".to_string() } else { input_str.clone() }).unwrap_or(serde_json::json!({}));
+                                                    let _ = self.event_tx.send(EngineEvent::ToolUseStart { id: id.clone(), name: name.clone(), input: input.clone() }).await;
+                                                    pending_tools.push((id, name, input));
+                                                }
+                                                break;
+                                            }
+                                            _ => {}
                                         }
-                                        StreamEvent::MessageStop => {
-                                            break;
-                                        }
-                                        _ => {} // ContentBlockStart/Stop handled implicitly
                                     }
-                                }
-                                Some(Err(e)) => {
-                                    let _ = self.event_tx.send(
-                                        EngineEvent::Error { message: e.to_string() }
-                                    ).await;
-                                    break;
-                                }
-                                None => {
-                                    break; // Stream ended
+                                    Some(Err(e)) => {
+                                        let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
+                                        stream_interrupted = true;
+                                        break;
+                                    }
+                                    None => {
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // Update session with usage
-                self.session.update_usage(&turn_usage);
-                debug_logger::log_stream_end(
-                    &self.config.provider.to_string(),
-                    turn_usage.input_tokens,
-                    turn_usage.output_tokens,
-                );
-                let _ = self
-                    .event_tx
-                    .send(EngineEvent::CostUpdate(turn_usage))
-                    .await;
+                    self.session.update_usage(&turn_usage);
+                    debug_logger::log_stream_end(
+                        &self.config.provider.to_string(),
+                        turn_usage.input_tokens,
+                        turn_usage.output_tokens,
+                    );
+                    let _ = self.event_tx.send(EngineEvent::CostUpdate(turn_usage)).await;
 
-                // Build assistant content blocks
-                let mut blocks = Vec::new();
-                if !thinking_text.is_empty() {
-                    blocks.push(ContentBlock::Thinking {
-                        thinking: thinking_text,
-                    });
-                }
-                if !assistant_text.is_empty() {
-                    blocks.push(ContentBlock::Text {
-                        text: assistant_text,
-                    });
-                }
+                    if stream_interrupted {
+                        let _ = self.event_tx.send(EngineEvent::Done).await;
+                        break;
+                    }
 
-                if !blocks.is_empty() {
-                    self.session.add_message(Message {
-                        role: Role::Assistant,
-                        content: blocks,
-                    });
-                }
+                    let mut blocks = Vec::new();
+                    if !thinking_text.is_empty() {
+                        blocks.push(ContentBlock::Thinking { thinking: thinking_text });
+                    }
+                    if !assistant_text.is_empty() {
+                        blocks.push(ContentBlock::Text { text: assistant_text });
+                    }
+                    for (id, name, input) in &pending_tools {
+                        blocks.push(ContentBlock::ToolUse { id: id.clone(), name: name.clone(), input: input.clone() });
+                    }
+                    
+                    if !blocks.is_empty() {
+                        self.session.add_message(Message { role: Role::Assistant, content: blocks });
+                    }
 
-                let _ = self.event_tx.send(EngineEvent::Done).await;
-            }
-            Err(e) => {
-                let _ = self
-                    .event_tx
-                    .send(EngineEvent::Error {
-                        message: e.to_string(),
-                    })
-                    .await;
-                let _ = self.event_tx.send(EngineEvent::Done).await;
+                    if pending_tools.is_empty() {
+                        let _ = self.event_tx.send(EngineEvent::Done).await;
+                        break;
+                    }
+
+                    let mut tool_results = Vec::new();
+                    for (id, name, input) in pending_tools {
+                        let result = match self.registry.get(&name) {
+                            Some(tool) => tool.call(input).await,
+                            None => crate::tools::ToolResult {
+                                content: format!("Tool {} not found", name),
+                                is_error: true,
+                            }
+                        };
+                        
+                        let _ = self.event_tx.send(EngineEvent::ToolResult {
+                            id: id.clone(),
+                            output: result.content.clone(),
+                            is_error: result.is_error,
+                        }).await;
+                        
+                        tool_results.push(ContentBlock::ToolResult {
+                            tool_use_id: id,
+                            content: result.content,
+                            is_error: result.is_error,
+                        });
+                    }
+
+                    self.session.add_message(Message { role: Role::User, content: tool_results });
+                }
+                Err(e) => {
+                    let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
+                    let _ = self.event_tx.send(EngineEvent::Done).await;
+                    break;
+                }
             }
         }
     }

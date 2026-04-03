@@ -89,6 +89,7 @@ impl LlmClient for OpenAiClient {
         &self,
         messages: &[Message],
         system_prompt: Option<&str>,
+        tools: Option<&[serde_json::Value]>,
     ) -> Result<BoxStream<'_, StreamEvent>, InfiniError> {
         let url = normalize_openai_url(&self.base_url);
 
@@ -109,18 +110,51 @@ impl LlmClient for OpenAiClient {
                 Role::System => "system",
             };
 
-            // Join text blocks into single content string
+            // Join text blocks into single content string and check for tools
             let mut text_content = String::new();
+            let mut tool_calls = Vec::new();
+            let mut tool_result_id = None;
+
             for block in &msg.content {
-                if let ContentBlock::Text { text } = block {
-                    text_content.push_str(text);
+                match block {
+                    ContentBlock::Text { text } | ContentBlock::Thinking { thinking: text } => {
+                        text_content.push_str(text);
+                    }
+                    ContentBlock::ToolUse { id, name, input } => {
+                        tool_calls.push(json!({
+                            "id": id,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": serde_json::to_string(input).unwrap_or_default()
+                            }
+                        }));
+                    }
+                    ContentBlock::ToolResult { tool_use_id, content: result_content, is_error: _ } => {
+                        text_content.push_str(result_content);
+                        tool_result_id = Some(tool_use_id.clone());
+                    }
                 }
             }
 
-            oai_messages.push(json!({
-                "role": role_str,
-                "content": text_content
-            }));
+            if let Some(tid) = tool_result_id {
+                oai_messages.push(json!({
+                    "role": "tool",
+                    "tool_call_id": tid,
+                    "content": text_content
+                }));
+            } else if !tool_calls.is_empty() {
+                oai_messages.push(json!({
+                    "role": role_str,
+                    "content": text_content,
+                    "tool_calls": tool_calls
+                }));
+            } else {
+                oai_messages.push(json!({
+                    "role": role_str,
+                    "content": text_content
+                }));
+            }
         }
 
         let mut body = json!({
@@ -129,6 +163,22 @@ impl LlmClient for OpenAiClient {
             "messages": oai_messages,
             "stream": true,
         });
+
+        if let Some(t) = tools {
+            if !t.is_empty() {
+                let functions: Vec<_> = t.iter().map(|s| {
+                    json!({
+                        "type": "function",
+                        "function": {
+                            "name": s["name"],
+                            "description": s["description"],
+                            "parameters": s["input_schema"]
+                        }
+                    })
+                }).collect();
+                body["tools"] = json!(functions);
+            }
+        }
 
         // `stream_options.include_usage` is an OpenAI extension not supported by
         // all compatible endpoints (DashScope, Ollama, vLLM, etc.). Only send it
@@ -185,10 +235,25 @@ impl LlmClient for OpenAiClient {
                         }
                     }
 
-                    // Extract text delta from choices
+                    // Extract text delta or tool calls from choices
                     if let Some(choices) = v["choices"].as_array()
                         && !choices.is_empty()
                     {
+                        // Check for tool calls delta
+                        if let Some(tool_calls) = choices[0]["delta"]["tool_calls"].as_array() {
+                            for t in tool_calls {
+                                if let Some(f) = t.get("function") {
+                                    if let Some(name) = f.get("name").and_then(|n| n.as_str()) {
+                                        let id = t.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
+                                        return Some(Ok(StreamEvent::ToolUseStart { id, name: name.to_string() }));
+                                    }
+                                    if let Some(args) = f.get("arguments").and_then(|a| a.as_str()) {
+                                        return Some(Ok(StreamEvent::ToolUseInputDelta { text: args.to_string() }));
+                                    }
+                                }
+                            }
+                        }
+
                         // Check for finish_reason
                         if let Some(reason) = choices[0]["finish_reason"].as_str() {
                             return Some(Ok(StreamEvent::MessageDelta {

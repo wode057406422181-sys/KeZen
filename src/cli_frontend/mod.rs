@@ -7,12 +7,15 @@ use crate::config::AppConfig;
 use crate::engine::InfiniEngine;
 use crate::engine::events::{EngineEvent, UserAction};
 
+use crate::tools::registry::create_default_registry;
+
 /// Launch the CLI frontend: spawn the Engine and run the REPL.
 pub async fn run_cli(config: AppConfig, prompt: Option<String>) -> anyhow::Result<()> {
     let (action_tx, action_rx) = mpsc::channel::<UserAction>(32);
     let (event_tx, event_rx) = mpsc::channel::<EngineEvent>(32);
 
-    let engine = InfiniEngine::new(config.clone(), action_rx, event_tx)?;
+    let registry = create_default_registry();
+    let engine = InfiniEngine::new(config.clone(), action_rx, event_tx, registry)?;
 
     // Spawn the engine loop in a background task
     tokio::spawn(async move {
