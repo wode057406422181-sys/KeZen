@@ -9,13 +9,29 @@ use clap::{Parser, Subcommand};
     long_about = "Infini is a blazing-fast AI coding assistant built in Rust.\nIt provides an interactive terminal interface for AI-assisted development."
 )]
 pub struct Cli {
+    /// Send a single prompt (non-interactive mode)
+    #[arg(short, long, global = true)]
+    pub prompt: Option<String>,
+
     /// Enable verbose/debug output
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
-    /// Path to configuration file
-    #[arg(short, long, global = true)]
-    pub config: Option<String>,
+    /// Override model
+    #[arg(long, global = true)]
+    pub model: Option<String>,
+
+    /// Override provider (anthropic/openai)
+    #[arg(long, global = true)]
+    pub provider: Option<String>,
+
+    /// Override API key
+    #[arg(long, global = true)]
+    pub api_key: Option<String>,
+
+    /// Override max tokens
+    #[arg(long, global = true)]
+    pub max_tokens: Option<u32>,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -23,22 +39,30 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Start an interactive coding session
+    /// Start an interactive chat session (default)
     Chat {
-        /// Initial prompt to send
+        /// Send a single prompt (non-interactive)
         #[arg(short, long)]
         prompt: Option<String>,
     },
 
-    /// Initialize Infini configuration in the current project
+    /// Start HTTP server
+    Serve {
+        /// Server port
+        #[arg(long, default_value = "3000")]
+        port: u16,
+
+        /// Server host
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+    },
+
+    /// Initialize project config
     Init,
 
-    /// Show current configuration
+    /// View/edit configuration
     Config {
-        /// Configuration key to get/set
         key: Option<String>,
-
-        /// Value to set
         #[arg(short, long)]
         set: Option<String>,
     },
