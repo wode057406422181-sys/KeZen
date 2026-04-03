@@ -126,12 +126,10 @@ impl LlmClient for AnthropicClient {
                             let usage = Usage {
                                 input_tokens: v["message"]["usage"]["input_tokens"]
                                     .as_u64()
-                                    .unwrap_or(0)
-                                    as u32,
+                                    .unwrap_or(0),
                                 output_tokens: v["message"]["usage"]["output_tokens"]
                                     .as_u64()
-                                    .unwrap_or(0)
-                                    as u32,
+                                    .unwrap_or(0),
                             };
                             Ok(StreamEvent::MessageStart {
                                 role,
@@ -193,10 +191,8 @@ impl LlmClient for AnthropicClient {
                                 v["delta"]["stop_reason"].as_str().map(|s| s.to_string());
                             let usage = if v["usage"].is_object() {
                                 Some(Usage {
-                                    input_tokens: v["usage"]["input_tokens"].as_u64().unwrap_or(0)
-                                        as u32,
-                                    output_tokens: v["usage"]["output_tokens"].as_u64().unwrap_or(0)
-                                        as u32,
+                                    input_tokens: v["usage"]["input_tokens"].as_u64().unwrap_or(0),
+                                    output_tokens: v["usage"]["output_tokens"].as_u64().unwrap_or(0),
                                 })
                             } else {
                                 None

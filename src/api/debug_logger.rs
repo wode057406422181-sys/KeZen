@@ -109,7 +109,7 @@ pub fn log_sse_event(provider: &str, event_type: &str, data: &str) {
 }
 
 /// Log the final summary after a stream completes.
-pub fn log_stream_end(provider: &str, input_tokens: u32, output_tokens: u32) {
+pub fn log_stream_end(provider: &str, input_tokens: u64, output_tokens: u64) {
     if !is_debug_enabled() {
         return;
     }

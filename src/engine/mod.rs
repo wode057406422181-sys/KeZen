@@ -25,6 +25,9 @@ pub struct InfiniEngine {
     config: AppConfig,
     client: Box<dyn LlmClient>,
     session: Session,
+    /// Cached system prompt, built once at construction to avoid repeated
+    /// blocking I/O (e.g. `git rev-parse`) on the async runtime.
+    system_prompt: String,
     action_rx: mpsc::Receiver<UserAction>,
     event_tx: mpsc::Sender<EngineEvent>,
 }
@@ -36,10 +39,15 @@ impl InfiniEngine {
         event_tx: mpsc::Sender<EngineEvent>,
     ) -> Result<Self, crate::error::InfiniError> {
         let client = api::create_client(&config)?;
+        // Build the system prompt once during construction (runs on the calling
+        // thread before the engine is spawned onto the async runtime). This
+        // avoids running blocking std::process::Command inside tokio tasks.
+        let system_prompt = build_system_prompt(config.model.as_deref());
         Ok(Self {
             config,
             client,
             session: Session::new(),
+            system_prompt,
             action_rx,
             event_tx,
         })
@@ -67,11 +75,15 @@ impl InfiniEngine {
             content: vec![ContentBlock::Text { text: content }],
         });
 
-        let system_prompt = build_system_prompt(self.config.model.as_deref());
-        // Clone messages to avoid borrow conflict with session
+        // Borrow messages as a slice — no clone needed.
+        // Rust's split borrows allow &self.session (immutable) and &self.client
+        // (immutable) to coexist since they are separate struct fields.
         let messages = self.session.messages();
 
-        let stream_result = self.client.stream(&messages, Some(&system_prompt)).await;
+        let stream_result = self
+            .client
+            .stream(messages, Some(&self.system_prompt))
+            .await;
 
         match stream_result {
             Ok(mut stream) => {
@@ -185,3 +197,4 @@ impl InfiniEngine {
         }
     }
 }
+

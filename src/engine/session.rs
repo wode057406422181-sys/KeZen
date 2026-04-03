@@ -3,8 +3,8 @@ use crate::api::types::{Message, Usage};
 /// Maintains conversation history and cumulative token usage for a session.
 pub struct Session {
     messages: Vec<Message>,
-    total_input_tokens: u32,
-    total_output_tokens: u32,
+    total_input_tokens: u64,
+    total_output_tokens: u64,
 }
 
 impl Session {
@@ -21,15 +21,19 @@ impl Session {
         self.messages.push(message);
     }
 
-    /// Get a snapshot of the current message history.
-    pub fn messages(&self) -> Vec<Message> {
-        self.messages.clone()
+    /// Borrow the current message history (zero-copy).
+    ///
+    /// Returns a slice reference instead of cloning, avoiding O(n) deep copies
+    /// on every turn. Rust's field-level borrow splitting allows the engine to
+    /// hold this reference while independently accessing other fields.
+    pub fn messages(&self) -> &[Message] {
+        &self.messages
     }
 
     /// Accumulate token usage from a single turn.
     pub fn update_usage(&mut self, usage: &Usage) {
-        self.total_input_tokens += usage.input_tokens;
-        self.total_output_tokens += usage.output_tokens;
+        self.total_input_tokens = self.total_input_tokens.saturating_add(usage.input_tokens);
+        self.total_output_tokens = self.total_output_tokens.saturating_add(usage.output_tokens);
     }
 
     /// Get cumulative usage across all turns.

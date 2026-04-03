@@ -150,9 +150,8 @@ impl LlmClient for OpenAiClient {
                     // Extract usage from the final chunk (when choices is empty)
                     if v["usage"].is_object() && !v["usage"].is_null() {
                         let usage = Usage {
-                            input_tokens: v["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-                            output_tokens: v["usage"]["completion_tokens"].as_u64().unwrap_or(0)
-                                as u32,
+                            input_tokens: v["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
+                            output_tokens: v["usage"]["completion_tokens"].as_u64().unwrap_or(0),
                         };
                         // If this chunk also has no delta content, just return usage via MessageDelta
                         let has_content = v["choices"].as_array().is_some_and(|c| {

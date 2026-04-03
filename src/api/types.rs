@@ -41,8 +41,8 @@ pub enum ContentBlock {
 
 #[derive(Debug, Clone, Default, Copy)]
 pub struct Usage {
-    pub input_tokens: u32,
-    pub output_tokens: u32,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 /// Unified stream events from LLM providers.
