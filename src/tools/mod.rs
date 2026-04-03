@@ -31,4 +31,15 @@ pub trait Tool: Send + Sync {
     fn input_schema(&self) -> serde_json::Value;
     /// Execute the tool with the given JSON input.
     async fn call(&self, input: serde_json::Value) -> ToolResult;
+
+    /// Whether this tool's execution is strictly read-only for the given input.
+    /// Default is false, which means it requires permission checking.
+    fn is_read_only(&self, _input: &serde_json::Value) -> bool {
+        false
+    }
+
+    /// Human-readable description for permission prompts.
+    fn permission_description(&self, _input: &serde_json::Value) -> String {
+        format!("{} wants to execute", self.name())
+    }
 }

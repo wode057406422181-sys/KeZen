@@ -21,6 +21,10 @@ pub async fn run_repl(
 ) -> anyhow::Result<()> {
     print_welcome(&config);
 
+    let mut session_in_tokens = 0u64;
+    let mut session_out_tokens = 0u64;
+    let pricing = crate::cost::get_model_pricing(config.model.as_deref().unwrap_or(""));
+
     // Single-prompt (non-interactive) mode
     if let Some(prompt) = initial_prompt {
         println!("  {} {}", "→".bright_green(), prompt);
@@ -28,7 +32,10 @@ pub async fn run_repl(
             .send(UserAction::SendMessage { content: prompt })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send message: {}", e))?;
-        handle_engine_events(&action_tx, &mut event_rx).await;
+        handle_engine_events(&action_tx, &mut event_rx, &mut session_in_tokens, &mut session_out_tokens).await;
+        
+        let cost = crate::cost::calculate_cost(session_in_tokens as u32, session_out_tokens as u32, &pricing);
+        println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
         return Ok(());
     }
 
@@ -47,40 +54,59 @@ pub async fn run_repl(
                 let _ = rl.add_history_entry(trimmed);
 
                 // Handle slash commands
-                match trimmed {
-                    "/quit" | "/exit" => {
-                        println!("\n  👋 {}\n", "Goodbye!".dimmed());
-                        break;
+                if trimmed.starts_with('/') {
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    match parts[0] {
+                        "/quit" | "/exit" => {
+                            let cost = crate::cost::calculate_cost(session_in_tokens as u32, session_out_tokens as u32, &pricing);
+                            println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
+                            println!("\n  👋 {}\n", "Goodbye!".dimmed());
+                            break;
+                        }
+                        "/resume" => {
+                            let target = if parts.len() > 1 { Some(parts[1]) } else { None };
+                            match crate::session::load_snapshot(target) {
+                                Ok(snap) => {
+                                    println!("  {} Resuming session: {}", "ℹ".blue(), snap.id);
+                                    session_in_tokens = snap.input_tokens;
+                                    session_out_tokens = snap.output_tokens;
+                                    let _ = action_tx.send(UserAction::RestoreSession { snapshot: snap }).await;
+                                }
+                                Err(e) => {
+                                    println!("  {} Failed to load session: {}", "✖".red(), e);
+                                }
+                            }
+                            continue;
+                        }
+                        "/help" => {
+                            print_help();
+                            continue;
+                        }
+                        "/clear" => {
+                            println!(
+                                "  {} {}",
+                                "ℹ".blue(),
+                                "Session clear is not yet implemented.".dimmed()
+                            );
+                            continue;
+                        }
+                        "/model" => {
+                            println!(
+                                "  {} Model: {}",
+                                "ℹ".blue(),
+                                config.model.as_deref().unwrap_or("(not set)")
+                            );
+                            continue;
+                        }
+                        _ => {
+                            println!(
+                                "  {} Unknown command: {}. Type /help for available commands.",
+                                "?".yellow(),
+                                parts[0]
+                            );
+                            continue;
+                        }
                     }
-                    "/help" => {
-                        print_help();
-                        continue;
-                    }
-                    "/clear" => {
-                        println!(
-                            "  {} {}",
-                            "ℹ".blue(),
-                            "Session clear is not yet implemented.".dimmed()
-                        );
-                        continue;
-                    }
-                    "/model" => {
-                        println!(
-                            "  {} Model: {}",
-                            "ℹ".blue(),
-                            config.model.as_deref().unwrap_or("(not set)")
-                        );
-                        continue;
-                    }
-                    _ if trimmed.starts_with('/') => {
-                        println!(
-                            "  {} Unknown command: {}. Type /help for available commands.",
-                            "?".yellow(),
-                            trimmed
-                        );
-                        continue;
-                    }
-                    _ => {}
                 }
 
                 // Send trimmed message to engine (stripping surrounding whitespace).
@@ -96,7 +122,7 @@ pub async fn run_repl(
                 }
 
                 // Handle the streaming response
-                handle_engine_events(&action_tx, &mut event_rx).await;
+                handle_engine_events(&action_tx, &mut event_rx, &mut session_in_tokens, &mut session_out_tokens).await;
             }
             Err(rustyline::error::ReadlineError::Interrupted) => {
                 // Ctrl-C at the prompt: just print and continue
@@ -104,6 +130,8 @@ pub async fn run_repl(
             }
             Err(rustyline::error::ReadlineError::Eof) => {
                 // Ctrl-D: exit
+                let cost = crate::cost::calculate_cost(session_in_tokens as u32, session_out_tokens as u32, &pricing);
+                println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
                 println!("\n  👋 {}\n", "Goodbye!".dimmed());
                 break;
             }
@@ -123,6 +151,8 @@ pub async fn run_repl(
 async fn handle_engine_events(
     action_tx: &mpsc::Sender<UserAction>,
     event_rx: &mut mpsc::Receiver<EngineEvent>,
+    session_in: &mut u64,
+    session_out: &mut u64,
 ) {
     let mut in_thinking = false;
     print_ai_prefix();
@@ -158,7 +188,12 @@ async fn handle_engine_events(
                         let _ = std::io::stdout().flush();
                     }
                     Some(EngineEvent::CostUpdate(usage)) => {
+                        *session_in += usage.input_tokens;
+                        *session_out += usage.output_tokens;
                         print_cost(&usage);
+                    }
+                    Some(EngineEvent::SessionSnapshotUpdate { snapshot }) => {
+                        let _ = crate::session::save_snapshot(&snapshot);
                     }
                     Some(EngineEvent::Error { message }) => {
                         print_error(&message);
@@ -173,6 +208,42 @@ async fn handle_engine_events(
                     }
                     Some(EngineEvent::ToolResult { id: _, output, is_error }) => {
                         print_tool_result(&output, is_error);
+                    }
+                    Some(EngineEvent::PermissionRequest { id, tool, description }) => {
+                        if in_thinking {
+                            in_thinking = false;
+                            println!();
+                        }
+                        
+                        super::render::print_permission_request(&tool, &description);
+                        
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        let tool_name = tool.clone();
+                        tokio::task::spawn_blocking(move || {
+                            loop {
+                                print!("  {} [y] Allow [n] Deny [a] Always allow {} > ", "›".bright_green().bold(), tool_name.bold());
+                                let _ = std::io::stdout().flush();
+                                let mut input = String::new();
+                                if std::io::stdin().read_line(&mut input).is_ok() {
+                                    let choice = input.trim().to_lowercase();
+                                    match choice.as_str() {
+                                        "y" | "yes" => { let _ = tx.send((true, false)); break; }
+                                        "n" | "no" => { let _ = tx.send((false, false)); break; }
+                                        "a" | "all" | "always" => { let _ = tx.send((true, true)); break; }
+                                        _ => { println!("  Please answer 'y', 'n', or 'a'."); }
+                                    }
+                                } else {
+                                    let _ = tx.send((false, false)); break;
+                                }
+                            }
+                        });
+                        
+                        let (allowed, always_allow) = rx.await.unwrap_or((false, false));
+                        let _ = action_tx.send(UserAction::PermissionResponse {
+                            id,
+                            allowed,
+                            always_allow,
+                        }).await;
                     }
                     Some(EngineEvent::Done) => {
                         println!(); // Final newline
@@ -197,6 +268,7 @@ fn print_help() {
     println!("  {}  — Exit Infini", "/quit".cyan());
     println!("  {} — Clear conversation history", "/clear".cyan());
     println!("  {} — Show current model", "/model".cyan());
+    println!("  {}  — Resume [id] or latest session", "/resume".cyan());
     println!();
     println!("  {}", "Keyboard Shortcuts:".bold());
     println!("  {}  — Cancel current response", "Ctrl+C".cyan());

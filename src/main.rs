@@ -3,10 +3,14 @@ mod cli;
 mod cli_frontend;
 mod config;
 mod constants;
+mod context;
+mod cost;
 mod engine;
 mod error;
+mod permissions;
 mod prompts;
 mod server;
+mod session;
 pub mod tools;
 
 use anyhow::Result;
@@ -53,12 +57,18 @@ async fn main() -> Result<()> {
         eprintln!("  🔍 API debug logging enabled → ~/.infini/logs/");
     }
 
+    let permission_mode = if cli.yes {
+        crate::permissions::PermissionMode::DontAsk
+    } else {
+        crate::permissions::PermissionMode::Default
+    };
+
     match cli.command {
         Some(Command::Serve { port, host }) => server::run_server(config, host, port).await,
         Some(Command::Chat { prompt }) => {
             // Chat subcommand: use its --prompt or fall back to top-level --prompt
             let effective_prompt = prompt.or(cli.prompt);
-            cli_frontend::run_cli(config, effective_prompt).await
+            cli_frontend::run_cli(config, effective_prompt, permission_mode).await
         }
         Some(Command::Init) => {
             println!("Initializing Infini in current directory...");
@@ -80,7 +90,7 @@ async fn main() -> Result<()> {
         }
         None => {
             // Default: if --prompt is given, single-shot; otherwise interactive
-            cli_frontend::run_cli(config, cli.prompt).await
+            cli_frontend::run_cli(config, cli.prompt, permission_mode).await
         }
     }
 }

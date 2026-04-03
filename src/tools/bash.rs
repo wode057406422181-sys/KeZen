@@ -99,6 +99,11 @@ impl Tool for BashTool {
             }
         }
     }
+
+    fn permission_description(&self, input: &serde_json::Value) -> String {
+        let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("unknown");
+        format!("Run: `{}`", cmd)
+    }
 }
 
 #[cfg(test)]

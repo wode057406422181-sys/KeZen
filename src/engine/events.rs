@@ -27,7 +27,16 @@ pub enum EngineEvent {
         output: String,
         is_error: bool,
     },
-    // PermissionRequest { id: String, tool: String, desc: String },
+    /// Request user permission for a potentially unsafe tool invocation
+    PermissionRequest {
+        id: String,
+        tool: String,
+        description: String,
+    },
+    /// Provide current session snapshot to frontend
+    SessionSnapshotUpdate {
+        snapshot: crate::session::SessionSnapshot,
+    },
 }
 
 /// Actions sent from Frontend to Engine
@@ -37,5 +46,14 @@ pub enum UserAction {
     SendMessage { content: String },
     /// User cancels the current streaming response
     Cancel,
-    // PermissionResponse { id: String, allowed: bool },
+    /// User responds to a permission request
+    PermissionResponse {
+        id: String,
+        allowed: bool,
+        always_allow: bool,
+    },
+    /// Restore a previous session state
+    RestoreSession {
+        snapshot: crate::session::SessionSnapshot,
+    },
 }

@@ -152,6 +152,11 @@ impl Tool for FileEditTool {
             is_error: false,
         }
     }
+
+    fn permission_description(&self, input: &serde_json::Value) -> String {
+        let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("unknown");
+        format!("Edit file: {}", path)
+    }
 }
 
 #[cfg(test)]

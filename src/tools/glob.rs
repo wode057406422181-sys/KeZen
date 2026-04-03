@@ -106,6 +106,10 @@ impl Tool for GlobTool {
             },
         }
     }
+
+    fn is_read_only(&self, _input: &serde_json::Value) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

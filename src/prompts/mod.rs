@@ -68,10 +68,23 @@ pub fn build_system_prompt(model: Option<&str>) -> String {
 
     let mut prompt = elements.join("\n\n");
 
-    // Try reading .infini.md (Similar to CLAUDE.md)
-    if let Ok(content) = std::fs::read_to_string(".infini.md") {
-        prompt.push_str("\n\n# Project Memory\n");
-        prompt.push_str(&content);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    prompt.push_str(&format!("\n\n# Current Working Directory\n{}\n", cwd.display()));
+
+    // Git context (blocking execution inside build_system_prompt is fine during init)
+    if let Some(git) = crate::context::git::collect_git_context_sync() {
+        prompt.push_str("\n\n# Git Context\n");
+        prompt.push_str(&format!("Branch: {}\n", git.branch));
+        prompt.push_str(&format!("Default Branch: {}\n", git.default_branch));
+        prompt.push_str(&format!("Recent Commits:\n{}\n", git.recent_commits));
+        prompt.push_str(&format!("Status:\n{}\n", git.status));
+    }
+
+    // Memory files
+    let memory_files = crate::context::memory::load_memory_files();
+    if let Some(memory_prompt) = crate::context::memory::format_memory_prompt(&memory_files) {
+        prompt.push_str("\n\n");
+        prompt.push_str(&memory_prompt);
     }
 
     prompt

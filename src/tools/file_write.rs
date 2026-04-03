@@ -56,14 +56,13 @@ impl Tool for FileWriteTool {
         };
 
         let path = PathBuf::from(file_path);
-        if let Some(parent) = path.parent() {
-            if let Err(e) = fs::create_dir_all(parent).await {
+        if let Some(parent) = path.parent()
+            && let Err(e) = fs::create_dir_all(parent).await {
                 return ToolResult {
                     content: format!("Failed to create parent directories: {}", e),
                     is_error: true,
                 };
             }
-        }
 
         // Use async metadata check instead of blocking path.exists()
         let is_create = fs::metadata(&path).await.is_err();
@@ -82,6 +81,11 @@ impl Tool for FileWriteTool {
                 is_error: true,
             },
         }
+    }
+
+    fn permission_description(&self, input: &serde_json::Value) -> String {
+        let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("unknown");
+        format!("Create/overwrite file: {}", path)
     }
 }
 

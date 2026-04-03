@@ -81,3 +81,9 @@ pub fn print_tool_result(output: &str, is_error: bool) {
         println!("  {} {}", "✓".green(), preview.dimmed());
     }
 }
+
+/// Print permission request
+pub fn print_permission_request(tool: &str, desc: &str) {
+    println!("\n  {} {} wants to execute:", "⚠".yellow().bold(), tool.bold());
+    println!("     {}", desc);
+}

@@ -127,6 +127,10 @@ impl Tool for GrepTool {
             },
         }
     }
+
+    fn is_read_only(&self, _input: &serde_json::Value) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
