@@ -84,3 +84,62 @@ impl Tool for FileWriteTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_write_creates_new_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test_new.txt");
+        let path_str = path.to_str().unwrap().to_string();
+
+        let tool = FileWriteTool;
+        let result = tool.call(json!({
+            "file_path": path_str,
+            "content": "hello core"
+        })).await;
+        
+        assert!(!result.is_error);
+        assert!(result.content.contains("created successfully"));
+        
+        let read_content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(read_content, "hello core");
+    }
+
+    #[tokio::test]
+    async fn test_write_creates_parent_dirs() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nested").join("dir").join("file.txt");
+        let path_str = path.to_str().unwrap().to_string();
+
+        let tool = FileWriteTool;
+        let result = tool.call(json!({
+            "file_path": path_str,
+            "content": "nested content"
+        })).await;
+        
+        assert!(!result.is_error);
+        assert!(path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_write_overwrites_existing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("exist.txt");
+        std::fs::write(&path, "old").unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+
+        let tool = FileWriteTool;
+        let result = tool.call(json!({
+            "file_path": path_str,
+            "content": "new"
+        })).await;
+        
+        assert!(!result.is_error);
+        assert!(result.content.contains("updated successfully"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+    }
+}

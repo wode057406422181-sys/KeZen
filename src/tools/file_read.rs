@@ -109,3 +109,50 @@ impl Tool for FileReadTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[tokio::test]
+    async fn test_read_existing_file() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "line1\nline2\nline3").unwrap();
+        let path_str = file.path().to_str().unwrap().to_string();
+
+        let tool = FileReadTool;
+        let result = tool.call(json!({"file_path": path_str})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("1: line1"));
+        assert!(result.content.contains("3: line3"));
+    }
+
+    #[tokio::test]
+    async fn test_read_nonexistent() {
+        let tool = FileReadTool;
+        let result = tool.call(json!({"file_path": "/path/to/nonexistent/file_12345.txt"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("Does not exist") || result.content.contains("doe not exist") || result.content.contains("does not exist"));
+    }
+
+    #[tokio::test]
+    async fn test_read_with_offset_and_limit() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "L1\nL2\nL3\nL4\nL5").unwrap();
+        let path_str = file.path().to_str().unwrap().to_string();
+
+        let tool = FileReadTool;
+        let result = tool.call(json!({
+            "file_path": path_str,
+            "offset": 2,
+            "limit": 2
+        })).await;
+        assert!(!result.is_error);
+        assert!(!result.content.contains("1: L1"));
+        assert!(result.content.contains("2: L2"));
+        assert!(result.content.contains("3: L3"));
+        assert!(!result.content.contains("4: L4"));
+    }
+}

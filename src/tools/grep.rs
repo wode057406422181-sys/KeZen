@@ -128,3 +128,55 @@ impl Tool for GrepTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_grep_finds_matches() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("match.txt");
+        std::fs::write(&path, "hello world\nignore this\nhello rust").unwrap();
+        let dir_str = dir.path().to_str().unwrap().to_string();
+
+        let tool = GrepTool;
+        let result = tool.call(json!({
+            "pattern": "hello",
+            "path": dir_str,
+            "include": "*.txt"
+        })).await;
+        
+        assert!(!result.is_error);
+        assert!(result.content.contains("match.txt:1: hello world"));
+        assert!(result.content.contains("match.txt:3: hello rust"));
+    }
+
+    #[tokio::test]
+    async fn test_grep_no_match() {
+        let dir = tempdir().unwrap();
+        let dir_str = dir.path().to_str().unwrap().to_string();
+
+        let tool = GrepTool;
+        let result = tool.call(json!({
+            "pattern": "impossible_string",
+            "path": dir_str
+        })).await;
+        
+        assert!(!result.is_error);
+        assert!(result.content.contains("No matches found"));
+    }
+
+    #[tokio::test]
+    async fn test_grep_invalid_regex() {
+        let tool = GrepTool;
+        let result = tool.call(json!({
+            "pattern": "[invalid_regex",
+            "path": "."
+        })).await;
+        
+        assert!(result.is_error);
+        assert!(result.content.contains("Invalid Regex pattern"));
+    }
+}

@@ -146,3 +146,84 @@ impl Tool for FileEditTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_edit_replaces_single() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("edit.txt");
+        std::fs::write(&path, "hello world").unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+
+        let tool = FileEditTool;
+        let result = tool.call(json!({
+            "file_path": path_str,
+            "old_string": "world",
+            "new_string": "rust",
+            "replace_all": false
+        })).await;
+        
+        assert!(!result.is_error);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello rust");
+    }
+
+    #[tokio::test]
+    async fn test_edit_multiple_without_flag_errors() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("edit_mult.txt");
+        std::fs::write(&path, "apple apple banana").unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+
+        let tool = FileEditTool;
+        let result = tool.call(json!({
+            "file_path": path_str,
+            "old_string": "apple",
+            "new_string": "orange",
+            "replace_all": false
+        })).await;
+        
+        assert!(result.is_error);
+        assert!(result.content.contains("Found 2 matches"));
+    }
+
+    #[tokio::test]
+    async fn test_edit_replace_all() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("edit_all.txt");
+        std::fs::write(&path, "foo bar foo").unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+
+        let tool = FileEditTool;
+        let result = tool.call(json!({
+            "file_path": path_str,
+            "old_string": "foo",
+            "new_string": "baz",
+            "replace_all": true
+        })).await;
+        
+        assert!(!result.is_error);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "baz bar baz");
+    }
+
+    #[tokio::test]
+    async fn test_edit_not_found() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("not_found.txt");
+        std::fs::write(&path, "hello").unwrap();
+        let path_str = path.to_str().unwrap().to_string();
+
+        let tool = FileEditTool;
+        let result = tool.call(json!({
+            "file_path": path_str,
+            "old_string": "world",
+            "new_string": "rust"
+        })).await;
+        
+        assert!(result.is_error);
+        assert!(result.content.contains("not found in file"));
+    }
+}

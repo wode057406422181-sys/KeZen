@@ -48,3 +48,38 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Box::new(super::glob::GlobTool));
     registry
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_registry_register_and_get() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(crate::tools::bash::BashTool));
+        assert!(registry.get("Bash").is_some());
+        assert!(registry.get("Unknown").is_none());
+    }
+
+    #[test]
+    fn test_registry_schemas() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(crate::tools::bash::BashTool));
+        let schemas = registry.schemas();
+        assert_eq!(schemas.len(), 1);
+        let schema = &schemas[0];
+        assert_eq!(schema["name"], "Bash");
+    }
+
+    #[test]
+    fn test_create_default_registry() {
+        let registry = create_default_registry();
+        assert!(registry.get("Bash").is_some());
+        assert!(registry.get("FileRead").is_some());
+        assert!(registry.get("FileWrite").is_some());
+        assert!(registry.get("FileEdit").is_some());
+        assert!(registry.get("Grep").is_some());
+        assert!(registry.get("Glob").is_some());
+        assert_eq!(registry.schemas().len(), 6);
+    }
+}

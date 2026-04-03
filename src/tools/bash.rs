@@ -100,3 +100,40 @@ impl Tool for BashTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_bash_echo() {
+        let tool = BashTool;
+        let result = tool.call(json!({"command": "echo 'hello world'"})).await;
+        assert!(!result.is_error);
+        assert_eq!(result.content.trim(), "hello world");
+    }
+
+    #[tokio::test]
+    async fn test_bash_exit_code() {
+        let tool = BashTool;
+        let result = tool.call(json!({"command": "exit 1"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("Exit code 1"));
+    }
+
+    #[tokio::test]
+    async fn test_bash_timeout() {
+        let tool = BashTool;
+        let result = tool.call(json!({"command": "sleep 1", "timeout": 10})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("timeout of 10ms"));
+    }
+
+    #[tokio::test]
+    async fn test_bash_missing_command() {
+        let tool = BashTool;
+        let result = tool.call(json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("missing or invalid 'command'"));
+    }
+}

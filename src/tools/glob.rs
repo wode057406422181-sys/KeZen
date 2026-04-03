@@ -108,3 +108,55 @@ impl Tool for GlobTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn test_glob_finds_files() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.rs"), "fn main(){}").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "hello").unwrap();
+        
+        let tool = GlobTool;
+        let result = tool.call(json!({
+            "pattern": "*.rs",
+            "path": dir.path().to_str().unwrap()
+        })).await;
+        
+        assert!(!result.is_error);
+        assert!(result.content.contains("a.rs"));
+        assert!(!result.content.contains("b.txt"));
+    }
+
+    #[tokio::test]
+    async fn test_glob_no_match() {
+        let dir = tempdir().unwrap();
+        
+        let tool = GlobTool;
+        let result = tool.call(json!({
+            "pattern": "*.rs",
+            "path": dir.path().to_str().unwrap()
+        })).await;
+        
+        assert!(!result.is_error);
+        assert!(result.content.contains("No files found"));
+    }
+
+    #[tokio::test]
+    async fn test_glob_invalid_pattern() {
+        let tool = GlobTool;
+        let result = tool.call(json!({
+            "pattern": "***"
+        })).await;
+        
+        // glob crate allows `***` but some invalid pattern like `[` without `]` will err
+        let result2 = tool.call(json!({
+            "pattern": "["
+        })).await;
+        assert!(result2.is_error);
+        assert!(result2.content.contains("Invalid glob pattern"));
+    }
+}
