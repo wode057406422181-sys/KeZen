@@ -1,4 +1,5 @@
 use crate::api::types::Usage;
+use crate::permissions::RiskLevel;
 
 /// Events sent from Engine to Frontend
 #[derive(Debug, Clone)]
@@ -32,6 +33,10 @@ pub enum EngineEvent {
         id: String,
         tool: String,
         description: String,
+        /// Risk level of the operation (Low, Medium, High)
+        risk_level: RiskLevel,
+        /// Suggested always-allow rule content (e.g. "git commit:*")
+        suggestion: Option<String>,
     },
     /// Provide current session snapshot to frontend
     SessionSnapshotUpdate {

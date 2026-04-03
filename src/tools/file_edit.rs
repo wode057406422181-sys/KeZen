@@ -157,6 +157,72 @@ impl Tool for FileEditTool {
         let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("unknown");
         format!("Edit file: {}", path)
     }
+
+    fn is_read_only(&self, _input: &serde_json::Value) -> bool {
+        false
+    }
+
+    fn is_file_tool(&self) -> bool {
+        true
+    }
+
+    fn check_permissions(&self, input: &serde_json::Value) -> crate::permissions::PermissionResult {
+        let file_path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+
+        // Path traversal → deny
+        if crate::permissions::safety::contains_path_traversal(file_path) {
+            return crate::permissions::PermissionResult::Deny {
+                message: format!("Path contains traversal (..): {}", file_path),
+            };
+        }
+
+        // Dangerous files → ask
+        if crate::permissions::safety::is_dangerous_path(file_path) {
+            return crate::permissions::PermissionResult::Ask {
+                message: format!("⚠️ Target is a sensitive file: {}", file_path),
+            };
+        }
+
+        // Working directory check
+        if let Ok(cwd) = std::env::current_dir() {
+            let cwd_str = cwd.to_string_lossy();
+            if !crate::permissions::safety::is_within_working_directory(file_path, &cwd_str) {
+                return crate::permissions::PermissionResult::Ask {
+                    message: format!("⚠️ File is outside the working directory: {}", file_path),
+                };
+            }
+        }
+
+        crate::permissions::PermissionResult::Passthrough
+    }
+
+    fn permission_matcher(&self, input: &serde_json::Value) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
+        let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        Some(Box::new(move |pattern: &str| {
+            if let Some(prefix) = pattern.strip_suffix("/**") {
+                let path_obj = std::path::Path::new(&path);
+                let mut components = path_obj.components();
+                components.any(|c| {
+                    if let std::path::Component::Normal(s) = c {
+                        s.to_str() == Some(prefix)
+                    } else {
+                        false
+                    }
+                })
+            } else {
+                path == pattern
+            }
+        }))
+    }
+
+    fn permission_suggestion(&self, input: &serde_json::Value) -> Option<String> {
+        let file_path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+        if let Ok(cwd) = std::env::current_dir() {
+            crate::permissions::safety::extract_file_suggestion(file_path, &cwd.to_string_lossy())
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]

@@ -209,19 +209,33 @@ async fn handle_engine_events(
                     Some(EngineEvent::ToolResult { id: _, output, is_error }) => {
                         print_tool_result(&output, is_error);
                     }
-                    Some(EngineEvent::PermissionRequest { id, tool, description }) => {
+                    Some(EngineEvent::PermissionRequest { id, tool, description, risk_level, suggestion }) => {
                         if in_thinking {
                             in_thinking = false;
                             println!();
                         }
                         
+                        // Display risk level indicator
+                        let risk_indicator = match risk_level {
+                            crate::permissions::RiskLevel::Low => "○".dimmed(),
+                            crate::permissions::RiskLevel::Medium => "●".yellow(),
+                            crate::permissions::RiskLevel::High => "●".red(),
+                        };
+                        println!("  {} {} {}", risk_indicator, "Permission required".bold(), format!("[{}]", tool).dimmed());
+                        
                         super::render::print_permission_request(&tool, &description);
                         
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         let tool_name = tool.clone();
+                        let suggestion_display = suggestion.clone();
                         tokio::task::spawn_blocking(move || {
                             loop {
-                                print!("  {} [y] Allow [n] Deny [a] Always allow {} > ", "›".bright_green().bold(), tool_name.bold());
+                                let always_label = if let Some(ref s) = suggestion_display {
+                                    format!("[a] Always allow \"{}:{}\"", tool_name, s)
+                                } else {
+                                    format!("[a] Always allow {}", tool_name)
+                                };
+                                print!("  {} [y] Allow [n] Deny {} > ", "›".bright_green().bold(), always_label.bold());
                                 let _ = std::io::stdout().flush();
                                 let mut input = String::new();
                                 if std::io::stdin().read_line(&mut input).is_ok() {

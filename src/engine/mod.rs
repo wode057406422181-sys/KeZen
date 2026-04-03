@@ -14,7 +14,7 @@ use crate::tools::registry::ToolRegistry;
 use self::events::{EngineEvent, UserAction};
 use self::session::Session;
 
-use crate::permissions::{PermissionCheck, PermissionMode, PermissionState};
+use crate::permissions::{PermissionDecision, PermissionMode, PermissionState};
 
 /// The core engine that orchestrates LLM interactions.
 ///
@@ -256,19 +256,50 @@ impl InfiniEngine {
                             }
                         };
 
+                        // Gather fine-grained permission inputs from the tool
                         let is_read_only = tool.is_read_only(&input);
+                        let is_file_tool = tool.is_file_tool();
                         let desc = tool.permission_description(&input);
+                        let tool_check = tool.check_permissions(&input);
+                        let suggestion = tool.permission_suggestion(&input);
 
-                        match self.permission_state.check(&name, is_read_only, desc.clone()) {
-                            PermissionCheck::Allow => {
+                        // Compute the permission decision in a scope so the matcher
+                        // (which borrows `tool`) is dropped before we move `tool`.
+                        let decision = {
+                            let matcher = tool.permission_matcher(&input);
+                            let matcher_ref = matcher.as_deref();
+                            self.permission_state.check(
+                                &name,
+                                &input,
+                                &tool_check,
+                                is_read_only,
+                                is_file_tool,
+                                desc.clone(),
+                                matcher_ref,
+                                suggestion.clone(),
+                            )
+                        };
+
+                        match decision {
+                            PermissionDecision::Allow => {
                                 approved_tools.push((idx, id, name, input, tool));
                             }
-                            PermissionCheck::NeedsApproval { tool_name, description } => {
+                            PermissionDecision::Deny { message } => {
+                                denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
+                                    content: message,
+                                    is_error: true,
+                                }));
+                            }
+                            PermissionDecision::NeedsApproval { tool_name, description, risk_level, suggestion } => {
                                 // Block and ask user
+                                // Borrow suggestion before moving tool_name into event
+                                let suggestion_ref: Option<&str> = suggestion.as_deref();
                                 let _ = self.event_tx.send(EngineEvent::PermissionRequest {
                                     id: id.clone(),
-                                    tool: tool_name.clone(),
+                                    tool: tool_name,
                                     description,
+                                    risk_level,
+                                    suggestion: suggestion.clone(),
                                 }).await;
 
                                 // Wait for UserAction::PermissionResponse
@@ -278,7 +309,11 @@ impl InfiniEngine {
                                         UserAction::PermissionResponse { id: resp_id, allowed, always_allow } => {
                                             if resp_id == id {
                                                 if always_allow && allowed {
-                                                    self.permission_state.always_allow(&tool_name);
+                                                    // Fine-grained: store rule content from suggestion
+                                                    self.permission_state.add_allow_rule(
+                                                        &name,
+                                                        suggestion_ref,
+                                                    );
                                                 }
                                                 was_allowed = allowed;
                                                 break;
