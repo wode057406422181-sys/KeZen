@@ -60,7 +60,7 @@ pub async fn run_repl(
                         println!(
                             "  {} {}",
                             "ℹ".blue(),
-                            "Session clear requires Phase 2 — coming soon.".dimmed()
+                            "Session clear is not yet implemented.".dimmed()
                         );
                         continue;
                     }

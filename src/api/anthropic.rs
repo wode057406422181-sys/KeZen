@@ -149,7 +149,7 @@ impl LlmClient for AnthropicClient {
         if let Some(t) = tools {
             if !t.is_empty() {
                 body["tools"] = json!(t);
-                // We default to `auto` choice in phase 2 unless otherwise constrained
+                // Default to `auto` tool choice unless otherwise constrained
                 body["tool_choice"] = json!({"type": "auto"});
             }
         }

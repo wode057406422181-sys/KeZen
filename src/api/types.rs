@@ -23,7 +23,7 @@ pub enum ContentBlock {
     #[serde(rename = "thinking")]
     Thinking { thinking: String },
 
-    // Phase 2: tool use
+    /// Tool use block
     #[serde(rename = "tool_use")]
     ToolUse {
         id: String,
@@ -48,7 +48,7 @@ pub struct Usage {
 /// Unified stream events from LLM providers.
 ///
 /// These events are consumed by the Engine to build EngineEvents
-/// for the frontend. Some fields are reserved for Phase 2 (tool use).
+/// for the frontend.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
@@ -56,7 +56,7 @@ pub enum StreamEvent {
     TextDelta { text: String },
     /// Incremental thinking content (Anthropic extended thinking)
     ThinkingDelta { text: String },
-    /// A content block started (index + type for Phase 2 routing)
+    /// A content block started (index + type for routing)
     ContentBlockStart {
         index: usize,
         block_type: String,
@@ -70,7 +70,7 @@ pub enum StreamEvent {
         role: Role,
         usage: Option<Usage>,
     },
-    /// Message delta (stop reason for Phase 2 tool loop + final usage)
+    /// Message delta (stop reason for tool loop + final usage)
     MessageDelta {
         stop_reason: Option<String>,
         usage: Option<Usage>,
@@ -78,7 +78,7 @@ pub enum StreamEvent {
     /// Message stream fully ended
     MessageStop,
 
-    // Phase 2 tool use streaming
+    /// Tool use streaming events
     ToolUseStart { id: String, name: String },
     ToolUseInputDelta { text: String },
     ToolUseInputDone,

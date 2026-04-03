@@ -37,6 +37,6 @@ async fn list_models(State(config): State<AppConfig>) -> impl IntoResponse {
 async fn not_implemented() -> impl IntoResponse {
     (
         StatusCode::NOT_IMPLEMENTED,
-        "501 Not Implemented: Phase 1 only includes server skeleton.",
+        "501 Not Implemented: server skeleton only.",
     )
 }

@@ -14,7 +14,7 @@ pub enum EngineEvent {
     Error { message: String },
     /// Current turn is complete
     Done,
-    // Phase 2 tool execution
+    /// Tool execution started
     ToolUseStart { id: String, name: String, input: serde_json::Value },
     ToolResult { id: String, output: String, is_error: bool },
     // PermissionRequest { id: String, tool: String, desc: String },
@@ -27,6 +27,5 @@ pub enum UserAction {
     SendMessage { content: String },
     /// User cancels the current streaming response
     Cancel,
-    // Phase 2 placeholders
     // PermissionResponse { id: String, allowed: bool },
 }
