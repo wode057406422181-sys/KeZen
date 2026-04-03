@@ -276,7 +276,7 @@ impl InfiniEngine {
                                 is_file_tool,
                                 desc.clone(),
                                 matcher_ref,
-                                suggestion.clone(),
+                                suggestion,
                             )
                         };
 
