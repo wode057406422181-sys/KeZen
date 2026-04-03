@@ -12,6 +12,7 @@ use crate::constants::api::{ANTHROPIC_VERSION, CONTENT_TYPE_JSON};
 use crate::constants::defaults::DEFAULT_MAX_TOKENS;
 use crate::error::InfiniError;
 
+/// Anthropic Messages API streaming client.
 pub struct AnthropicClient {
     client: reqwest::Client,
     model: String,
@@ -170,7 +171,10 @@ impl LlmClient for AnthropicClient {
 
         let stream = response.bytes_stream().eventsource();
 
-        // Track current content block type to properly route deltas
+        // Transform raw SSE events into typed StreamEvents.
+        // Tool-use blocks are split at this layer: content_block_start with
+        // type "tool_use" emits ToolUseStart, and input_json_delta chunks
+        // emit ToolUseInputDelta, so the engine doesn't need to track block types.
         let event_stream = stream.filter_map(|event_result| async {
             match event_result {
                 Ok(event) => {

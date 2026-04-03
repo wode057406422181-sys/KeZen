@@ -82,6 +82,8 @@ impl InfiniEngine {
         let mut iterations = 0;
         let max_iterations = 25;
 
+        // Agentic loop: keeps calling the LLM until it stops requesting tools
+        // or we hit the safety cap.
         loop {
             if iterations >= max_iterations {
                 let _ = self.event_tx.send(EngineEvent::Error { message: "Max tool loop iterations reached".into() }).await;
@@ -102,12 +104,14 @@ impl InfiniEngine {
             let mut turn_usage = Usage::default();
 
             let mut pending_tools = Vec::new();
+            // Tracks the tool currently being streamed: (id, name, accumulated_json_input)
             let mut current_tool: Option<(String, String, String)> = None;
             let mut stream_interrupted = false;
 
             match stream_result {
                 Ok(mut stream) => {
                     loop {
+                        // biased: check cancel before stream to ensure responsiveness
                         tokio::select! {
                             biased;
 
@@ -157,6 +161,8 @@ impl InfiniEngine {
                                                     if u.input_tokens > 0 { turn_usage.input_tokens = u.input_tokens; }
                                                 }
                                             }
+                                            // Flush pending tool on MessageStop in case
+                                            // ContentBlockStop was not emitted (some providers).
                                             StreamEvent::MessageStop => {
                                                 if let Some((id, name, input_str)) = current_tool.take() {
                                                     let input = serde_json::from_str(&if input_str.is_empty() { "{}".to_string() } else { input_str.clone() }).unwrap_or(serde_json::json!({}));
@@ -198,6 +204,7 @@ impl InfiniEngine {
                         break;
                     }
 
+                    // Record this turn's assistant response in conversation history.
                     let mut blocks = Vec::new();
                     if !thinking_text.is_empty() {
                         blocks.push(ContentBlock::Thinking { thinking: thinking_text });
@@ -213,11 +220,13 @@ impl InfiniEngine {
                         self.session.add_message(Message { role: Role::Assistant, content: blocks });
                     }
 
+                    // No tools requested: the LLM is done, exit the loop.
                     if pending_tools.is_empty() {
                         let _ = self.event_tx.send(EngineEvent::Done).await;
                         break;
                     }
 
+                    // Execute each requested tool and collect results.
                     let mut tool_results = Vec::new();
                     for (id, name, input) in pending_tools {
                         let result = match self.registry.get(&name) {
@@ -241,6 +250,8 @@ impl InfiniEngine {
                         });
                     }
 
+                    // Feed tool results back as a "user" message so the LLM
+                    // can see the outputs and decide the next step.
                     self.session.add_message(Message { role: Role::User, content: tool_results });
                 }
                 Err(e) => {

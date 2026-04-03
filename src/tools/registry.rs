@@ -2,6 +2,10 @@ use std::collections::HashMap;
 
 use super::Tool;
 
+/// Central registry mapping tool names to their implementations.
+///
+/// The engine uses this to look up tools requested by the LLM and to
+/// generate the combined JSON schema array sent with each API call.
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
 }
@@ -13,14 +17,17 @@ impl ToolRegistry {
         }
     }
 
+    /// Add a tool to the registry, keyed by its `name()`.
     pub fn register(&mut self, tool: Box<dyn Tool>) {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
+    /// Look up a tool by name. Returns `None` if not registered.
     pub fn get(&self, name: &str) -> Option<&dyn Tool> {
         self.tools.get(name).map(|t| t.as_ref())
     }
 
+    /// Generate the JSON tool schemas array for the LLM API request.
     pub fn schemas(&self) -> Vec<serde_json::Value> {
         self.tools.values().map(|t| {
             serde_json::json!({
@@ -38,6 +45,7 @@ impl Default for ToolRegistry {
     }
 }
 
+/// Create a registry pre-loaded with all built-in tools.
 pub fn create_default_registry() -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(super::bash::BashTool));

@@ -12,6 +12,9 @@ use crate::constants::api::CONTENT_TYPE_JSON;
 use crate::constants::defaults::DEFAULT_MAX_TOKENS;
 use crate::error::InfiniError;
 
+/// OpenAI Chat Completions API streaming client.
+///
+/// Also works with OpenAI-compatible endpoints (e.g. DashScope, vLLM, Ollama).
 pub struct OpenAiClient {
     client: reqwest::Client,
     model: String,
