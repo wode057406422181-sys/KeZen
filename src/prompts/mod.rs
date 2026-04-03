@@ -53,14 +53,15 @@ fn compute_env_info(model: Option<&str>) -> String {
 }
 
 pub fn build_system_prompt(model: Option<&str>) -> String {
-    // Only fetch elements that are active for Phase 1.
-    // To enable Phase 2 sections (like ACTIONS_PHASE2, USING_TOOLS_PHASE2), just add them here.
     let elements = [
         get_simple_intro_section(),
-        SYSTEM_BASE.to_string(),
+        SYSTEM_RULES.to_string(),
         DOING_TASKS.to_string(),
-        TONE_AND_STYLE_BASE.to_string(),
+        ACTIONS.to_string(),
+        USING_TOOLS.to_string(),
+        TONE_AND_STYLE.to_string(),
         OUTPUT_EFFICIENCY.to_string(),
+        SESSION_GUIDANCE.to_string(),
         SYSTEM_PROMPT_DYNAMIC_BOUNDARY.to_string(),
         compute_env_info(model),
     ];

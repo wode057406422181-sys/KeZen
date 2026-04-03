@@ -59,9 +59,14 @@ dirs = "6"
 # Utilities
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+glob = "0.3.3"
+regex = "1.12.3"
 
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+[dev-dependencies]
+tempfile = "3.27.0"

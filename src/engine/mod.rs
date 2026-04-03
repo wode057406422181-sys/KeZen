@@ -9,6 +9,7 @@ use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{self, LlmClient};
 use crate::config::AppConfig;
 use crate::prompts::build_system_prompt;
+use crate::tools::registry::ToolRegistry;
 
 use self::events::{EngineEvent, UserAction};
 use self::session::Session;
@@ -30,6 +31,7 @@ pub struct InfiniEngine {
     system_prompt: String,
     action_rx: mpsc::Receiver<UserAction>,
     event_tx: mpsc::Sender<EngineEvent>,
+    registry: ToolRegistry,
 }
 
 impl InfiniEngine {
@@ -37,6 +39,7 @@ impl InfiniEngine {
         config: AppConfig,
         action_rx: mpsc::Receiver<UserAction>,
         event_tx: mpsc::Sender<EngineEvent>,
+        registry: ToolRegistry,
     ) -> Result<Self, crate::error::InfiniError> {
         let client = api::create_client(&config)?;
         // Build the system prompt once at construction.
@@ -51,6 +54,7 @@ impl InfiniEngine {
             system_prompt,
             action_rx,
             event_tx,
+            registry,
         })
     }
 
@@ -70,135 +74,214 @@ impl InfiniEngine {
 
     /// Handle a user message: send to LLM, stream response, accumulate history.
     async fn handle_send_message(&mut self, content: String) {
-        // Add user message to session
         self.session.add_message(Message {
             role: Role::User,
             content: vec![ContentBlock::Text { text: content }],
         });
 
-        // Borrow messages as a slice — no clone needed.
-        // Rust's split borrows allow &self.session (immutable) and &self.client
-        // (immutable) to coexist since they are separate struct fields.
-        let messages = self.session.messages();
+        let mut iterations = 0;
+        let max_iterations = 25;
 
-        let stream_result = self
-            .client
-            .stream(messages, Some(&self.system_prompt))
-            .await;
+        // Agentic loop: keeps calling the LLM until it stops requesting tools
+        // or we hit the safety cap.
+        loop {
+            if iterations >= max_iterations {
+                let _ = self.event_tx.send(EngineEvent::Error { message: "Max tool loop iterations reached".into() }).await;
+                break;
+            }
+            iterations += 1;
 
-        match stream_result {
-            Ok(mut stream) => {
-                let mut assistant_text = String::new();
-                let mut thinking_text = String::new();
-                let mut turn_usage = Usage::default();
+            let schemas = self.registry.schemas();
+            let tools_arg = if schemas.is_empty() { None } else { Some(schemas.as_slice()) };
 
-                loop {
-                    tokio::select! {
-                        biased;
+            let stream_result = self
+                .client
+                .stream(self.session.messages(), Some(&self.system_prompt), tools_arg)
+                .await;
 
-                        // Check for cancel / channel-close first (biased priority).
-                        cancel_action = self.action_rx.recv() => {
-                            match cancel_action {
-                                // User cancelled: notify frontend then stop streaming.
-                                Some(UserAction::Cancel) | None => {
-                                    let _ = self.event_tx.send(EngineEvent::Done).await;
-                                    return;
+            let mut assistant_text = String::new();
+            let mut thinking_text = String::new();
+            let mut turn_usage = Usage::default();
+
+            let mut pending_tools = Vec::new();
+            // Tracks the tool currently being streamed: (id, name, accumulated_json_input)
+            let mut current_tool: Option<(String, String, String)> = None;
+            let mut stream_interrupted = false;
+
+            match stream_result {
+                Ok(mut stream) => {
+                    loop {
+                        // biased: check cancel before stream to ensure responsiveness
+                        tokio::select! {
+                            biased;
+
+                            cancel_action = self.action_rx.recv() => {
+                                match cancel_action {
+                                    Some(UserAction::Cancel) | None => {
+                                        stream_interrupted = true;
+                                        break;
+                                    }
+                                    Some(_) => {}
                                 }
-                                // Any other action during streaming is ignored.
-                                Some(_) => {}
                             }
-                        }
 
-                        evt_opt = stream.next() => {
-                            match evt_opt {
-                                Some(Ok(evt)) => {
-                                    match evt {
-                                        StreamEvent::TextDelta { text } => {
-                                            assistant_text.push_str(&text);
-                                            let _ = self.event_tx.send(
-                                                EngineEvent::TextDelta { text }
-                                            ).await;
-                                        }
-                                        StreamEvent::ThinkingDelta { text } => {
-                                            thinking_text.push_str(&text);
-                                            let _ = self.event_tx.send(
-                                                EngineEvent::ThinkingDelta { text }
-                                            ).await;
-                                        }
-                                        StreamEvent::MessageStart { usage: Some(u), .. } => {
-                                            turn_usage.input_tokens = u.input_tokens;
-                                        }
-                                        StreamEvent::MessageDelta { usage: Some(u), .. } => {
-                                            // MessageDelta usage often has output_tokens
-                                            if u.output_tokens > 0 {
-                                                turn_usage.output_tokens = u.output_tokens;
+                            evt_opt = stream.next() => {
+                                match evt_opt {
+                                    Some(Ok(evt)) => {
+                                        match evt {
+                                            StreamEvent::TextDelta { text } => {
+                                                assistant_text.push_str(&text);
+                                                let _ = self.event_tx.send(EngineEvent::TextDelta { text }).await;
                                             }
-                                            if u.input_tokens > 0 {
+                                            StreamEvent::ThinkingDelta { text } => {
+                                                thinking_text.push_str(&text);
+                                                let _ = self.event_tx.send(EngineEvent::ThinkingDelta { text }).await;
+                                            }
+                                            StreamEvent::ToolUseStart { id, name } => {
+                                                current_tool = Some((id, name, String::new()));
+                                            }
+                                            StreamEvent::ToolUseInputDelta { text } => {
+                                                if let Some((_, _, ref mut input)) = current_tool {
+                                                    input.push_str(&text);
+                                                }
+                                            }
+                                            StreamEvent::ToolUseInputDone | StreamEvent::ContentBlockStop { .. } => {
+                                                if let Some((id, name, input_str)) = current_tool.take() {
+                                                    let input = serde_json::from_str(&if input_str.is_empty() { "{}".to_string() } else { input_str.clone() }).unwrap_or(serde_json::json!({}));
+                                                    let _ = self.event_tx.send(EngineEvent::ToolUseStart { id: id.clone(), name: name.clone(), input: input.clone() }).await;
+                                                    pending_tools.push((id, name, input));
+                                                }
+                                            }
+                                            StreamEvent::MessageStart { usage: Some(u), .. } => {
                                                 turn_usage.input_tokens = u.input_tokens;
                                             }
+                                            StreamEvent::MessageDelta { usage, .. } => {
+                                                if let Some(u) = usage {
+                                                    if u.output_tokens > 0 { turn_usage.output_tokens = u.output_tokens; }
+                                                    if u.input_tokens > 0 { turn_usage.input_tokens = u.input_tokens; }
+                                                }
+                                            }
+                                            // Flush pending tool on MessageStop in case
+                                            // ContentBlockStop was not emitted (some providers).
+                                            StreamEvent::MessageStop => {
+                                                if let Some((id, name, input_str)) = current_tool.take() {
+                                                    let input = serde_json::from_str(&if input_str.is_empty() { "{}".to_string() } else { input_str.clone() }).unwrap_or(serde_json::json!({}));
+                                                    let _ = self.event_tx.send(EngineEvent::ToolUseStart { id: id.clone(), name: name.clone(), input: input.clone() }).await;
+                                                    pending_tools.push((id, name, input));
+                                                }
+                                                break;
+                                            }
+                                            // ContentBlockStart is intentionally not handled here.
+                                            // For text blocks it carries no content (deltas arrive via TextDelta).
+                                            // For tool blocks the id/name are already extracted as ToolUseStart
+                                            // by the provider-level SSE parser (anthropic.rs / openai.rs).
+                                            _ => {}
                                         }
-                                        StreamEvent::MessageStop => {
-                                            break;
-                                        }
-                                        _ => {} // ContentBlockStart/Stop handled implicitly
                                     }
-                                }
-                                Some(Err(e)) => {
-                                    let _ = self.event_tx.send(
-                                        EngineEvent::Error { message: e.to_string() }
-                                    ).await;
-                                    break;
-                                }
-                                None => {
-                                    break; // Stream ended
+                                    Some(Err(e)) => {
+                                        let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
+                                        stream_interrupted = true;
+                                        break;
+                                    }
+                                    None => {
+                                        break;
+                                    }
                                 }
                             }
                         }
                     }
-                }
 
-                // Update session with usage
-                self.session.update_usage(&turn_usage);
-                debug_logger::log_stream_end(
-                    &self.config.provider.to_string(),
-                    turn_usage.input_tokens,
-                    turn_usage.output_tokens,
-                );
-                let _ = self
-                    .event_tx
-                    .send(EngineEvent::CostUpdate(turn_usage))
-                    .await;
+                    self.session.update_usage(&turn_usage);
+                    debug_logger::log_stream_end(
+                        &self.config.provider.to_string(),
+                        turn_usage.input_tokens,
+                        turn_usage.output_tokens,
+                    );
+                    let _ = self.event_tx.send(EngineEvent::CostUpdate(turn_usage)).await;
 
-                // Build assistant content blocks
-                let mut blocks = Vec::new();
-                if !thinking_text.is_empty() {
-                    blocks.push(ContentBlock::Thinking {
-                        thinking: thinking_text,
-                    });
-                }
-                if !assistant_text.is_empty() {
-                    blocks.push(ContentBlock::Text {
-                        text: assistant_text,
-                    });
-                }
+                    if stream_interrupted {
+                        let _ = self.event_tx.send(EngineEvent::Done).await;
+                        break;
+                    }
 
-                if !blocks.is_empty() {
-                    self.session.add_message(Message {
-                        role: Role::Assistant,
-                        content: blocks,
-                    });
-                }
+                    // Record this turn's assistant response in conversation history.
+                    let mut blocks = Vec::new();
+                    if !thinking_text.is_empty() {
+                        blocks.push(ContentBlock::Thinking { thinking: thinking_text });
+                    }
+                    if !assistant_text.is_empty() {
+                        blocks.push(ContentBlock::Text { text: assistant_text });
+                    }
+                    for (id, name, input) in &pending_tools {
+                        blocks.push(ContentBlock::ToolUse { id: id.clone(), name: name.clone(), input: input.clone() });
+                    }
 
-                let _ = self.event_tx.send(EngineEvent::Done).await;
-            }
-            Err(e) => {
-                let _ = self
-                    .event_tx
-                    .send(EngineEvent::Error {
-                        message: e.to_string(),
-                    })
-                    .await;
-                let _ = self.event_tx.send(EngineEvent::Done).await;
+                    if !blocks.is_empty() {
+                        self.session.add_message(Message { role: Role::Assistant, content: blocks });
+                    }
+
+                    // No tools requested: the LLM is done, exit the loop.
+                    if pending_tools.is_empty() {
+                        let _ = self.event_tx.send(EngineEvent::Done).await;
+                        break;
+                    }
+
+                    // Execute requested tools concurrently.
+                    let mut join_set = tokio::task::JoinSet::new();
+                    for (idx, (id, name, input)) in pending_tools.into_iter().enumerate() {
+                        match self.registry.get(&name) {
+                            Some(tool) => {
+                                // Arc<dyn Tool> is cheaply cloneable and Send + Sync,
+                                // so we can move it into the spawned future directly.
+                                join_set.spawn(async move {
+                                    let result = tool.call(input).await;
+                                    (idx, id, name, result)
+                                });
+                            }
+                            None => {
+                                join_set.spawn(async move {
+                                    (idx, id.clone(), name.clone(), crate::tools::ToolResult {
+                                        content: format!("Tool {} not found", name),
+                                        is_error: true,
+                                    })
+                                });
+                            }
+                        }
+                    }
+
+                    // Collect results and sort by original index to preserve order.
+                    let mut indexed_results = Vec::new();
+                    while let Some(join_result) = join_set.join_next().await {
+                        if let Ok(r) = join_result {
+                            indexed_results.push(r);
+                        }
+                    }
+                    indexed_results.sort_by_key(|(idx, _, _, _)| *idx);
+
+                    let mut tool_results = Vec::new();
+                    for (_idx, id, _name, result) in indexed_results {
+                        let _ = self.event_tx.send(EngineEvent::ToolResult {
+                            id: id.clone(),
+                            output: result.content.clone(),
+                            is_error: result.is_error,
+                        }).await;
+
+                        tool_results.push(ContentBlock::ToolResult {
+                            tool_use_id: id,
+                            content: result.content,
+                            is_error: result.is_error,
+                        });
+                    }
+
+                    // Feed tool results back as a "user" message so the LLM
+                    // can see the outputs and decide the next step.
+                    self.session.add_message(Message { role: Role::User, content: tool_results });
+                }
+                Err(e) => {
+                    let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
+                    let _ = self.event_tx.send(EngineEvent::Done).await;
+                    break;
+                }
             }
         }
     }

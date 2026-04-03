@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use crate::config::AppConfig;
 use crate::engine::events::{EngineEvent, UserAction};
 
-use super::render::{print_ai_prefix, print_cost, print_error, print_thinking, print_welcome};
+use super::render::{print_ai_prefix, print_cost, print_error, print_thinking, print_welcome, print_tool_use, print_tool_result};
 
 /// Run the interactive REPL loop.
 ///
@@ -60,7 +60,7 @@ pub async fn run_repl(
                         println!(
                             "  {} {}",
                             "ℹ".blue(),
-                            "Session clear requires Phase 2 — coming soon.".dimmed()
+                            "Session clear is not yet implemented.".dimmed()
                         );
                         continue;
                     }
@@ -163,6 +163,16 @@ async fn handle_engine_events(
                     Some(EngineEvent::Error { message }) => {
                         print_error(&message);
                         break;
+                    }
+                    Some(EngineEvent::ToolUseStart { id: _, name, input }) => {
+                        if in_thinking {
+                            in_thinking = false;
+                            println!();
+                        }
+                        print_tool_use(&name, &input);
+                    }
+                    Some(EngineEvent::ToolResult { id: _, output, is_error }) => {
+                        print_tool_result(&output, is_error);
                     }
                     Some(EngineEvent::Done) => {
                         println!(); // Final newline

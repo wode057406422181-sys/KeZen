@@ -12,6 +12,7 @@ use crate::constants::api::{ANTHROPIC_VERSION, CONTENT_TYPE_JSON};
 use crate::constants::defaults::DEFAULT_MAX_TOKENS;
 use crate::error::InfiniError;
 
+/// Anthropic Messages API streaming client.
 pub struct AnthropicClient {
     client: reqwest::Client,
     model: String,
@@ -89,6 +90,7 @@ impl LlmClient for AnthropicClient {
         &self,
         messages: &[Message],
         system_prompt: Option<&str>,
+        tools: Option<&[serde_json::Value]>,
     ) -> Result<BoxStream<'_, StreamEvent>, InfiniError> {
         let url = normalize_anthropic_url(&self.base_url);
 
@@ -145,6 +147,14 @@ impl LlmClient for AnthropicClient {
             body["system"] = json!(sys_prompt);
         }
 
+        if let Some(t) = tools {
+            if !t.is_empty() {
+                body["tools"] = json!(t);
+                // Default to `auto` tool choice unless otherwise constrained
+                body["tool_choice"] = json!({"type": "auto"});
+            }
+        }
+
         debug_logger::log_request("anthropic", &url, &body);
 
         let response = self.client.post(&url).json(&body).send().await?;
@@ -161,7 +171,10 @@ impl LlmClient for AnthropicClient {
 
         let stream = response.bytes_stream().eventsource();
 
-        // Track current content block type to properly route deltas
+        // Transform raw SSE events into typed StreamEvents.
+        // Tool-use blocks are split at this layer: content_block_start with
+        // type "tool_use" emits ToolUseStart, and input_json_delta chunks
+        // emit ToolUseInputDelta, so the engine doesn't need to track block types.
         let event_stream = stream.filter_map(|event_result| async {
             match event_result {
                 Ok(event) => {
@@ -199,6 +212,13 @@ impl LlmClient for AnthropicClient {
                                 .as_str()
                                 .unwrap_or("text")
                                 .to_string();
+
+                            if block_type == "tool_use" {
+                                let id = v["content_block"]["id"].as_str().unwrap_or("").to_string();
+                                let name = v["content_block"]["name"].as_str().unwrap_or("").to_string();
+                                return Some(Ok(StreamEvent::ToolUseStart { id, name }));
+                            }
+
                             Ok(StreamEvent::ContentBlockStart { index, block_type })
                         }
                         "content_block_delta" => {
@@ -215,6 +235,10 @@ impl LlmClient for AnthropicClient {
                                         return None; // skip empty deltas
                                     }
                                     Ok(StreamEvent::ThinkingDelta { text })
+                                }
+                                "input_json_delta" => {
+                                    let text = v["delta"]["partial_json"].as_str().unwrap_or("").to_string();
+                                    Ok(StreamEvent::ToolUseInputDelta { text })
                                 }
                                 _ => {
                                     // text_delta or unknown
@@ -233,6 +257,10 @@ impl LlmClient for AnthropicClient {
                                 Err(e) => return Some(Err(InfiniError::Json(e))),
                             };
                             let index = v["index"].as_u64().unwrap_or(0) as usize;
+                            // Instead of ContentBlockStop for everything, emit ContentBlockStop so the engine
+                            // knows we reached the end of the block. If Engine was in "Assemble Tool Input" state,
+                            // It will treat it as ToolUseInputDone. Since we don't have block_type here,
+                            // ContentBlockStop is the safest protocol mapping.
                             Ok(StreamEvent::ContentBlockStop { index })
                         }
                         "message_delta" => {
