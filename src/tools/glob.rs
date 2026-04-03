@@ -148,7 +148,7 @@ mod tests {
     #[tokio::test]
     async fn test_glob_invalid_pattern() {
         let tool = GlobTool;
-        let result = tool.call(json!({
+        let _result = tool.call(json!({
             "pattern": "***"
         })).await;
         
