@@ -33,7 +33,7 @@ impl fmt::Display for Provider {
 /// 3. ANTHROPIC_API_KEY / OPENAI_API_KEY (auto-detect provider)
 /// 4. Config file (~/.infini/config/config.toml)
 /// 5. Defaults (only max_tokens = 8192; model has no default)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub provider: Provider,
@@ -56,6 +56,13 @@ pub struct AppConfig {
 
     /// Custom User-Agent header (useful for Coding Plan endpoints)
     pub user_agent: Option<String>,
+
+    /// Send stream_options.include_usage in OpenAI streaming requests.
+    ///
+    /// Set to `false` for endpoints that don't support this field (DashScope,
+    /// Ollama, vLLM, etc.). Defaults to `true` for the official OpenAI API.
+    #[serde(default = "default_true")]
+    pub include_stream_usage: bool,
 }
 
 impl Default for AppConfig {
@@ -68,8 +75,13 @@ impl Default for AppConfig {
             max_tokens: Some(DEFAULT_MAX_TOKENS),
             thinking: false,
             user_agent: None,
+            include_stream_usage: true,
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl AppConfig {
@@ -152,8 +164,27 @@ impl AppConfig {
         })
     }
 
-    /// Get User-Agent string (configurable, defaults to "infini/1.0.0")
+    /// Get User-Agent string (configurable, defaults to infini/<version>)
     pub fn user_agent(&self) -> &str {
         self.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT)
+    }
+}
+
+impl fmt::Debug for AppConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppConfig")
+            .field("provider", &self.provider)
+            .field("api_url", &self.api_url)
+            // Redact the API key — never print credentials to the terminal.
+            .field(
+                "api_key",
+                &self.api_key.as_deref().map(|_| "[REDACTED]"),
+            )
+            .field("model", &self.model)
+            .field("max_tokens", &self.max_tokens)
+            .field("thinking", &self.thinking)
+            .field("user_agent", &self.user_agent)
+            .field("include_stream_usage", &self.include_stream_usage)
+            .finish()
     }
 }

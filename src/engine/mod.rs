@@ -39,9 +39,10 @@ impl InfiniEngine {
         event_tx: mpsc::Sender<EngineEvent>,
     ) -> Result<Self, crate::error::InfiniError> {
         let client = api::create_client(&config)?;
-        // Build the system prompt once during construction (runs on the calling
-        // thread before the engine is spawned onto the async runtime). This
-        // avoids running blocking std::process::Command inside tokio tasks.
+        // Build the system prompt once at construction.
+        // NOTE: `build_system_prompt` calls `std::process::Command` (blocking).
+        // This runs on the tokio thread that calls `InfiniEngine::new()`; callers
+        // should wrap this in `tokio::task::spawn_blocking` if latency is critical.
         let system_prompt = build_system_prompt(config.model.as_deref());
         Ok(Self {
             config,
@@ -95,12 +96,17 @@ impl InfiniEngine {
                     tokio::select! {
                         biased;
 
-                        // Check for cancel actions first
+                        // Check for cancel / channel-close first (biased priority).
                         cancel_action = self.action_rx.recv() => {
-                            if let Some(UserAction::Cancel) = cancel_action {
-                                break;
+                            match cancel_action {
+                                // User cancelled: notify frontend then stop streaming.
+                                Some(UserAction::Cancel) | None => {
+                                    let _ = self.event_tx.send(EngineEvent::Done).await;
+                                    return;
+                                }
+                                // Any other action during streaming is ignored.
+                                Some(_) => {}
                             }
-                            // Other actions during streaming are ignored
                         }
 
                         evt_opt = stream.next() => {

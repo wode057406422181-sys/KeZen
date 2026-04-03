@@ -57,9 +57,11 @@ pub async fn run_repl(
                         continue;
                     }
                     "/clear" => {
-                        println!("  {} {}", "✓".green(), "Conversation cleared.".dimmed());
-                        // Note: session clear happens via engine in Phase 2;
-                        // for now just inform the user
+                        println!(
+                            "  {} {}",
+                            "ℹ".blue(),
+                            "Session clear requires Phase 2 — coming soon.".dimmed()
+                        );
                         continue;
                     }
                     "/model" => {
@@ -81,10 +83,10 @@ pub async fn run_repl(
                     _ => {}
                 }
 
-                // Send message to engine
+                // Send trimmed message to engine (stripping surrounding whitespace).
                 if action_tx
                     .send(UserAction::SendMessage {
-                        content: line.clone(),
+                        content: trimmed.to_string(),
                     })
                     .await
                     .is_err()

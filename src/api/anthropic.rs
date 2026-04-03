@@ -5,7 +5,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::json;
 
 use crate::api::debug_logger;
-use crate::api::types::{Message, Role, StreamEvent, Usage};
+use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{BoxStream, LlmClient};
 use crate::config::AppConfig;
 use crate::constants::api::{ANTHROPIC_VERSION, CONTENT_TYPE_JSON};
@@ -81,10 +81,52 @@ impl LlmClient for AnthropicClient {
             format!("{}/v1/messages", self.base_url)
         };
 
+        // Strip Thinking blocks from history: Anthropic's Messages API requires
+        // thinking blocks in multi-turn history to carry a `signature` field
+        // (extended-thinking beta verification). We don't retain signatures, so
+        // sending them causes a 400. Text-only content is always safe.
+        let cleaned_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|msg| {
+                let role_str = match msg.role {
+                    Role::User => "user",
+                    Role::Assistant => "assistant",
+                    Role::System => "system",
+                };
+                let content: Vec<serde_json::Value> = msg
+                    .content
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Thinking { .. } => None, // drop — no signature
+                        ContentBlock::Text { text } => {
+                            Some(serde_json::json!({"type": "text", "text": text}))
+                        }
+                        ContentBlock::ToolUse { id, name, input } => {
+                            Some(serde_json::json!({
+                                "type": "tool_use",
+                                "id": id,
+                                "name": name,
+                                "input": input,
+                            }))
+                        }
+                        ContentBlock::ToolResult { tool_use_id, content: result_content, is_error } => {
+                            Some(serde_json::json!({
+                                "type": "tool_result",
+                                "tool_use_id": tool_use_id,
+                                "content": result_content,
+                                "is_error": is_error,
+                            }))
+                        }
+                    })
+                    .collect();
+                serde_json::json!({"role": role_str, "content": content})
+            })
+            .collect();
+
         let mut body = json!({
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "messages": messages,
+            "messages": cleaned_messages,
             "stream": true,
         });
 

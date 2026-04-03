@@ -16,7 +16,12 @@ pub struct OpenAiClient {
     client: reqwest::Client,
     model: String,
     max_tokens: u32,
+    /// Base URL, trimmed of trailing slashes.
+    /// Must be a root URL (e.g. `https://api.openai.com`); path segments
+    /// like `/v1/chat/completions` are appended automatically.
     base_url: String,
+    /// Mirror of `AppConfig::include_stream_usage`.
+    include_stream_usage: bool,
 }
 
 impl OpenAiClient {
@@ -57,6 +62,7 @@ impl OpenAiClient {
             model,
             max_tokens: config.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
             base_url,
+            include_stream_usage: config.include_stream_usage,
         })
     }
 }
@@ -107,15 +113,19 @@ impl LlmClient for OpenAiClient {
             }));
         }
 
-        let body = json!({
+        let mut body = json!({
             "model": self.model,
             "max_completion_tokens": self.max_tokens,
             "messages": oai_messages,
             "stream": true,
-            "stream_options": {
-                "include_usage": true
-            }
         });
+
+        // `stream_options.include_usage` is an OpenAI extension not supported by
+        // all compatible endpoints (DashScope, Ollama, vLLM, etc.). Only send it
+        // when explicitly enabled (default: true for the official OpenAI API).
+        if self.include_stream_usage {
+            body["stream_options"] = json!({"include_usage": true});
+        }
 
         debug_logger::log_request("openai", &url, &body);
 

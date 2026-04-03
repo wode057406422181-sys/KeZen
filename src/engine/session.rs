@@ -15,7 +15,15 @@ impl Session {
             total_output_tokens: 0,
         }
     }
+}
 
+impl Default for Session {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Session {
     /// Append a message (user or assistant) to the conversation history.
     pub fn add_message(&mut self, message: Message) {
         self.messages.push(message);
