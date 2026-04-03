@@ -165,6 +165,10 @@ impl InfiniEngine {
                                                 }
                                                 break;
                                             }
+                                            // ContentBlockStart is intentionally not handled here.
+                                            // For text blocks it carries no content (deltas arrive via TextDelta).
+                                            // For tool blocks the id/name are already extracted as ToolUseStart
+                                            // by the provider-level SSE parser (anthropic.rs / openai.rs).
                                             _ => {}
                                         }
                                     }
