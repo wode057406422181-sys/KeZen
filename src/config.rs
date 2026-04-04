@@ -29,9 +29,9 @@ impl fmt::Display for Provider {
 ///
 /// Loading priority (high → low):
 /// 1. CLI arguments (--model, --api-key, etc.)
-/// 2. KEZEN_* environment variables
+/// 2. INFINI_* environment variables
 /// 3. ANTHROPIC_API_KEY / OPENAI_API_KEY (auto-detect provider)
-/// 4. Config file (~/.kezen/config/config.toml)
+/// 4. Config file (~/.infini/config/config.toml)
 /// 5. Defaults (only max_tokens = 8192; model has no default)
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -87,7 +87,7 @@ fn default_true() -> bool {
 impl AppConfig {
     /// Load configuration from the default config file, applying ENV overrides.
     ///
-    /// Priority: config file < ANTHROPIC/OPENAI env < KEZEN_* env
+    /// Priority: config file < ANTHROPIC/OPENAI env < INFINI_* env
     /// (CLI overrides are applied in main.rs after this call)
     pub fn load() -> Result<Self> {
         let mut config = Self::default();
@@ -118,20 +118,20 @@ impl AppConfig {
             config.provider = Provider::OpenAi;
         }
 
-        // Layer 2: KEZEN_* env vars (higher priority, override everything above)
-        if let Ok(val) = std::env::var("KEZEN_PROVIDER") {
+        // Layer 2: INFINI_* env vars (higher priority, override everything above)
+        if let Ok(val) = std::env::var("INFINI_PROVIDER") {
             config.provider = match val.to_lowercase().as_str() {
                 "openai" => Provider::OpenAi,
                 _ => Provider::Anthropic,
             };
         }
-        if let Ok(val) = std::env::var("KEZEN_API_KEY") {
+        if let Ok(val) = std::env::var("INFINI_API_KEY") {
             config.api_key = Some(val);
         }
-        if let Ok(val) = std::env::var("KEZEN_BASE_URL") {
+        if let Ok(val) = std::env::var("INFINI_BASE_URL") {
             config.api_url = Some(val);
         }
-        if let Ok(val) = std::env::var("KEZEN_MODEL") {
+        if let Ok(val) = std::env::var("INFINI_MODEL") {
             config.model = Some(val);
         }
 
@@ -153,7 +153,7 @@ impl AppConfig {
     pub fn config_path() -> Result<PathBuf> {
         let home =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        Ok(home.join(".kezen").join("config").join("config.toml"))
+        Ok(home.join(".infini").join("config").join("config.toml"))
     }
 
     /// Get the base URL for the configured provider
@@ -164,7 +164,7 @@ impl AppConfig {
         })
     }
 
-    /// Get User-Agent string (configurable, defaults to kezen/<version>)
+    /// Get User-Agent string (configurable, defaults to infini/<version>)
     pub fn user_agent(&self) -> &str {
         self.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT)
     }

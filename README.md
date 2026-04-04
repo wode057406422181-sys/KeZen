@@ -1,10 +1,10 @@
-# ⚡ KeZen
+# ⚡ Infini
 
 A fast, modern AI coding CLI built in Rust — with agentic tool orchestration, multi-provider support, and real-time cost tracking.
 
 ## Overview
 
-KeZen is a blazing-fast AI coding assistant built from the ground up in Rust. It provides an interactive REPL for AI-assisted development with agentic capabilities — the AI can autonomously read, write, search, and execute commands on your codebase with a permission-gated safety model.
+Infini is a blazing-fast AI coding assistant built from the ground up in Rust. It provides an interactive REPL for AI-assisted development with agentic capabilities — the AI can autonomously read, write, search, and execute commands on your codebase with a permission-gated safety model.
 
 ## Features
 
@@ -13,7 +13,7 @@ KeZen is a blazing-fast AI coding assistant built from the ground up in Rust. It
 - 🔌 **Multi-Provider** — Supports Anthropic (Claude), OpenAI (GPT/o-series), Google (Gemini), and OpenAI-compatible endpoints (Qwen, Kimi, GLM, MiniMax, etc.)
 - 🛠️ **6 Built-in Tools** — Bash, FileRead, FileWrite, FileEdit, Grep, Glob — all with async parallel execution
 - 🔒 **Permission System** — Destructive operations require user approval; use `-y` to bypass
-- 🧠 **Context Management** — 3-tier hierarchical memory (`.kezen.md`) + Git context injection
+- 🧠 **Context Management** — 3-tier hierarchical memory (`.infini.md`) + Git context injection
 - 💾 **Session Persistence** — JSON snapshots with `/resume` to restore previous sessions
 - 💰 **Cost Tracking** — Regex-based model pricing with session-level USD cost reporting
 - ⚡ **Async-first** — Built on Tokio for efficient streaming I/O
@@ -45,12 +45,12 @@ cargo run -- --help
 
 ```bash
 cargo install --path .
-kezen --help
+infini --help
 ```
 
 ### Configuration
 
-KeZen loads configuration from `~/.config/kezen/config.toml`:
+Infini loads configuration from `~/.config/infini/config.toml`:
 
 ```toml
 [default]
@@ -64,7 +64,7 @@ You can also configure via environment variables:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-xxx
-export KEZEN_MODEL=claude-sonnet-4-6
+export INFINI_MODEL=claude-sonnet-4-6
 ```
 
 ## REPL Commands
@@ -107,7 +107,7 @@ src/
 │   ├── grep.rs          # Regex search across files
 │   └── glob.rs          # File pattern matching
 ├── context/             # Context management
-│   ├── memory.rs        # .kezen.md hierarchical memory
+│   ├── memory.rs        # .infini.md hierarchical memory
 │   └── git.rs           # Git context collection
 ├── permissions/         # Permission gating
 │   └── mod.rs           # PermissionState, approval flow

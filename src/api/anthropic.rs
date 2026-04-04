@@ -10,7 +10,7 @@ use crate::api::{BoxStream, LlmClient};
 use crate::config::AppConfig;
 use crate::constants::api::{ANTHROPIC_VERSION, CONTENT_TYPE_JSON};
 use crate::constants::defaults::DEFAULT_MAX_TOKENS;
-use crate::error::KezenError;
+use crate::error::InfiniError;
 
 /// Anthropic Messages API streaming client.
 pub struct AnthropicClient {
@@ -21,24 +21,24 @@ pub struct AnthropicClient {
 }
 
 impl AnthropicClient {
-    pub fn new(config: &AppConfig) -> Result<Self, KezenError> {
-        let api_key = config.api_key.as_deref().ok_or(KezenError::NoApiKey)?;
+    pub fn new(config: &AppConfig) -> Result<Self, InfiniError> {
+        let api_key = config.api_key.as_deref().ok_or(InfiniError::NoApiKey)?;
         let model = config
             .model
             .as_deref()
-            .ok_or(KezenError::NoModel)?
+            .ok_or(InfiniError::NoModel)?
             .to_string();
 
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-api-key",
             HeaderValue::from_str(api_key)
-                .map_err(|e| KezenError::Config(format!("Invalid API key format: {}", e)))?,
+                .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
         );
         headers.insert(
             "authorization",
             HeaderValue::from_str(&format!("Bearer {}", api_key))
-                .map_err(|e| KezenError::Config(format!("Invalid API key format: {}", e)))?,
+                .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
         );
         headers.insert(
             "anthropic-version",
@@ -49,7 +49,7 @@ impl AnthropicClient {
         headers.insert(
             "user-agent",
             HeaderValue::from_str(config.user_agent())
-                .map_err(|e| KezenError::Config(format!("Invalid User-Agent format: {}", e)))?,
+                .map_err(|e| InfiniError::Config(format!("Invalid User-Agent format: {}", e)))?,
         );
 
         let client = reqwest::Client::builder()
@@ -91,7 +91,7 @@ impl LlmClient for AnthropicClient {
         messages: &[Message],
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
-    ) -> Result<BoxStream<'_, StreamEvent>, KezenError> {
+    ) -> Result<BoxStream<'_, StreamEvent>, InfiniError> {
         let url = normalize_anthropic_url(&self.base_url);
 
         // Strip Thinking blocks from history: Anthropic's Messages API requires
@@ -162,7 +162,7 @@ impl LlmClient for AnthropicClient {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             debug_logger::log_error_response("anthropic", status.as_u16(), &text);
-            return Err(KezenError::Api(format!(
+            return Err(InfiniError::Api(format!(
                 "Anthropic API error {}: {}",
                 status, text
             )));
@@ -182,7 +182,7 @@ impl LlmClient for AnthropicClient {
                         "message_start" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => return Some(Err(InfiniError::Json(e))),
                             };
                             let role = match v["message"]["role"].as_str() {
                                 Some("user") => Role::User,
@@ -204,7 +204,7 @@ impl LlmClient for AnthropicClient {
                         "content_block_start" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => return Some(Err(InfiniError::Json(e))),
                             };
                             let index = v["index"].as_u64().unwrap_or(0) as usize;
                             let block_type = v["content_block"]["type"]
@@ -223,7 +223,7 @@ impl LlmClient for AnthropicClient {
                         "content_block_delta" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => return Some(Err(InfiniError::Json(e))),
                             };
                             let delta_type = v["delta"]["type"].as_str().unwrap_or("");
                             match delta_type {
@@ -253,7 +253,7 @@ impl LlmClient for AnthropicClient {
                         "content_block_stop" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => return Some(Err(InfiniError::Json(e))),
                             };
                             let index = v["index"].as_u64().unwrap_or(0) as usize;
                             // Instead of ContentBlockStop for everything, emit ContentBlockStop so the engine
@@ -265,7 +265,7 @@ impl LlmClient for AnthropicClient {
                         "message_delta" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => return Some(Err(InfiniError::Json(e))),
                             };
                             let stop_reason =
                                 v["delta"]["stop_reason"].as_str().map(|s| s.to_string());
@@ -283,7 +283,7 @@ impl LlmClient for AnthropicClient {
                         "error" => {
                             let v: serde_json::Value =
                                 serde_json::from_str(&event.data).unwrap_or_default();
-                            Err(KezenError::Api(format!("Anthropic stream error: {}", v)))
+                            Err(InfiniError::Api(format!("Anthropic stream error: {}", v)))
                         }
                         _ => {
                             return None; // skip ping and unknown events
@@ -291,7 +291,7 @@ impl LlmClient for AnthropicClient {
                     };
                     Some(parsed)
                 }
-                Err(e) => Some(Err(KezenError::Stream(e.to_string()))),
+                Err(e) => Some(Err(InfiniError::Stream(e.to_string()))),
             }
         });
 

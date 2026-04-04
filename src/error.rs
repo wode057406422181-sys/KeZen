@@ -2,7 +2,7 @@ use thiserror::Error;
 
 /// Application-level errors
 #[derive(Error, Debug)]
-pub enum KezenError {
+pub enum InfiniError {
     #[error("API error: {0}")]
     Api(String),
 
@@ -13,7 +13,7 @@ pub enum KezenError {
     NoApiKey,
 
     #[error(
-        "No model configured. Please specify a model via --model, KEZEN_MODEL, or config file."
+        "No model configured. Please specify a model via --model, INFINI_MODEL, or config file."
     )]
     NoModel,
 

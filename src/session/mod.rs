@@ -16,7 +16,7 @@ pub struct SessionSnapshot {
 pub fn get_sessions_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".kezen")
+        .join(".infini")
         .join("sessions")
 }
 

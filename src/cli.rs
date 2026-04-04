@@ -1,12 +1,12 @@
 use clap::{Parser, Subcommand};
 
-/// KeZen — A fast, modern AI coding CLI
+/// Infini — A fast, modern AI coding CLI
 #[derive(Parser, Debug)]
 #[command(
-    name = "kezen",
+    name = "infini",
     version,
     about = "A fast, modern AI coding CLI",
-    long_about = "KeZen is a blazing-fast AI coding assistant built in Rust.\nIt provides an interactive terminal interface for AI-assisted development."
+    long_about = "Infini is a blazing-fast AI coding assistant built in Rust.\nIt provides an interactive terminal interface for AI-assisted development."
 )]
 pub struct Cli {
     /// Send a single prompt (non-interactive mode)

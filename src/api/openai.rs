@@ -10,7 +10,7 @@ use crate::api::{BoxStream, LlmClient};
 use crate::config::AppConfig;
 use crate::constants::api::CONTENT_TYPE_JSON;
 use crate::constants::defaults::DEFAULT_MAX_TOKENS;
-use crate::error::KezenError;
+use crate::error::InfiniError;
 
 /// OpenAI Chat Completions API streaming client.
 ///
@@ -28,30 +28,30 @@ pub struct OpenAiClient {
 }
 
 impl OpenAiClient {
-    pub fn new(config: &AppConfig) -> Result<Self, KezenError> {
-        let api_key = config.api_key.as_deref().ok_or(KezenError::NoApiKey)?;
+    pub fn new(config: &AppConfig) -> Result<Self, InfiniError> {
+        let api_key = config.api_key.as_deref().ok_or(InfiniError::NoApiKey)?;
         let model = config
             .model
             .as_deref()
-            .ok_or(KezenError::NoModel)?
+            .ok_or(InfiniError::NoModel)?
             .to_string();
 
         let mut headers = HeaderMap::new();
         headers.insert(
             "authorization",
             HeaderValue::from_str(&format!("Bearer {}", api_key))
-                .map_err(|e| KezenError::Config(format!("Invalid API key format: {}", e)))?,
+                .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
         );
         headers.insert(
             "x-api-key",
             HeaderValue::from_str(api_key)
-                .map_err(|e| KezenError::Config(format!("Invalid API key format: {}", e)))?,
+                .map_err(|e| InfiniError::Config(format!("Invalid API key format: {}", e)))?,
         );
         headers.insert("content-type", HeaderValue::from_static(CONTENT_TYPE_JSON));
         headers.insert(
             "user-agent",
             HeaderValue::from_str(config.user_agent())
-                .map_err(|e| KezenError::Config(format!("Invalid User-Agent format: {}", e)))?,
+                .map_err(|e| InfiniError::Config(format!("Invalid User-Agent format: {}", e)))?,
         );
 
         let client = reqwest::Client::builder()
@@ -93,7 +93,7 @@ impl LlmClient for OpenAiClient {
         messages: &[Message],
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
-    ) -> Result<BoxStream<'_, StreamEvent>, KezenError> {
+    ) -> Result<BoxStream<'_, StreamEvent>, InfiniError> {
         let url = normalize_openai_url(&self.base_url);
 
         // Convert internal message format to OpenAI format
@@ -204,7 +204,7 @@ impl LlmClient for OpenAiClient {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             debug_logger::log_error_response("openai", status.as_u16(), &text);
-            return Err(KezenError::Api(format!(
+            return Err(InfiniError::Api(format!(
                 "OpenAI API error {}: {}",
                 status, text
             )));
@@ -216,7 +216,7 @@ impl LlmClient for OpenAiClient {
             // Each SSE chunk may produce zero, one, or multiple StreamEvents
             // (e.g. parallel tool calls in a single delta). We collect them into
             // a Vec and emit via `futures::stream::iter`.
-            let events: Vec<Result<StreamEvent, KezenError>> = match event_result {
+            let events: Vec<Result<StreamEvent, InfiniError>> = match event_result {
                 Ok(event) => {
                     debug_logger::log_sse_event("openai", "message", &event.data);
                     // OpenAI signals end of stream with [DONE]
@@ -226,10 +226,10 @@ impl LlmClient for OpenAiClient {
 
                     let v: serde_json::Value = match serde_json::from_str(&event.data) {
                         Ok(v) => v,
-                        Err(e) => return futures::stream::iter(vec![Err(KezenError::Json(e))]),
+                        Err(e) => return futures::stream::iter(vec![Err(InfiniError::Json(e))]),
                     };
 
-                    let mut out: Vec<Result<StreamEvent, KezenError>> = Vec::new();
+                    let mut out: Vec<Result<StreamEvent, InfiniError>> = Vec::new();
 
                     // Extract usage from the final chunk (when choices is empty)
                     if v["usage"].is_object() && !v["usage"].is_null() {
@@ -290,7 +290,7 @@ impl LlmClient for OpenAiClient {
 
                     out
                 }
-                Err(e) => vec![Err(KezenError::Stream(e.to_string()))],
+                Err(e) => vec![Err(InfiniError::Stream(e.to_string()))],
             };
 
             futures::stream::iter(events)
