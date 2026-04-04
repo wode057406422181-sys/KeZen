@@ -112,10 +112,13 @@ fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
                 ]));
             }
             super::app::MessageRole::System => {
-                lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(&msg.content, Style::default().fg(SYSTEM_COLOR)),
-                ]));
+                let msg_lines: Vec<&str> = msg.content.lines().collect();
+                for line in msg_lines {
+                    lines.push(Line::from(vec![
+                        Span::styled("  ", Style::default()),
+                        Span::styled(line, Style::default().fg(SYSTEM_COLOR)),
+                    ]));
+                }
             }
         }
     }
@@ -322,14 +325,48 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         app.model_name.clone()
     };
 
-    let status_text = format!(
-        " {} │ {}↓ / {}↑ tokens │ ${:.4} ",
-        model_display,
-        app.session_in_tokens,
-        app.session_out_tokens,
-        cost,
+    // ── Context memory gauge ──────────────────────────────────────
+    let threshold = (app.context_window as f64 * 0.80) as u64;
+    let used = app.session_in_tokens;
+    let pct = if threshold > 0 {
+        ((used as f64 / threshold as f64) * 100.0).min(100.0)
+    } else {
+        0.0
+    };
+
+    // Format used/threshold as "12k/160k" style
+    let fmt_k = |v: u64| -> String {
+        if v >= 1_000_000 {
+            format!("{:.1}M", v as f64 / 1_000_000.0)
+        } else if v >= 1_000 {
+            format!("{:.0}k", v as f64 / 1_000.0)
+        } else {
+            format!("{}", v)
+        }
+    };
+    let ctx_label = format!("{}/ {}", fmt_k(used), fmt_k(threshold));
+
+    // Build a tiny 10-char progress bar: ████░░░░░░
+    let bar_width = 10usize;
+    let filled = ((pct / 100.0) * bar_width as f64).round() as usize;
+    let empty = bar_width.saturating_sub(filled);
+    let bar_str: String = "█".repeat(filled) + &"░".repeat(empty);
+
+    let bar_color = if pct >= 90.0 {
+        ERROR_COLOR
+    } else if pct >= 70.0 {
+        Color::Yellow
+    } else {
+        Color::Green
+    };
+
+    // ── Left section: model + cost ────────────────────────────────
+    let left_text = format!(
+        " {} │ ${:.4} ",
+        model_display, cost,
     );
 
+    // ── Right section: state indicator ────────────────────────────
     let queued_count = app.queued_user_messages.len();
     let right_text = if queued_count > 0 {
         format!(" ⟡ streaming · {} queued ", queued_count)
@@ -341,14 +378,25 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         " ready ".to_string()
     };
 
-    // Pad the middle to right-align the right text
+    // ── Build the full line ───────────────────────────────────────
+    // Layout: [left] [ctx_bar ctx_label] [padding] [right]
+    let ctx_section = format!(" {} {} ", bar_str, ctx_label);
     let total_width = area.width as usize;
-    let left_len = status_text.len();
+    let left_len = left_text.len();
+    let ctx_len = ctx_section.len();
     let right_len = right_text.len();
-    let padding = total_width.saturating_sub(left_len + right_len);
+    let padding = total_width.saturating_sub(left_len + ctx_len + right_len);
 
     let line = Line::from(vec![
-        Span::styled(&status_text, Style::default().fg(STATUS_FG).bg(STATUS_BG)),
+        Span::styled(&left_text, Style::default().fg(STATUS_FG).bg(STATUS_BG)),
+        Span::styled(
+            &bar_str,
+            Style::default().fg(bar_color).bg(STATUS_BG),
+        ),
+        Span::styled(
+            format!(" {} ", ctx_label),
+            Style::default().fg(STATUS_FG).bg(STATUS_BG).add_modifier(Modifier::DIM),
+        ),
         Span::styled(
             " ".repeat(padding),
             Style::default().bg(STATUS_BG),

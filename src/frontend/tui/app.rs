@@ -101,6 +101,8 @@ pub struct App {
     pub session_in_tokens: u64,
     pub session_out_tokens: u64,
     pub pricing: crate::cost::CostPricing,
+    /// Context window size (determined from model or config override).
+    pub context_window: u64,
 
     // ── Lifecycle ─────────────────────────────────────────────
     pub should_quit: bool,
@@ -135,10 +137,13 @@ impl App {
 
             pending_permission: None,
 
-            model_name: model,
+            model_name: model.clone(),
             session_in_tokens: 0,
             session_out_tokens: 0,
             pricing,
+            context_window: config.context_window.unwrap_or_else(|| {
+                crate::engine::compact::context_window_for_model(&model)
+            }),
 
             should_quit: false,
         }
@@ -299,7 +304,7 @@ impl App {
             EngineEvent::SlashCommandResult { command, output } => {
                 self.messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: format!("/{} → {}", command, output),
+                    content: format!("{} →\n{}", command, output),
                 });
                 if self.auto_scroll {
                     self.scroll_to_bottom();
@@ -424,13 +429,33 @@ impl App {
             (_, KeyCode::Enter) => {
                 if !self.input.is_empty() {
                     let content = self.input.clone();
+                    
+                    if content.trim() == "/quit" || content.trim() == "/exit" {
+                        self.should_quit = true;
+                        return;
+                    }
+
                     self.input_history.push(content.clone());
                     self.history_index = None;
                     self.input.clear();
                     self.cursor_pos = 0;
                     self.auto_scroll = true;
 
-                    if self.is_streaming || self.waiting_for_response {
+                    if content.trim().starts_with('/') {
+                        if self.is_streaming || self.waiting_for_response {
+                            self.queue_toast = Some((
+                                "✖ Cannot execute slash commands while AI is busy. Press Ctrl+C to cancel.".into(),
+                                Instant::now(),
+                            ));
+                        } else {
+                            self.messages.push(ChatMessage {
+                                role: MessageRole::User,
+                                content: content.clone(),
+                            });
+                            self.waiting_for_response = true;
+                            let _ = action_tx.send(UserAction::SendMessage { content }).await;
+                        }
+                    } else if self.is_streaming || self.waiting_for_response {
                         const MAX_QUEUED_MESSAGES: usize = 5;
                         if self.queued_user_messages.len() >= MAX_QUEUED_MESSAGES {
                             self.queue_toast = Some((
