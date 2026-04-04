@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::oneshot;
@@ -11,7 +12,7 @@ use super::config::McpServerConfig;
 
 pub struct StdioTransport {
     pub(crate) child: Child,
-    pub(crate) next_id: u64,
+    pub(crate) next_id: AtomicU64,
     pub(crate) request_tx: mpsc::Sender<(Value, oneshot::Sender<Result<Value>>)>,
     pub(crate) notify_tx: mpsc::Sender<Value>,
 }
@@ -40,15 +41,19 @@ impl StdioTransport {
 
         Ok(Self {
             child,
-            next_id: 1,
+            next_id: AtomicU64::new(1),
             request_tx,
             notify_tx,
         })
     }
 
-    pub async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
-        let id = self.next_id;
-        self.next_id += 1;
+    /// Send a JSON-RPC request and await the response.
+    ///
+    /// Takes `&self` (not `&mut self`) thanks to `AtomicU64` for ID generation
+    /// and channel-based I/O. This allows concurrent tool calls without holding
+    /// the Mutex for the entire round-trip.
+    pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
         let req = json!({
             "jsonrpc": "2.0",
@@ -63,7 +68,7 @@ impl StdioTransport {
         resp_rx.await?
     }
 
-    pub async fn notify(&mut self, method: &str, params: Value) -> Result<()> {
+    pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
         let req = json!({
             "jsonrpc": "2.0",
             "method": method,

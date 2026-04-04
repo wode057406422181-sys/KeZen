@@ -47,7 +47,7 @@ impl Tool for McpTool {
     }
 
     async fn call(&self, input: Value) -> ToolResult {
-        let mut client = self.client.lock().await;
+        let client = self.client.lock().await;
         match client.call_tool(&self.tool_name, input).await {
             Ok(output) => ToolResult { content: output, is_error: false },
             Err(e) => ToolResult { content: e.to_string(), is_error: true },
@@ -89,10 +89,34 @@ impl Tool for McpTool {
 }
 
 /// Build display name: mcp__<server>__<tool>
+///
+/// Aligns with Claude Code's `normalizeNameForMCP`: replaces non-alphanumeric
+/// characters with `_`, collapses consecutive underscores, and strips
+/// leading/trailing underscores to avoid delimiter confusion.
+fn normalize_name(name: &str) -> String {
+    let replaced: String = name.chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .collect();
+    // Collapse consecutive underscores
+    let mut result = String::with_capacity(replaced.len());
+    let mut prev_underscore = false;
+    for c in replaced.chars() {
+        if c == '_' {
+            if !prev_underscore {
+                result.push(c);
+            }
+            prev_underscore = true;
+        } else {
+            result.push(c);
+            prev_underscore = false;
+        }
+    }
+    // Strip leading/trailing underscores
+    result.trim_matches('_').to_string()
+}
+
 pub fn build_mcp_tool_name(server: &str, tool: &str) -> String {
-    let s = server.replace(|c: char| !c.is_alphanumeric(), "_");
-    let t = tool.replace(|c: char| !c.is_alphanumeric(), "_");
-    format!("mcp__{}__{}", s, t)
+    format!("mcp__{}__{}" , normalize_name(server), normalize_name(tool))
 }
 
 #[cfg(test)]
@@ -102,7 +126,24 @@ mod tests {
     #[test]
     fn test_build_mcp_tool_name() {
         assert_eq!(build_mcp_tool_name("filesystem", "read_file"), "mcp__filesystem__read_file");
-        assert_eq!(build_mcp_tool_name("my-server!", "my.tool"), "mcp__my_server___my_tool");
+        // Consecutive underscores collapsed, leading/trailing stripped
+        assert_eq!(build_mcp_tool_name("my-server!", "my.tool"), "mcp__my-server__my_tool");
+    }
+
+    #[test]
+    fn test_normalize_name_collapses_underscores() {
+        assert_eq!(normalize_name("a__b___c"), "a_b_c");
+        assert_eq!(normalize_name("_leading_"), "leading");
+        assert_eq!(normalize_name("normal-name"), "normal-name");
+    }
+
+    #[test]
+    fn test_no_name_collision() {
+        // "my-server" and "my_server" must NOT produce the same name
+        // because hyphens are preserved
+        let a = build_mcp_tool_name("my-server", "tool");
+        let b = build_mcp_tool_name("my_server", "tool");
+        assert_ne!(a, b);
     }
 
     #[test]
@@ -128,6 +169,3 @@ mod tests {
         assert!(desc.contains("encoding"));
     }
 }
-
-
-

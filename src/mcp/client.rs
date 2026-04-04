@@ -25,7 +25,7 @@ pub struct McpClient {
 impl McpClient {
     /// Connects to a server, performs handshake, and lists tools.
     pub async fn connect(name: &str, cfg: &McpServerConfig) -> Result<Self> {
-        let mut transport = StdioTransport::spawn(cfg).await
+        let transport = StdioTransport::spawn(cfg).await
             .with_context(|| format!("Failed to spawn MCP server '{}'", name))?;
 
         // 1. initialize
@@ -84,7 +84,10 @@ impl McpClient {
     }
 
     /// Calls a specific tool on the server.
-    pub async fn call_tool(&mut self, tool_name: &str, args: Value) -> Result<String> {
+    ///
+    /// Takes `&self` — the transport's `request()` method is concurrency-safe
+    /// thanks to `AtomicU64` ID generation and channel-based I/O.
+    pub async fn call_tool(&self, tool_name: &str, args: Value) -> Result<String> {
         let req = json!({
             "name": tool_name,
             "arguments": args
@@ -117,21 +120,33 @@ impl McpClient {
     }
 }
 
-/// Helper function to connect to all servers defined in the config
-pub async fn connect_all_servers() -> Result<Vec<Arc<dyn Tool>>> {
+/// Result of connecting to all configured MCP servers.
+pub struct McpConnectResult {
+    /// Tool trait objects ready for registration.
+    pub tools: Vec<Arc<dyn Tool>>,
+    /// Diagnostic messages for the frontend (replaces previous `eprintln!` calls).
+    pub warnings: Vec<String>,
+}
+
+/// Connects to all servers defined in the config.
+///
+/// Returns tools + warnings instead of printing to stderr, so the frontend
+/// can display connection status through the proper event channel.
+pub async fn connect_all_servers() -> Result<McpConnectResult> {
     let mut mcp_tools: Vec<Arc<dyn Tool>> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
     
     if let Ok(Some(config)) = McpConfig::load().await {
         for (server_name, server_cfg) in config.servers {
             // Check deny list first
             if config.denied_servers.contains(&server_name) {
-                eprintln!("[MCP] Skipping '{}': server is in denied list", server_name);
+                warnings.push(format!("[MCP] Skipping '{}': server is in denied list", server_name));
                 continue;
             }
             
             // Check allow list if it's not empty
             if !config.allowed_servers.is_empty() && !config.allowed_servers.contains(&server_name) {
-                eprintln!("[MCP] Skipping '{}': server is not in allowed list", server_name);
+                warnings.push(format!("[MCP] Skipping '{}': server is not in allowed list", server_name));
                 continue;
             }
 
@@ -150,11 +165,11 @@ pub async fn connect_all_servers() -> Result<Vec<Arc<dyn Tool>>> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to connect to MCP server {}: {}", server_name, e);
+                    warnings.push(format!("Failed to connect to MCP server '{}': {}", server_name, e));
                 }
             }
         }
     }
 
-    Ok(mcp_tools)
+    Ok(McpConnectResult { tools: mcp_tools, warnings })
 }

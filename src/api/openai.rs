@@ -93,6 +93,7 @@ impl LlmClient for OpenAiClient {
         messages: &[Message],
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
+        max_tokens_override: Option<u32>,
     ) -> Result<BoxStream<'_, StreamEvent>, KezenError> {
         let url = normalize_openai_url(&self.base_url);
 
@@ -167,9 +168,11 @@ impl LlmClient for OpenAiClient {
             }
         }
 
+        let effective_max_tokens = max_tokens_override.unwrap_or(self.max_tokens);
+
         let mut body = json!({
             "model": self.model,
-            "max_completion_tokens": self.max_tokens,
+            "max_completion_tokens": effective_max_tokens,
             "messages": oai_messages,
             "stream": true,
         });

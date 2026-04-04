@@ -85,9 +85,15 @@ impl Session {
         }
     }
 
-    /// Clear all messages (for /clear command).
+    /// Clear all messages and reset usage counters (for /clear command).
+    ///
+    /// Resets token counts and cost so that `/cost` shows fresh data and
+    /// `should_auto_compact` doesn't trigger based on stale counters.
     pub fn clear(&mut self) {
         self.messages.clear();
+        self.total_input_tokens = 0;
+        self.total_output_tokens = 0;
+        self.total_cost_usd = 0.0;
     }
 
     /// Replace the entire message history (for /compact).
@@ -153,15 +159,22 @@ mod tests {
     }
 
     #[test]
-    fn test_clear_empties_messages() {
-        let mut s = Session::new("test-model".into(), zero_pricing());
+    fn test_clear_empties_messages_and_resets_usage() {
+        let mut s = Session::new("test-model".into(), sonnet_pricing());
         s.add_message(Message {
             role: Role::User,
             content: vec![ContentBlock::Text { text: "hello".into() }],
         });
+        s.update_usage(&Usage { input_tokens: 500, output_tokens: 200 });
         assert_eq!(s.messages().len(), 1);
+        assert!(s.total_cost_usd > 0.0);
+
         s.clear();
+
         assert!(s.messages().is_empty());
+        assert_eq!(s.total_input_tokens, 0);
+        assert_eq!(s.total_output_tokens, 0);
+        assert_eq!(s.total_cost_usd, 0.0);
     }
 
     #[test]

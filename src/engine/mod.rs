@@ -55,8 +55,15 @@ impl KezenEngine {
         
         if !config.no_mcp {
             match crate::mcp::client::connect_all_servers().await {
-                Ok(mcp_tools) => {
-                    for tool in mcp_tools {
+                Ok(result) => {
+                    // Surface connection diagnostics through the event channel
+                    // (not eprintln!) to preserve Engine/Frontend separation.
+                    for warning in result.warnings {
+                        let _ = event_tx.send(EngineEvent::Error {
+                            message: warning,
+                        }).await;
+                    }
+                    for tool in result.tools {
                         registry.register(tool);
                     }
                 }
@@ -132,7 +139,7 @@ impl KezenEngine {
 
             let stream_result = self
                 .client
-                .stream(self.session.messages(), Some(&self.system_prompt), tools_arg)
+                .stream(self.session.messages(), Some(&self.system_prompt), tools_arg, None)
                 .await;
 
             let mut assistant_text = String::new();
@@ -543,7 +550,7 @@ impl KezenEngine {
         let mut last_error: Option<String> = None;
 
         for attempt in 1..=MAX_COMPACT_RETRIES {
-            match self.client.stream(&messages_to_summarize, None, None).await {
+            match self.client.stream(&messages_to_summarize, None, None, Some(compact::COMPACT_MAX_OUTPUT_TOKENS)).await {
                 Ok(mut stream) => {
                     let mut assistant_text = String::new();
                     let mut stream_errors = Vec::new();
@@ -580,8 +587,22 @@ impl KezenEngine {
                             }
 
                             let mut new_messages = vec![summary_msg];
+
+                            // Ensure role alternation: summary is User, so if
+                            // the kept tail also starts with User, insert an
+                            // empty Assistant placeholder to satisfy the API.
+                            // (Aligned with Claude Code's normalizeMessagesForAPI
+                            // approach.)
                             if keep_count > 0 {
                                 let start_idx = original_messages.len() - keep_count;
+                                if original_messages[start_idx].role == Role::User {
+                                    new_messages.push(Message {
+                                        role: Role::Assistant,
+                                        content: vec![ContentBlock::Text {
+                                            text: "[Acknowledged — continuing from context above.]".into(),
+                                        }],
+                                    });
+                                }
                                 new_messages.extend(original_messages[start_idx..].iter().cloned());
                             }
 

@@ -1,14 +1,18 @@
 use anyhow::Result;
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use tokio::fs;
 
 /// Config mapped to ~/.kezen/mcp.json
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpConfig {
+    /// `IndexMap` preserves insertion order from the JSON file, matching
+    /// the behaviour of JS `Object.entries()` in Claude Code. This means
+    /// servers appear in the tool schema in the order the user wrote them,
+    /// which is both deterministic and intuitive.
     #[serde(default, rename = "mcpServers")]
-    pub servers: HashMap<String, McpServerConfig>,
+    pub servers: IndexMap<String, McpServerConfig>,
     #[serde(default, rename = "allowedServers")]
     pub allowed_servers: Vec<String>,
     #[serde(default, rename = "deniedServers")]
@@ -25,18 +29,21 @@ pub struct McpServerConfig {
 }
 
 impl McpConfig {
-    /// Loads the configuration from ~/.kezen/mcp.json
+    /// Loads the configuration from ~/.kezen/mcp.json.
+    ///
+    /// Uses fully-async I/O (no blocking `path.exists()`) per project conventions.
     pub async fn load() -> Result<Option<Self>> {
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Home directory not found"))?;
         let config_path = home.join(".kezen").join("mcp.json");
 
-        if !config_path.exists() {
-            return Ok(None);
+        match fs::read_to_string(&config_path).await {
+            Ok(content) => {
+                let config = serde_json::from_str(&content)?;
+                Ok(Some(config))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
         }
-
-        let content = fs::read_to_string(config_path).await?;
-        let config = serde_json::from_str(&content)?;
-        Ok(Some(config))
     }
 }
 
@@ -76,4 +83,3 @@ mod tests {
         assert!(config.denied_servers.is_empty());
     }
 }
-
