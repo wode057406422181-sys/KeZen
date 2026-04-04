@@ -355,4 +355,79 @@ mod tests {
         // None api_key → map(|_| "[REDACTED]") → None, shown as "None"
         assert!(debug_str.contains("api_key: None"));
     }
+
+    // ── SearchConfig ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn default_search_is_none() {
+        assert!(default_config().search.is_none());
+    }
+
+    #[test]
+    fn search_config_default_mode_is_brave() {
+        let sc: SearchConfig = toml::from_str("[dummy]\n").unwrap_or(SearchConfig {
+            mode: default_search_mode(),
+            api_key: None,
+            base_url: None,
+            search_strategy: None,
+        });
+        assert_eq!(sc.mode, "brave");
+    }
+
+    #[test]
+    fn search_config_deserializes_native_mode() {
+        let toml_str = r#"
+            mode = "native"
+            search_strategy = "agent_max"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.mode, "native");
+        assert_eq!(sc.search_strategy.as_deref(), Some("agent_max"));
+        assert!(sc.api_key.is_none());
+    }
+
+    #[test]
+    fn search_config_deserializes_brave_with_key() {
+        let toml_str = r#"
+            mode = "brave"
+            api_key = "BSA-test-key"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.mode, "brave");
+        assert_eq!(sc.api_key.as_deref(), Some("BSA-test-key"));
+        assert!(sc.search_strategy.is_none());
+    }
+
+    #[test]
+    fn search_config_mode_defaults_when_omitted() {
+        let toml_str = r#"
+            api_key = "test"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.mode, "brave"); // default
+    }
+
+    #[test]
+    fn app_config_with_search_section() {
+        let toml_str = r#"
+            provider = "openai"
+            [search]
+            mode = "native"
+            search_strategy = "turbo"
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.search.is_some());
+        let search = config.search.unwrap();
+        assert_eq!(search.mode, "native");
+        assert_eq!(search.search_strategy.as_deref(), Some("turbo"));
+    }
+
+    #[test]
+    fn app_config_without_search_section() {
+        let toml_str = r#"
+            provider = "anthropic"
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.search.is_none());
+    }
 }

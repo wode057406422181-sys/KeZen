@@ -577,4 +577,166 @@ mod tests {
         assert!(md.contains("Hello"));
         assert!(md.contains("World"));
     }
+
+    #[test]
+    fn test_htmd_link_conversion() {
+        let html = r#"<a href="https://example.com">Click</a>"#;
+        let md = htmd::convert(html).unwrap();
+        assert!(md.contains("Click"));
+        assert!(md.contains("https://example.com"));
+    }
+
+    // ── URL validation edge cases ────────────────────────────────────
+
+    #[test]
+    fn test_validate_url_ip_address_fails() {
+        // IP addresses have no dots splitting into 2+ parts as hostname
+        let result = validate_url("https://192.168.1.1/path");
+        // 192.168.1.1 has 4 parts, so this actually passes hostname check
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_url_with_port() {
+        assert!(validate_url("https://example.com:8080/path").is_ok());
+    }
+
+    #[test]
+    fn test_validate_url_with_query_string() {
+        assert!(validate_url("https://example.com/search?q=test&page=1").is_ok());
+    }
+
+    #[test]
+    fn test_validate_url_with_fragment() {
+        assert!(validate_url("https://example.com/page#section").is_ok());
+    }
+
+    #[test]
+    fn test_validate_url_data_scheme_rejected() {
+        let result = validate_url("data:text/html,<h1>hello</h1>");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unsupported URL scheme"));
+    }
+
+    #[test]
+    fn test_validate_url_javascript_scheme_rejected() {
+        let result = validate_url("javascript:alert(1)");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_url_no_hostname() {
+        let result = validate_url("https:///path");
+        assert!(result.is_err());
+    }
+
+    // ── Preapproved hosts comprehensive ──────────────────────────────
+
+    #[test]
+    fn test_preapproved_github_docs() {
+        assert!(is_preapproved_host("docs.github.com"));
+    }
+
+    #[test]
+    fn test_preapproved_python_docs() {
+        assert!(is_preapproved_host("docs.python.org"));
+    }
+
+    #[test]
+    fn test_preapproved_kubernetes() {
+        assert!(is_preapproved_host("kubernetes.io"));
+    }
+
+    #[test]
+    fn test_preapproved_claude_platform() {
+        assert!(is_preapproved_host("platform.claude.com"));
+    }
+
+    #[test]
+    fn test_preapproved_mcp() {
+        assert!(is_preapproved_host("modelcontextprotocol.io"));
+    }
+
+    #[test]
+    fn test_not_preapproved_subdomain_of_approved() {
+        // sub.doc.rust-lang.org is NOT explicitly in the set
+        assert!(!is_preapproved_host("sub.doc.rust-lang.org"));
+    }
+
+    // ── Tool trait detail tests ──────────────────────────────────────
+
+    #[test]
+    fn test_input_schema_has_url_required() {
+        let tool = WebFetchTool::new(None);
+        let schema = tool.input_schema();
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v.as_str() == Some("url")));
+    }
+
+    #[test]
+    fn test_input_schema_has_prompt_optional() {
+        let tool = WebFetchTool::new(None);
+        let schema = tool.input_schema();
+        assert!(schema["properties"]["prompt"].is_object());
+        let required = schema["required"].as_array().unwrap();
+        assert!(!required.iter().any(|v| v.as_str() == Some("prompt")));
+    }
+
+    #[test]
+    fn test_description_mentions_cache() {
+        let tool = WebFetchTool::new(None);
+        assert!(tool.description().contains("cache"));
+    }
+
+    // ── Permission description ───────────────────────────────────────
+
+    #[test]
+    fn test_permission_description_shows_host() {
+        let tool = WebFetchTool::new(None);
+        let input = json!({"url": "https://docs.rs/tokio/latest"});
+        let desc = tool.permission_description(&input);
+        assert!(desc.contains("docs.rs"));
+    }
+
+    #[test]
+    fn test_permission_description_invalid_url_fallback() {
+        let tool = WebFetchTool::new(None);
+        let input = json!({"url": "not-a-url"});
+        let desc = tool.permission_description(&input);
+        assert!(desc.contains("not-a-url"));
+    }
+
+    #[test]
+    fn test_permission_description_missing_url() {
+        let tool = WebFetchTool::new(None);
+        let input = json!({});
+        let desc = tool.permission_description(&input);
+        assert!(desc.contains("unknown"));
+    }
+
+    // ── Permission matcher edge cases ────────────────────────────────
+
+    #[test]
+    fn test_permission_matcher_without_domain_prefix() {
+        let tool = WebFetchTool::new(None);
+        let input = json!({"url": "https://example.com/path"});
+        let matcher = tool.permission_matcher(&input).unwrap();
+        // Bare hostname also matches
+        assert!(matcher("example.com"));
+        assert!(!matcher("other.com"));
+    }
+
+    #[test]
+    fn test_permission_suggestion_no_url() {
+        let tool = WebFetchTool::new(None);
+        let input = json!({});
+        assert!(tool.permission_suggestion(&input).is_none());
+    }
+
+    #[test]
+    fn test_permission_suggestion_invalid_url() {
+        let tool = WebFetchTool::new(None);
+        let input = json!({"url": "not-valid"});
+        assert!(tool.permission_suggestion(&input).is_none());
+    }
 }

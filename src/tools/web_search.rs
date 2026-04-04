@@ -577,4 +577,183 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "Google Test");
     }
+
+    // ── Input schema ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_input_schema_requires_query() {
+        let tool = WebSearchTool::new(None);
+        let schema = tool.input_schema();
+        let required = schema["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v.as_str() == Some("query")));
+    }
+
+    #[test]
+    fn test_input_schema_has_max_results() {
+        let tool = WebSearchTool::new(None);
+        let schema = tool.input_schema();
+        assert!(schema["properties"]["max_results"].is_object());
+        // max_results is NOT required
+        let required = schema["required"].as_array().unwrap();
+        assert!(!required.iter().any(|v| v.as_str() == Some("max_results")));
+    }
+
+    // ── Permission ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_check_permissions_always_allows() {
+        let tool = WebSearchTool::new(None);
+        let result = tool.check_permissions(&json!({"query": "test"})).await;
+        assert!(matches!(result, crate::permissions::PermissionResult::Allow));
+    }
+
+    #[test]
+    fn test_permission_description_with_query() {
+        let tool = WebSearchTool::new(None);
+        let desc = tool.permission_description(&json!({"query": "rust async"}));
+        assert_eq!(desc, "Search the web for: \"rust async\"");
+    }
+
+    #[test]
+    fn test_permission_description_without_query() {
+        let tool = WebSearchTool::new(None);
+        let desc = tool.permission_description(&json!({}));
+        assert_eq!(desc, "Search the web for: \"unknown\"");
+    }
+
+    // ── format_results ───────────────────────────────────────────────
+
+    #[test]
+    fn test_format_results_single_item() {
+        let results = vec![SearchResult {
+            title: "Only Result".into(),
+            url: "https://only.com".into(),
+            snippet: "The only snippet".into(),
+        }];
+        let output = format_results("test", &results);
+        assert!(output.contains("1. Only Result"));
+        assert!(output.contains("https://only.com"));
+        assert!(output.contains("The only snippet"));
+        assert!(output.contains("REMINDER"));
+    }
+
+    #[test]
+    fn test_format_results_contains_separator() {
+        let results = vec![SearchResult {
+            title: "Title".into(),
+            url: "https://example.com".into(),
+            snippet: "Snippet".into(),
+        }];
+        let output = format_results("test query", &results);
+        assert!(output.contains("─")); // separator line
+    }
+
+    // ── Description ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_description_mentions_search() {
+        let tool = WebSearchTool::new(None);
+        assert!(tool.description().contains("Search"));
+    }
+
+    // ── Error paths for other providers ──────────────────────────────
+
+    #[tokio::test]
+    async fn test_google_cse_missing_api_key() {
+        let config = SearchConfig {
+            mode: "google_cse".into(),
+            api_key: None,
+            base_url: Some("cx-id".into()),
+            search_strategy: None,
+        };
+        let tool = WebSearchTool::new(Some(config));
+        let result = tool.call(json!({"query": "test"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("requires an API key"));
+    }
+
+    #[tokio::test]
+    async fn test_google_cse_missing_base_url() {
+        let config = SearchConfig {
+            mode: "google_cse".into(),
+            api_key: Some("key".into()),
+            base_url: None,
+            search_strategy: None,
+        };
+        let tool = WebSearchTool::new(Some(config));
+        let result = tool.call(json!({"query": "test"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("base_url"));
+    }
+
+    #[tokio::test]
+    async fn test_bing_missing_api_key() {
+        let config = SearchConfig {
+            mode: "bing".into(),
+            api_key: None,
+            base_url: None,
+            search_strategy: None,
+        };
+        let tool = WebSearchTool::new(Some(config));
+        let result = tool.call(json!({"query": "test"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("requires an API key"));
+    }
+
+    // ── Default max_results via call ─────────────────────────────────
+
+    #[tokio::test]
+    async fn test_call_with_no_max_results_defaults() {
+        // We can't easily test the actual default value (10) without a mock,
+        // but we can verify the call doesn't panic when max_results is omitted.
+        let tool = WebSearchTool::new(None);
+        let result = tool.call(json!({"query": "test"})).await;
+        // Will fail (no config), but should NOT panic
+        assert!(result.is_error);
+    }
+
+    // ── Parse responses with missing optional fields ─────────────────
+
+    #[test]
+    fn test_parse_brave_response_missing_description() {
+        let json_str = r#"{
+            "web": {
+                "results": [
+                    {"title": "No Desc", "url": "https://test.com"}
+                ]
+            }
+        }"#;
+        let resp: BraveResponse = serde_json::from_str(json_str).unwrap();
+        let results = resp.web.unwrap().results.unwrap();
+        assert_eq!(results[0].title, "No Desc");
+        assert!(results[0].description.is_none());
+    }
+
+    #[test]
+    fn test_parse_brave_response_empty_web() {
+        let json_str = r#"{"web": null}"#;
+        let resp: BraveResponse = serde_json::from_str(json_str).unwrap();
+        assert!(resp.web.is_none());
+    }
+
+    #[test]
+    fn test_parse_google_cse_response_no_items() {
+        let json_str = r#"{}"#;
+        let resp: GoogleCseResponse = serde_json::from_str(json_str).unwrap();
+        assert!(resp.items.is_none());
+    }
+
+    #[test]
+    fn test_parse_bing_response_no_web_pages() {
+        let json_str = r#"{}"#;
+        let resp: BingResponse = serde_json::from_str(json_str).unwrap();
+        assert!(resp.web_pages.is_none());
+    }
+
+    #[test]
+    fn test_parse_searxng_empty_results() {
+        let json_str = r#"{"results": []}"#;
+        let resp: SearxngResponse = serde_json::from_str(json_str).unwrap();
+        assert!(resp.results.is_empty());
+    }
 }

@@ -53,3 +53,37 @@ pub fn create_client(config: &AppConfig) -> Result<Box<dyn LlmClient>, KezenErro
         Provider::OpenAi => Ok(Box::new(openai::OpenAiClient::new(config)?)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_options_default_has_no_search() {
+        let opts = StreamOptions::default();
+        assert!(!opts.enable_server_search);
+        assert!(opts.search_strategy.is_none());
+    }
+
+    #[test]
+    fn stream_options_clone_preserves_fields() {
+        let opts = StreamOptions {
+            enable_server_search: true,
+            search_strategy: Some("agent_max".to_string()),
+        };
+        let cloned = opts.clone();
+        assert!(cloned.enable_server_search);
+        assert_eq!(cloned.search_strategy.as_deref(), Some("agent_max"));
+    }
+
+    #[test]
+    fn stream_options_debug_output() {
+        let opts = StreamOptions {
+            enable_server_search: true,
+            search_strategy: Some("turbo".to_string()),
+        };
+        let debug = format!("{:?}", opts);
+        assert!(debug.contains("enable_server_search: true"));
+        assert!(debug.contains("turbo"));
+    }
+}

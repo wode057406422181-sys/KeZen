@@ -160,4 +160,66 @@ mod tests {
             h.join().unwrap();
         }
     }
+
+    #[test]
+    fn test_expired_entry_returns_none() {
+        // Create a cache and manually insert an already-expired entry
+        let cache = WebCache::new();
+        {
+            let entry = CacheEntry {
+                content: "old content".into(),
+                content_type: "text/html".into(),
+                status: 200,
+                // Created 20 minutes ago → expired (TTL is 15 min)
+                fetched_at: Instant::now() - Duration::from_secs(20 * 60),
+            };
+            let mut inner = cache.inner.lock().unwrap();
+            inner.put("https://expired.com".into(), entry);
+        }
+        // Should return None since it's expired
+        assert!(cache.get("https://expired.com").is_none());
+    }
+
+    #[test]
+    fn test_fresh_entry_not_expired() {
+        let entry = CacheEntry {
+            content: "fresh".into(),
+            content_type: "text/html".into(),
+            status: 200,
+            fetched_at: Instant::now(),
+        };
+        assert!(!entry.is_expired());
+    }
+
+    #[test]
+    fn test_overwrite_existing_key() {
+        let cache = WebCache::new();
+        cache.insert("https://a.com".into(), "v1".into(), "text/html".into(), 200);
+        cache.insert("https://a.com".into(), "v2".into(), "text/html".into(), 200);
+        let entry = cache.get("https://a.com").unwrap();
+        assert_eq!(entry.content, "v2");
+    }
+
+    #[test]
+    fn test_cache_entry_preserves_status_and_content_type() {
+        let cache = WebCache::new();
+        cache.insert("https://a.com".into(), "body".into(), "application/json".into(), 404);
+        let entry = cache.get("https://a.com").unwrap();
+        assert_eq!(entry.content_type, "application/json");
+        assert_eq!(entry.status, 404);
+    }
+
+    #[test]
+    fn test_global_cache_returns_same_instance() {
+        let c1 = global_cache();
+        let c2 = global_cache();
+        // Same pointer
+        assert!(std::ptr::eq(c1, c2));
+    }
+
+    #[test]
+    fn test_default_impl() {
+        let cache = WebCache::default();
+        assert!(cache.get("https://nonexistent.com").is_none());
+    }
 }

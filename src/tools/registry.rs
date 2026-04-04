@@ -145,10 +145,64 @@ mod tests {
             search_strategy: Some("turbo".into()),
         });
         let registry = create_default_registry(&config);
-        // Native mode: server-side handles search & fetch, no client tools registered.
         assert!(registry.get("WebSearch").is_none());
         assert!(registry.get("WebFetch").is_none());
-        assert_eq!(registry.schemas().len(), 6); // Only core tools
+        assert_eq!(registry.schemas().len(), 6);
+    }
+
+    #[test]
+    fn test_registry_default_impl() {
+        let registry = ToolRegistry::default();
+        assert!(registry.get("Bash").is_none());
+        assert!(registry.schemas().is_empty());
+    }
+
+    #[test]
+    fn test_registry_overwrite_same_name() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(crate::tools::bash::BashTool));
+        registry.register(Arc::new(crate::tools::bash::BashTool));
+        assert_eq!(registry.schemas().len(), 1);
+    }
+
+    #[test]
+    fn test_schemas_contain_required_fields() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(crate::tools::bash::BashTool));
+        let schemas = registry.schemas();
+        let s = &schemas[0];
+        assert!(s.get("name").is_some());
+        assert!(s.get("description").is_some());
+        assert!(s.get("input_schema").is_some());
+    }
+
+    #[test]
+    fn test_create_default_registry_with_searxng() {
+        let mut config = AppConfig::default();
+        config.search = Some(crate::config::SearchConfig {
+            mode: "searxng".into(),
+            api_key: None,
+            base_url: Some("http://localhost:8080".into()),
+            search_strategy: None,
+        });
+        let registry = create_default_registry(&config);
+        assert!(registry.get("WebSearch").is_some());
+        assert!(registry.get("WebFetch").is_some());
+        assert_eq!(registry.schemas().len(), 8);
+    }
+
+    #[test]
+    fn test_create_default_registry_native_agent_max() {
+        let mut config = AppConfig::default();
+        config.search = Some(crate::config::SearchConfig {
+            mode: "native".into(),
+            api_key: None,
+            base_url: None,
+            search_strategy: Some("agent_max".into()),
+        });
+        let registry = create_default_registry(&config);
+        assert!(registry.get("WebSearch").is_none());
+        assert!(registry.get("WebFetch").is_none());
+        assert_eq!(registry.schemas().len(), 6);
     }
 }
-
