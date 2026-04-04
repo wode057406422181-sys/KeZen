@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 use crate::config::AppConfig;
 use crate::engine::events::{EngineEvent, UserAction};
@@ -240,6 +241,10 @@ impl App {
                 output,
                 is_error,
             } => {
+                // Remove the first matching active tool (not blindly FIFO,
+                // because tools may complete out of order in parallel execution).
+                // We remove the first one since ToolResult doesn't carry the name;
+                // this is still FIFO but guarded against empty vec.
                 if !self.active_tools.is_empty() {
                     self.active_tools.remove(0);
                 }
@@ -484,13 +489,19 @@ impl App {
                 if self.cursor_pos > 0 {
                     self.cursor_pos -= 1;
                     let byte_off = self.cursor_byte_offset();
-                    self.input.remove(byte_off);
+                    // drain() the full char (may be multi-byte UTF-8); remove() only
+                    // strips a single byte and would corrupt the string + panic.
+                    if let Some(ch) = self.input[byte_off..].chars().next() {
+                        self.input.drain(byte_off..byte_off + ch.len_utf8());
+                    }
                 }
             }
             (_, KeyCode::Delete) => {
                 if self.cursor_pos < self.input_char_count() {
                     let byte_off = self.cursor_byte_offset();
-                    self.input.remove(byte_off);
+                    if let Some(ch) = self.input[byte_off..].chars().next() {
+                        self.input.drain(byte_off..byte_off + ch.len_utf8());
+                    }
                 }
             }
             (_, KeyCode::Left) => {
@@ -566,6 +577,44 @@ impl App {
             _ => {}
         }
     }
+
+    // ── Queue drain helper ───────────────────────────────────────────────
+
+    /// Try to send the next queued user message if the engine is idle and
+    /// the cooldown has elapsed.  Called from both the engine-event and
+    /// tick branches of the main event loop to avoid duplicating the logic.
+    async fn try_drain_queue(&mut self, action_tx: &mpsc::Sender<UserAction>) {
+        const QUEUED_SEND_COOLDOWN_MS: u128 = 500;
+        let cooldown_ok = self
+            .last_queued_send
+            .map_or(true, |t| t.elapsed().as_millis() >= QUEUED_SEND_COOLDOWN_MS);
+
+        if !self.is_streaming
+            && !self.waiting_for_response
+            && !self.queued_user_messages.is_empty()
+            && cooldown_ok
+        {
+            let next_msg = self.queued_user_messages.remove(0);
+
+            self.messages.push(ChatMessage {
+                role: MessageRole::User,
+                content: next_msg.clone(),
+            });
+            self.waiting_for_response = true;
+            self.last_queued_send = Some(Instant::now());
+            if let Err(e) = action_tx
+                .send(UserAction::SendMessage {
+                    content: next_msg,
+                })
+                .await
+            {
+                self.queue_toast = Some((
+                    format!("Failed to send queued message: {}", e),
+                    Instant::now(),
+                ));
+            }
+        }
+    }
 }
 
 // ─── Main application loop ──────────────────────────────────────────────────
@@ -624,44 +673,27 @@ pub async fn run_app(
 
     terminal.draw(|f| ui::draw(f, &app))?;
 
+    // Debounced snapshot saving — only the latest snapshot is persisted.
+    // Replaces the previous approach that spawned a fire-and-forget task for
+    // every single snapshot event, which could create hundreds of concurrent
+    // writes during rapid streaming.
+    let mut snapshot_handle: Option<JoinHandle<()>> = None;
+
     loop {
         tokio::select! {
             // ── Engine events ───────────────────────────────────────
             Some(engine_event) = event_rx.recv() => {
-                handle_snapshot(&engine_event);
+                debounce_snapshot(&engine_event, &mut snapshot_handle);
                 app.handle_engine_event(engine_event);
 
                 // Batch-drain: consume ALL buffered events before redrawing.
                 while let Ok(next_event) = event_rx.try_recv() {
-                    handle_snapshot(&next_event);
+                    debounce_snapshot(&next_event, &mut snapshot_handle);
                     app.handle_engine_event(next_event);
                 }
 
                 // After a Done event, auto-send the next queued user message.
-                // Cooldown: wait ≥500ms between sends so the user sees each turn.
-                const QUEUED_SEND_COOLDOWN_MS: u128 = 500;
-                let cooldown_ok = app.last_queued_send
-                    .map_or(true, |t| t.elapsed().as_millis() >= QUEUED_SEND_COOLDOWN_MS);
-
-                if !app.is_streaming && !app.waiting_for_response
-                    && !app.queued_user_messages.is_empty()
-                    && cooldown_ok
-                {
-                    let next_msg = app.queued_user_messages.remove(0);
-
-                    app.messages.push(ChatMessage {
-                        role: MessageRole::User,
-                        content: next_msg.clone(),
-                    });
-                    app.waiting_for_response = true;
-                    app.last_queued_send = Some(Instant::now());
-                    if let Err(e) = action_tx.send(UserAction::SendMessage { content: next_msg }).await {
-                        app.queue_toast = Some((
-                            format!("Failed to send queued message: {}", e),
-                            Instant::now(),
-                        ));
-                    }
-                }
+                app.try_drain_queue(&action_tx).await;
             }
 
             // ── Terminal events (keyboard, resize) ──────────────────
@@ -680,30 +712,8 @@ pub async fn run_app(
                 // Always tick — spinner + toast expiry + queued send cooldown
                 app.tick();
 
-                // Retry queued send on tick (in case cooldown blocked it on the engine event branch)
-                const QUEUED_SEND_COOLDOWN_MS_TICK: u128 = 500;
-                let cooldown_ok = app.last_queued_send
-                    .map_or(true, |t| t.elapsed().as_millis() >= QUEUED_SEND_COOLDOWN_MS_TICK);
-
-                if !app.is_streaming && !app.waiting_for_response
-                    && !app.queued_user_messages.is_empty()
-                    && cooldown_ok
-                {
-                    let next_msg = app.queued_user_messages.remove(0);
-
-                    app.messages.push(ChatMessage {
-                        role: MessageRole::User,
-                        content: next_msg.clone(),
-                    });
-                    app.waiting_for_response = true;
-                    app.last_queued_send = Some(Instant::now());
-                    if let Err(e) = action_tx.send(UserAction::SendMessage { content: next_msg }).await {
-                        app.queue_toast = Some((
-                            format!("Failed to send queued message: {}", e),
-                            Instant::now(),
-                        ));
-                    }
-                }
+                // Retry queued send on tick (in case cooldown elapsed since the last event)
+                app.try_drain_queue(&action_tx).await;
             }
         }
 
@@ -717,12 +727,20 @@ pub async fn run_app(
     Ok(())
 }
 
-/// Save session snapshot asynchronously (extracted to avoid repeated code).
-fn handle_snapshot(event: &EngineEvent) {
+/// Debounced session snapshot saving.
+///
+/// Cancels any in-flight snapshot write and spawns a new one.  This ensures
+/// that during rapid streaming (many events/sec) only the *latest* snapshot
+/// is persisted, avoiding hundreds of concurrent file writes.
+fn debounce_snapshot(event: &EngineEvent, handle: &mut Option<JoinHandle<()>>) {
     if let EngineEvent::SessionSnapshotUpdate { snapshot } = event {
+        // Cancel previous save if still running
+        if let Some(h) = handle.take() {
+            h.abort();
+        }
         let snap = snapshot.clone();
-        tokio::spawn(async move {
+        *handle = Some(tokio::spawn(async move {
             let _ = crate::session::save_snapshot(&snap).await;
-        });
+        }));
     }
 }

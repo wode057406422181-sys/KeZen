@@ -5,6 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::permissions::RiskLevel;
 use super::app::App;
@@ -297,9 +298,10 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
     // Place cursor inside the input box (only when not busy)
     if !app.is_busy() && app.pending_permission.is_none() {
-        // Calculate display width of text before cursor (CJK chars are 2 columns wide)
+        // Calculate display width of text before cursor using proper Unicode widths.
+        // UnicodeWidthChar handles CJK fullwidth (2), combining marks (0), etc.
         let display_cols: usize = app.input.chars().take(app.cursor_pos)
-            .map(|c| if c.is_ascii() { 1 } else { 2 })
+            .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
             .sum();
         // +1 for left border
         let x = area.x + display_cols as u16 + 1;
@@ -380,12 +382,15 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     // ── Build the full line ───────────────────────────────────────
     // Layout: [left] [ctx_bar ctx_label] [padding] [right]
-    let ctx_section = format!(" {} {} ", bar_str, ctx_label);
+    // Use UnicodeWidthStr::width() for accurate terminal column counts.
+    // chars().count() is wrong for CJK fullwidth chars (2 columns each).
+    let ctx_label_span = format!(" {} ", ctx_label);
     let total_width = area.width as usize;
-    let left_len = left_text.len();
-    let ctx_len = ctx_section.len();
-    let right_len = right_text.len();
-    let padding = total_width.saturating_sub(left_len + ctx_len + right_len);
+    let left_w = UnicodeWidthStr::width(left_text.as_str());
+    let bar_w = UnicodeWidthStr::width(bar_str.as_str());
+    let ctx_w = UnicodeWidthStr::width(ctx_label_span.as_str());
+    let right_w = UnicodeWidthStr::width(right_text.as_str());
+    let padding = total_width.saturating_sub(left_w + bar_w + ctx_w + right_w);
 
     let line = Line::from(vec![
         Span::styled(&left_text, Style::default().fg(STATUS_FG).bg(STATUS_BG)),
@@ -394,7 +399,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(bar_color).bg(STATUS_BG),
         ),
         Span::styled(
-            format!(" {} ", ctx_label),
+            ctx_label_span,
             Style::default().fg(STATUS_FG).bg(STATUS_BG).add_modifier(Modifier::DIM),
         ),
         Span::styled(
@@ -479,7 +484,15 @@ fn draw_permission_dialog(frame: &mut Frame, app: &App) {
         Span::styled("  Risk: ", Style::default().bold()),
         Span::styled(format!("● {}", risk_label), Style::default().fg(risk_color)),
     ]));
-    lines.push(Line::from(""));
+
+    // Show suggestion if present (e.g. "Allow this tool permanently?")
+    if let Some(suggestion) = &perm.suggestion {
+        lines.push(Line::from(vec![
+            Span::styled("  Hint: ", Style::default().fg(ACCENT_COLOR).bold()),
+            Span::styled(suggestion.as_str(), Style::default().fg(ACCENT_COLOR).italic()),
+        ]));
+    }
+
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
         Span::styled("  [y] ", Style::default().fg(Color::Green).bold()),

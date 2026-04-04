@@ -54,6 +54,7 @@ termimad = "0.31"
 
 # TUI framework
 ratatui = "0.29"
+unicode-width = "0.2"
 
 # Configuration
 toml = "0.8"
