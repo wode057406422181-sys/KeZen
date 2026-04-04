@@ -103,12 +103,19 @@ pub struct AppConfig {
     /// Maximum tokens for responses
     pub max_tokens: Option<u32>,
 
+    /// Override the context window size
+    pub context_window: Option<u64>,
+
     /// Enable extended thinking (Anthropic only)
     #[serde(default)]
     pub thinking: bool,
 
     /// Custom User-Agent header (useful for Coding Plan endpoints)
     pub user_agent: Option<String>,
+
+    /// Disable MCP server connections
+    #[serde(default)]
+    pub no_mcp: bool,
 
     /// Send stream_options.include_usage in OpenAI streaming requests.
     ///
@@ -129,8 +136,10 @@ impl Default for AppConfig {
             api_key: None,
             model: None,
             max_tokens: Some(DEFAULT_MAX_TOKENS),
+            context_window: None,
             thinking: false,
             user_agent: None,
+            no_mcp: false,
             include_stream_usage: true,
             search: None,
         }

@@ -53,60 +53,15 @@ pub async fn run_repl(
 
                 let _ = rl.add_history_entry(trimmed);
 
-                // Handle slash commands
-                if trimmed.starts_with('/') {
-                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                    match parts[0] {
-                        "/quit" | "/exit" => {
-                            let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, &pricing);
-                            println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
-                            println!("\n  👋 {}\n", "Goodbye!".dimmed());
-                            break;
-                        }
-                        "/resume" => {
-                            let target = if parts.len() > 1 { Some(parts[1]) } else { None };
-                            match crate::session::load_snapshot(target).await {
-                                Ok(snap) => {
-                                    println!("  {} Resuming session: {}", "ℹ".blue(), snap.id);
-                                    session_in_tokens = snap.input_tokens;
-                                    session_out_tokens = snap.output_tokens;
-                                    let _ = action_tx.send(UserAction::RestoreSession { snapshot: snap }).await;
-                                }
-                                Err(e) => {
-                                    println!("  {} Failed to load session: {}", "✖".red(), e);
-                                }
-                            }
-                            continue;
-                        }
-                        "/help" => {
-                            print_help();
-                            continue;
-                        }
-                        "/clear" => {
-                            println!(
-                                "  {} {}",
-                                "ℹ".blue(),
-                                "Session clear is not yet implemented.".dimmed()
-                            );
-                            continue;
-                        }
-                        "/model" => {
-                            println!(
-                                "  {} Model: {}",
-                                "ℹ".blue(),
-                                config.model.as_deref().unwrap_or("(not set)")
-                            );
-                            continue;
-                        }
-                        _ => {
-                            println!(
-                                "  {} Unknown command: {}. Type /help for available commands.",
-                                "?".yellow(),
-                                parts[0]
-                            );
-                            continue;
-                        }
-                    }
+                // Handle REPL-only commands (process control).
+                // All other slash commands are delegated to the Engine
+                // via handle_slash_command(), which returns results as
+                // SlashCommandResult events.
+                if trimmed == "/quit" || trimmed == "/exit" {
+                    let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, &pricing);
+                    println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
+                    println!("\n  👋 {}\n", "Goodbye!".dimmed());
+                    break;
                 }
 
                 // Send trimmed message to engine (stripping surrounding whitespace).
@@ -263,6 +218,13 @@ async fn handle_engine_events(
                         println!(); // Final newline
                         break;
                     }
+                    Some(EngineEvent::SlashCommandResult { command, output }) => {
+                        println!("  {} {}\n{}", "ℹ".blue(), command.dimmed(), output);
+                        break;
+                    }
+                    Some(EngineEvent::CompactProgress { message }) => {
+                        println!("  {} {}", "ℹ".blue(), message.dimmed());
+                    }
                     None => {
                         // Channel closed, engine died
                         print_error("Engine disconnected unexpectedly.");
@@ -274,18 +236,3 @@ async fn handle_engine_events(
     }
 }
 
-/// Print available slash commands.
-fn print_help() {
-    println!();
-    println!("  {}", "Available Commands:".bold());
-    println!("  {}  — Show this help message", "/help".cyan());
-    println!("  {}  — Exit KeZen", "/quit".cyan());
-    println!("  {} — Clear conversation history", "/clear".cyan());
-    println!("  {} — Show current model", "/model".cyan());
-    println!("  {}  — Resume [id] or latest session", "/resume".cyan());
-    println!();
-    println!("  {}", "Keyboard Shortcuts:".bold());
-    println!("  {}  — Cancel current response", "Ctrl+C".cyan());
-    println!("  {}  — Exit KeZen", "Ctrl+D".cyan());
-    println!();
-}
