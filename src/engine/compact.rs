@@ -1,3 +1,5 @@
+use crate::constants::prompts::{COMPACT_NO_TOOLS_PREAMBLE, COMPACT_PROMPT, COMPACT_NO_TOOLS_TRAILER};
+
 /// Returns the context window size for a given model.
 pub fn context_window_for_model(model: &str) -> u64 {
     if model.contains("opus") || model.contains("sonnet") || model.contains("haiku") {
@@ -18,37 +20,35 @@ pub fn should_auto_compact(total_input_tokens: u64, model: &str, configured_wind
     total_input_tokens > threshold
 }
 
+/// Build the full compact prompt: NO_TOOLS preamble + main prompt + NO_TOOLS trailer
 pub fn compact_prompt() -> String {
-    r#"CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
-
-Your task is to create a detailed summary of the conversation so far.
-
-<analysis>
-Write your thought process and scratchpad here.
-</analysis>
-<summary>
-Write the final structured summary here, including:
-1. User's original request and true intent
-2. Key technical concepts discussed
-3. Files modified and code changed
-4. Errors encountered and how they were fixed
-5. Pending tasks remaining
-6. Current state of the work
-</summary>"#.to_string()
+    format!("{}{}{}", COMPACT_NO_TOOLS_PREAMBLE, COMPACT_PROMPT, COMPACT_NO_TOOLS_TRAILER)
 }
 
 pub fn extract_summary(raw: &str) -> String {
+    // Strip <analysis> block first (drafting scratchpad, not needed in output)
+    let without_analysis = if let Some(start) = raw.find("<analysis>") {
+        if let Some(end) = raw.find("</analysis>") {
+            format!("{}{}", &raw[..start], &raw[end + "</analysis>".len()..])
+        } else {
+            raw.to_string()
+        }
+    } else {
+        raw.to_string()
+    };
+
+    // Extract <summary> content
     let start_tag = "<summary>";
     let end_tag = "</summary>";
-    
-    if let Some(start_idx) = raw.find(start_tag) {
+
+    if let Some(start_idx) = without_analysis.find(start_tag) {
         let content_start = start_idx + start_tag.len();
-        if let Some(end_idx) = raw[content_start..].find(end_tag) {
-            return raw[content_start..content_start + end_idx].trim().to_string();
+        if let Some(end_idx) = without_analysis[content_start..].find(end_tag) {
+            return without_analysis[content_start..content_start + end_idx].trim().to_string();
         }
-        return raw[content_start..].trim().to_string();
+        return without_analysis[content_start..].trim().to_string();
     }
-    
+
     // Fallback if tags not present
-    raw.trim().to_string()
+    without_analysis.trim().to_string()
 }
