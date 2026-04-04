@@ -12,8 +12,8 @@ pub fn context_window_for_model(model: &str) -> u64 {
 }
 
 /// Helper to decide if auto-compaction should trigger
-pub fn should_auto_compact(total_input_tokens: u64, model: &str) -> bool {
-    let window = context_window_for_model(model);
+pub fn should_auto_compact(total_input_tokens: u64, model: &str, configured_window: Option<u64>) -> bool {
+    let window = configured_window.unwrap_or_else(|| context_window_for_model(model));
     let threshold = (window as f64 * 0.80) as u64; // 80% of context window
     total_input_tokens > threshold
 }

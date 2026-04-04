@@ -50,6 +50,9 @@ pub struct AppConfig {
     /// Maximum tokens for responses
     pub max_tokens: Option<u32>,
 
+    /// Override the context window size
+    pub context_window: Option<u64>,
+
     /// Enable extended thinking (Anthropic only)
     #[serde(default)]
     pub thinking: bool,
@@ -77,6 +80,7 @@ impl Default for AppConfig {
             api_key: None,
             model: None,
             max_tokens: Some(DEFAULT_MAX_TOKENS),
+            context_window: None,
             thinking: false,
             user_agent: None,
             no_mcp: false,

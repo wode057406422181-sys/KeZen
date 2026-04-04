@@ -117,7 +117,7 @@ impl KezenEngine {
         // Agentic loop: keeps calling the LLM until it stops requesting tools
         // or we hit the safety cap.
         loop {
-            if compact::should_auto_compact(self.session.total_usage().input_tokens, &self.session.model_name) {
+            if compact::should_auto_compact(self.session.total_usage().input_tokens, &self.session.model_name, self.config.context_window) {
                 self.compact_context().await;
             }
 
