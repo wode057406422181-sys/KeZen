@@ -263,6 +263,7 @@ impl KezenEngine {
                                 denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
                                     content: format!("Tool {} not found", name),
                                     is_error: true,
+                                    extraction_usage: None,
                                 }));
                                 continue;
                             }
@@ -300,6 +301,7 @@ impl KezenEngine {
                                 denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
                                     content: message,
                                     is_error: true,
+                                    extraction_usage: None,
                                 }));
                             }
                             PermissionDecision::NeedsApproval { tool_name, description, risk_level, suggestion } => {
@@ -353,6 +355,7 @@ impl KezenEngine {
                                     denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
                                         content: "User denied permission to execute this tool".to_string(),
                                         is_error: true,
+                                        extraction_usage: None,
                                     }));
                                 }
                             }
@@ -378,7 +381,15 @@ impl KezenEngine {
                     indexed_results.sort_by_key(|(idx, _, _, _)| *idx);
 
                     let mut tool_results = Vec::new();
+                    // Track extraction usage from sub-LLM calls (e.g. WebFetch content extraction)
+                    let mut extraction_usage_total = Usage::default();
                     for (_idx, id, _name, result) in indexed_results {
+                        // Accumulate any extraction usage into the turn total
+                        if let Some(eu) = &result.extraction_usage {
+                            extraction_usage_total.input_tokens += eu.input_tokens;
+                            extraction_usage_total.output_tokens += eu.output_tokens;
+                        }
+
                         let _ = self.event_tx.send(EngineEvent::ToolResult {
                             id: id.clone(),
                             output: result.content.clone(),
@@ -390,6 +401,12 @@ impl KezenEngine {
                             content: result.content,
                             is_error: result.is_error,
                         });
+                    }
+
+                    // Report extraction usage to session and frontend
+                    if extraction_usage_total.input_tokens > 0 || extraction_usage_total.output_tokens > 0 {
+                        self.session.update_usage(&extraction_usage_total);
+                        let _ = self.event_tx.send(EngineEvent::CostUpdate(extraction_usage_total)).await;
                     }
 
                     // Feed tool results back as a "user" message so the LLM

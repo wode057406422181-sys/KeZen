@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::{Tool, ToolResult};
 use super::web_cache;
 use crate::api;
-use crate::api::types::{ContentBlock, Message, Role, StreamEvent};
+use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::config::AppConfig;
 
 /// Maximum markdown content length before truncation (100K chars).
@@ -49,19 +49,25 @@ impl WebFetchTool {
     }
 
     /// Fetch URL content, convert to markdown, optionally extract via LLM.
-    async fn fetch_and_process(&self, url: &str, prompt: Option<&str>) -> Result<String, String> {
+    async fn fetch_and_process(&self, url: &str, prompt: Option<&str>) -> Result<(String, Option<Usage>), String> {
         // 1. Validate URL
         validate_url(url)?;
 
+        // 1b. Upgrade http → https
+        let url = if url.starts_with("http://") {
+            url.replacen("http://", "https://", 1)
+        } else {
+            url.to_string()
+        };
+
         // 2. Check cache
-        if let Some(cached) = web_cache::global_cache().get(url) {
+        if let Some(cached) = web_cache::global_cache().get(&url) {
             return self.maybe_extract(&cached.content, prompt).await;
         }
 
-        // 3. Fetch
         let resp = self
             .http
-            .get(url)
+            .get(url.as_str())
             .header("Accept", "text/markdown, text/html, */*")
             .send()
             .await
@@ -88,7 +94,7 @@ impl WebFetchTool {
         if !resp.status().is_success() {
             return Err(format!(
                 "HTTP {} fetching {}",
-                status, url
+                status, &url
             ));
         }
 
@@ -128,19 +134,22 @@ impl WebFetchTool {
 
     /// If a prompt is provided, run content extraction via the configured LLM.
     /// Otherwise, return the markdown as-is.
+    ///
+    /// Returns `(content, Option<Usage>)` — the extracted text and any token
+    /// usage consumed by the secondary LLM call.
     async fn maybe_extract(
         &self,
         markdown: &str,
         prompt: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<(String, Option<Usage>), String> {
         let prompt = match prompt {
             Some(p) if !p.is_empty() => p,
-            _ => return Ok(markdown.to_string()),
+            _ => return Ok((markdown.to_string(), None)),
         };
 
         let config = match &self.config {
             Some(c) => c,
-            None => return Ok(markdown.to_string()),
+            None => return Ok((markdown.to_string(), None)),
         };
 
         // Create a lightweight, one-shot LLM client for the extraction call
@@ -166,14 +175,22 @@ impl WebFetchTool {
             .await
             .map_err(|e| format!("LLM extraction call failed: {}", e))?;
 
-        // Collect the full response text
+        // Collect the full response text and usage
         let mut result_text = String::new();
         let mut stream = stream_result;
+        let mut extraction_usage = Usage::default();
 
         while let Some(event_result) = stream.next().await {
             match event_result {
                 Ok(StreamEvent::TextDelta { text }) => {
                     result_text.push_str(&text);
+                }
+                Ok(StreamEvent::MessageStart { usage: Some(u), .. }) => {
+                    extraction_usage.input_tokens = u.input_tokens;
+                }
+                Ok(StreamEvent::MessageDelta { usage: Some(u), .. }) => {
+                    if u.output_tokens > 0 { extraction_usage.output_tokens = u.output_tokens; }
+                    if u.input_tokens > 0 { extraction_usage.input_tokens = u.input_tokens; }
                 }
                 Ok(StreamEvent::MessageStop) => break,
                 Ok(_) => {} // Skip other events
@@ -183,10 +200,12 @@ impl WebFetchTool {
             }
         }
 
+        let has_usage = extraction_usage.input_tokens > 0 || extraction_usage.output_tokens > 0;
+
         if result_text.is_empty() {
-            Ok(markdown.to_string())
+            Ok((markdown.to_string(), if has_usage { Some(extraction_usage) } else { None }))
         } else {
-            Ok(result_text)
+            Ok((result_text, if has_usage { Some(extraction_usage) } else { None }))
         }
     }
 }
@@ -302,7 +321,7 @@ impl Tool for WebFetchTool {
     }
 
     fn description(&self) -> &str {
-        "Fetch content from a URL and convert it to markdown. Optionally extract specific information using a prompt. Use this when you need to read web page content. The URL must be a valid http/https URL. HTTP URLs are automatically upgraded to HTTPS. Includes a 15-minute cache for repeated access."
+        "Fetch content from a URL and convert it to markdown. Optionally extract specific information using a prompt. Use this when you need to read web page content. The URL must be a valid http/https URL. HTTP URLs are automatically upgraded to HTTPS. Includes a 15-minute cache for repeated access. When a prompt is provided, a secondary LLM call extracts relevant information — token Usage from this sub-call is tracked and reported."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -329,6 +348,7 @@ impl Tool for WebFetchTool {
                 return ToolResult {
                     content: "Error: missing or empty 'url' parameter".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -336,13 +356,15 @@ impl Tool for WebFetchTool {
         let prompt = input.get("prompt").and_then(|v| v.as_str());
 
         match self.fetch_and_process(url, prompt).await {
-            Ok(content) => ToolResult {
+            Ok((content, extraction_usage)) => ToolResult {
                 content,
                 is_error: false,
+                extraction_usage,
             },
             Err(e) => ToolResult {
                 content: format!("WebFetch failed: {}", e),
                 is_error: true,
+                extraction_usage: None,
             },
         }
     }
@@ -738,5 +760,35 @@ mod tests {
         let tool = WebFetchTool::new(None);
         let input = json!({"url": "not-valid"});
         assert!(tool.permission_suggestion(&input).is_none());
+    }
+
+    // ── HTTP→HTTPS upgrade ──────────────────────────────────────────
+
+    #[test]
+    fn test_http_url_passes_validation() {
+        // http:// is valid and will be upgraded to https:// in fetch_and_process
+        assert!(validate_url("http://example.com/page").is_ok());
+    }
+
+    #[test]
+    fn test_description_mentions_upgrade() {
+        let tool = WebFetchTool::new(None);
+        assert!(tool.description().contains("upgraded to HTTPS"));
+    }
+
+    // ── extraction_usage on error results ────────────────────────────
+
+    #[tokio::test]
+    async fn test_error_result_has_no_extraction_usage() {
+        let tool = WebFetchTool::new(None);
+        let result = tool.call(json!({})).await;
+        assert!(result.is_error);
+        assert!(result.extraction_usage.is_none());
+    }
+
+    #[test]
+    fn test_description_mentions_usage_tracking() {
+        let tool = WebFetchTool::new(None);
+        assert!(tool.description().contains("tracked"));
     }
 }

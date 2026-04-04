@@ -40,6 +40,7 @@ impl Tool for BashTool {
                 return ToolResult {
                     content: "Error: missing or invalid 'command' parameter".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -61,6 +62,7 @@ impl Tool for BashTool {
                 return ToolResult {
                     content: format!("Failed to spawn shell: {}", e),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -85,16 +87,19 @@ impl Tool for BashTool {
                 ToolResult {
                     content,
                     is_error,
+                    extraction_usage: None,
                 }
             }
             Ok(Err(e)) => ToolResult {
                 content: format!("Failed to execute command: {}", e),
                 is_error: true,
+                extraction_usage: None,
             },
             Err(_) => {
                 ToolResult {
                     content: format!("Command killed due to timeout of {}ms", timeout_ms),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         }

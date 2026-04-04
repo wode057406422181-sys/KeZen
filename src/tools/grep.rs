@@ -44,6 +44,7 @@ impl Tool for GrepTool {
                 return ToolResult {
                     content: "Error: missing or invalid 'pattern'".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -66,6 +67,7 @@ impl Tool for GrepTool {
                     return ToolResult {
                         content: format!("Invalid Regex pattern: {}", e),
                         is_error: true,
+                        extraction_usage: None,
                     };
                 }
             };
@@ -106,6 +108,7 @@ impl Tool for GrepTool {
                 return ToolResult {
                     content: "No matches found".to_string(),
                     is_error: false,
+                    extraction_usage: None,
                 };
             }
 
@@ -116,6 +119,7 @@ impl Tool for GrepTool {
             ToolResult {
                 content: results,
                 is_error: false,
+                    extraction_usage: None,
             }
         }).await;
 
@@ -124,6 +128,7 @@ impl Tool for GrepTool {
             Err(e) => ToolResult {
                 content: format!("Grep task panicked: {}", e),
                 is_error: true,
+                extraction_usage: None,
             },
         }
     }

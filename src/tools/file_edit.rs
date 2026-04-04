@@ -49,6 +49,7 @@ impl Tool for FileEditTool {
                 return ToolResult {
                     content: "Error: missing or invalid 'file_path'".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -59,6 +60,7 @@ impl Tool for FileEditTool {
                 return ToolResult {
                     content: "Error: missing or invalid 'old_string'".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -69,6 +71,7 @@ impl Tool for FileEditTool {
                 return ToolResult {
                     content: "Error: missing or invalid 'new_string'".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -87,6 +90,7 @@ impl Tool for FileEditTool {
                     return ToolResult {
                         content: format!("Failed to read file: {}", file_path),
                         is_error: true,
+                        extraction_usage: None,
                     };
                 }
             }
@@ -97,6 +101,7 @@ impl Tool for FileEditTool {
                 return ToolResult {
                     content: "Error: old_string cannot be empty for an existing file. Use FileWrite to overwrite the entire file, or provide a non-empty old_string to target a specific section.".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 };
             }
             // Create new file
@@ -107,11 +112,13 @@ impl Tool for FileEditTool {
                 return ToolResult {
                     content: format!("Failed to write new file: {}", e),
                     is_error: true,
+                    extraction_usage: None,
                 };
             }
             return ToolResult {
                 content: format!("The file {} has been created successfully.", file_path),
                 is_error: false,
+                extraction_usage: None,
             };
         }
 
@@ -119,6 +126,7 @@ impl Tool for FileEditTool {
             return ToolResult {
                 content: format!("String to replace not found in file.\nString: {}", old_string),
                 is_error: true,
+                extraction_usage: None,
             };
         }
 
@@ -127,6 +135,7 @@ impl Tool for FileEditTool {
             return ToolResult {
                 content: format!("Found {} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: {}", occurrences, old_string),
                 is_error: true,
+                extraction_usage: None,
             };
         }
 
@@ -140,6 +149,7 @@ impl Tool for FileEditTool {
             return ToolResult {
                 content: format!("Failed to write updated file: {}", e),
                 is_error: true,
+                extraction_usage: None,
             };
         }
 
@@ -150,6 +160,7 @@ impl Tool for FileEditTool {
                 format!("The file {} has been updated successfully.", file_path)
             },
             is_error: false,
+            extraction_usage: None,
         }
     }
 

@@ -48,7 +48,7 @@ impl WebCache {
 
     /// Look up a URL in the cache. Returns `None` if missing or expired.
     pub fn get(&self, url: &str) -> Option<CacheEntry> {
-        let mut cache = self.inner.lock().unwrap();
+        let mut cache = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(entry) = cache.get(url) {
             if entry.is_expired() {
                 cache.pop(url);
@@ -67,14 +67,14 @@ impl WebCache {
             status,
             fetched_at: Instant::now(),
         };
-        let mut cache = self.inner.lock().unwrap();
+        let mut cache = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         cache.put(url, entry);
     }
 
     /// Clear all entries.
     #[allow(dead_code)] // TODO: Expose via /clear-cache command
     pub fn clear(&self) {
-        let mut cache = self.inner.lock().unwrap();
+        let mut cache = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         cache.clear();
     }
 }

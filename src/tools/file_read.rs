@@ -45,6 +45,7 @@ impl Tool for FileReadTool {
                 return ToolResult {
                     content: "Error: missing or invalid 'file_path'".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -62,6 +63,7 @@ impl Tool for FileReadTool {
                     return ToolResult {
                         content: format!("File does not exist: {}", file_path_str),
                         is_error: true,
+                        extraction_usage: None,
                     };
                 }
                 // Try reading as bytes to check if binary (check first 8KB for null bytes, like git)
@@ -71,12 +73,14 @@ impl Tool for FileReadTool {
                         return ToolResult {
                             content: format!("Cannot read binary file: {}", file_path_str),
                             is_error: true,
+                            extraction_usage: None,
                         };
                     }
                 }
                 return ToolResult {
                     content: format!("Failed to read file: {}", e),
                     is_error: true,
+                    extraction_usage: None,
                 };
             }
         };
@@ -89,11 +93,13 @@ impl Tool for FileReadTool {
             return ToolResult {
                 content: format!("<system-reminder>Warning: the file exists but is shorter than the provided offset ({}). The file has {} lines.</system-reminder>", offset, total_lines),
                 is_error: false,
+                extraction_usage: None,
             };
         } else if total_lines == 0 {
             return ToolResult {
                 content: "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>".to_string(),
                 is_error: false,
+                    extraction_usage: None,
             };
         }
 
@@ -107,6 +113,7 @@ impl Tool for FileReadTool {
         ToolResult {
             content: result_content,
             is_error: false,
+                    extraction_usage: None,
         }
     }
 

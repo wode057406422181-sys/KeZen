@@ -41,6 +41,7 @@ impl Tool for FileWriteTool {
                 return ToolResult {
                     content: "Error: missing or invalid 'file_path'".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -51,6 +52,7 @@ impl Tool for FileWriteTool {
                 return ToolResult {
                     content: "Error: missing or invalid 'content'".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -61,6 +63,7 @@ impl Tool for FileWriteTool {
                 return ToolResult {
                     content: format!("Failed to create parent directories: {}", e),
                     is_error: true,
+                    extraction_usage: None,
                 };
             }
 
@@ -75,10 +78,12 @@ impl Tool for FileWriteTool {
                     format!("The file {} has been updated successfully.", file_path)
                 },
                 is_error: false,
+                extraction_usage: None,
             },
             Err(e) => ToolResult {
                 content: format!("Failed to write file: {}", e),
                 is_error: true,
+                extraction_usage: None,
             },
         }
     }

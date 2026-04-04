@@ -39,6 +39,7 @@ impl Tool for GlobTool {
                 return ToolResult {
                     content: "Error: missing or invalid 'pattern'".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -73,6 +74,7 @@ impl Tool for GlobTool {
                     return ToolResult {
                         content: format!("Invalid glob pattern: {}", e),
                         is_error: true,
+                        extraction_usage: None,
                     };
                 }
             }
@@ -81,6 +83,7 @@ impl Tool for GlobTool {
                 return ToolResult {
                     content: "No files found".to_string(),
                     is_error: false,
+                    extraction_usage: None,
                 };
             }
 
@@ -95,6 +98,7 @@ impl Tool for GlobTool {
             ToolResult {
                 content,
                 is_error: false,
+                    extraction_usage: None,
             }
         }).await;
 
@@ -103,6 +107,7 @@ impl Tool for GlobTool {
             Err(e) => ToolResult {
                 content: format!("Glob task panicked: {}", e),
                 is_error: true,
+                extraction_usage: None,
             },
         }
     }

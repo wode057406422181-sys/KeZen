@@ -386,6 +386,7 @@ impl Tool for WebSearchTool {
                 return ToolResult {
                     content: "Error: missing or empty 'query' parameter".to_string(),
                     is_error: true,
+                    extraction_usage: None,
                 }
             }
         };
@@ -399,10 +400,12 @@ impl Tool for WebSearchTool {
             Ok(results) => ToolResult {
                 content: format_results(query, &results),
                 is_error: false,
+                extraction_usage: None,
             },
             Err(e) => ToolResult {
                 content: format!("Search failed: {}", e),
                 is_error: true,
+                extraction_usage: None,
             },
         }
     }
