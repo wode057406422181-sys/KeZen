@@ -30,9 +30,19 @@ impl CacheEntry {
 
 /// Thread-safe LRU cache for fetched web pages.
 ///
-/// Stored behind a `Mutex` so it can be shared across concurrent tool
-/// invocations. The lock hold-time is tiny (in-memory HashMap ops only),
-/// so contention is negligible.
+/// # Why `std::sync::Mutex` instead of `tokio::sync::Mutex`
+///
+/// We deliberately use `std::sync::Mutex` here because:
+/// 1. The lock guard is **never held across an `.await` point** — all
+///    operations (`get`, `insert`, `clear`) acquire the lock, do an
+///    O(1) in-memory `LruCache` operation, and release immediately.
+/// 2. `std::sync::Mutex` has lower overhead than its tokio counterpart
+///    when the critical section is sub-microsecond (no async yield).
+/// 3. `unwrap_or_else(|e| e.into_inner())` recovers from poisoned locks
+///    so a panic in one task doesn't permanently brick the cache.
+///
+/// If future modifications ever need to hold the lock across an `.await`,
+/// this MUST be changed to `tokio::sync::Mutex`.
 pub struct WebCache {
     inner: Mutex<LruCache<String, CacheEntry>>,
 }

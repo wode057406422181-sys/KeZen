@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use serde_json::json;
 use std::collections::HashSet;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use super::{Tool, ToolResult};
@@ -53,14 +54,15 @@ impl WebFetchTool {
         // 1. Validate URL
         validate_url(url)?;
 
-        // 1b. Upgrade http → https
+        // 1b. Upgrade http → https (done BEFORE cache lookup so that
+        //     http:// and https:// variants share the same cache key)
         let url = if url.starts_with("http://") {
             url.replacen("http://", "https://", 1)
         } else {
             url.to_string()
         };
 
-        // 2. Check cache
+        // 2. Check cache (uses the already-upgraded URL as key)
         if let Some(cached) = web_cache::global_cache().get(&url) {
             return self.maybe_extract(&cached.content, prompt).await;
         }
@@ -211,6 +213,12 @@ impl WebFetchTool {
 }
 
 /// Validate that a URL is safe to fetch.
+///
+/// Rejects:
+/// - Non-http(s) schemes
+/// - Embedded credentials
+/// - Single-part hostnames (e.g. `localhost`)
+/// - Private / loopback / link-local IP addresses (SSRF prevention)
 fn validate_url(url: &str) -> Result<(), String> {
     if url.len() > MAX_URL_LENGTH {
         return Err(format!("URL too long: {} chars (max {})", url.len(), MAX_URL_LENGTH));
@@ -229,6 +237,16 @@ fn validate_url(url: &str) -> Result<(), String> {
     }
 
     if let Some(host) = parsed.host_str() {
+        // Block private/internal IP addresses to prevent SSRF
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            if is_private_or_reserved_ip(&ip) {
+                return Err(format!(
+                    "Access to private/internal IP address '{}' is not allowed (SSRF protection)",
+                    host
+                ));
+            }
+        }
+
         let parts: Vec<&str> = host.split('.').collect();
         if parts.len() < 2 {
             return Err(format!("Invalid hostname: '{}' (must have at least 2 parts)", host));
@@ -238,6 +256,33 @@ fn validate_url(url: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Returns `true` if the IP address is private, loopback, link-local, or
+/// otherwise reserved — i.e. should never be fetched by a web tool.
+///
+/// This guards against SSRF attacks where the LLM is tricked into fetching
+/// internal infrastructure (e.g. cloud metadata at 169.254.169.254).
+fn is_private_or_reserved_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()           // 127.0.0.0/8
+            || v4.is_private()         // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+            || v4.is_link_local()      // 169.254.0.0/16 (AWS metadata!)
+            || v4.is_broadcast()       // 255.255.255.255
+            || v4.is_unspecified()     // 0.0.0.0
+            || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64 // 100.64.0.0/10 (CGNAT)
+            || v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0 // 192.0.0.0/24 (IETF)
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()           // ::1
+            || v6.is_unspecified()     // ::
+            // fc00::/7 — unique local addresses
+            || (v6.segments()[0] & 0xfe00) == 0xfc00
+            // fe80::/10 — link-local
+            || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
 }
 
 /// Check if a hostname is in the preapproved list.
@@ -369,14 +414,39 @@ impl Tool for WebFetchTool {
         &self,
         input: &serde_json::Value,
     ) -> crate::permissions::PermissionResult {
+        let url_str = match input.get("url").and_then(|v| v.as_str()) {
+            Some(u) if !u.is_empty() => u,
+            _ => {
+                return crate::permissions::PermissionResult::Ask {
+                    message: "Cannot determine URL — requires approval".to_string(),
+                };
+            }
+        };
+
+        // Attempt to parse — unparseable URLs must NOT silently fall through
+        let parsed = match url::Url::parse(url_str) {
+            Ok(p) => p,
+            Err(_) => {
+                return crate::permissions::PermissionResult::Ask {
+                    message: format!("Malformed URL requires approval: {}", url_str),
+                };
+            }
+        };
+
+        let host = match parsed.host_str() {
+            Some(h) => h,
+            None => {
+                return crate::permissions::PermissionResult::Ask {
+                    message: format!("URL has no hostname — requires approval: {}", url_str),
+                };
+            }
+        };
+
         // Preapproved documentation domains are auto-allowed
-        if let Some(url_str) = input.get("url").and_then(|v| v.as_str())
-            && let Ok(parsed) = url::Url::parse(url_str)
-            && let Some(host) = parsed.host_str()
-            && is_preapproved_host(host)
-        {
+        if is_preapproved_host(host) {
             return crate::permissions::PermissionResult::Allow;
         }
+
         // Non-preapproved domains: require user approval
         crate::permissions::PermissionResult::Passthrough
     }
@@ -561,6 +631,30 @@ mod tests {
         assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
     }
 
+    #[tokio::test]
+    async fn test_malformed_url_requires_approval() {
+        let tool = WebFetchTool::new(None);
+        let input = json!({"url": "not-a-url"});
+        let result = tool.check_permissions(&input).await;
+        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_empty_url_requires_approval() {
+        let tool = WebFetchTool::new(None);
+        let input = json!({"url": ""});
+        let result = tool.check_permissions(&input).await;
+        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_missing_url_requires_approval() {
+        let tool = WebFetchTool::new(None);
+        let input = json!({});
+        let result = tool.check_permissions(&input).await;
+        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+    }
+
     // ── Permission matcher / suggestion ──────────────────────────────
 
     #[test]
@@ -603,11 +697,46 @@ mod tests {
     // ── URL validation edge cases ────────────────────────────────────
 
     #[test]
-    fn test_validate_url_ip_address_fails() {
-        // IP addresses have no dots splitting into 2+ parts as hostname
+    fn test_validate_url_private_ip_rejected() {
+        // Private IPs must be blocked to prevent SSRF
         let result = validate_url("https://192.168.1.1/path");
-        // 192.168.1.1 has 4 parts, so this actually passes hostname check
-        assert!(result.is_ok());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("SSRF protection"));
+    }
+
+    #[test]
+    fn test_validate_url_loopback_rejected() {
+        let result = validate_url("https://127.0.0.1/admin");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("SSRF protection"));
+    }
+
+    #[test]
+    fn test_validate_url_link_local_rejected() {
+        // AWS metadata endpoint
+        let result = validate_url("http://169.254.169.254/latest/meta-data/");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("SSRF protection"));
+    }
+
+    #[test]
+    fn test_validate_url_public_ip_ok() {
+        // Public IPs should be allowed (e.g. 8.8.8.8)
+        assert!(validate_url("https://8.8.8.8/dns-query").is_ok());
+    }
+
+    #[test]
+    fn test_validate_url_ipv6_loopback_rejected() {
+        // [::1] is rejected — either by the SSRF IP check or by the
+        // hostname parts check (IPv6 literals have no dot-separated parts).
+        assert!(validate_url("https://[::1]/path").is_err());
+    }
+
+    #[test]
+    fn test_validate_url_private_ipv4_10_rejected() {
+        let result = validate_url("https://10.0.0.1/internal");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("SSRF protection"));
     }
 
     #[test]

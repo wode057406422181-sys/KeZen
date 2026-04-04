@@ -406,7 +406,11 @@ impl Tool for WebSearchTool {
         &self,
         _input: &serde_json::Value,
     ) -> crate::permissions::PermissionResult {
-        crate::permissions::PermissionResult::Allow
+        // Search queries are sent to third-party APIs (Brave, Bing, Google
+        // CSE, etc.) and may contain sensitive context from the user's
+        // codebase.  Defer to the generic permission pipeline instead of
+        // unconditionally auto-allowing.
+        crate::permissions::PermissionResult::Passthrough
     }
 
     fn permission_description(&self, input: &serde_json::Value) -> String {
@@ -590,10 +594,11 @@ mod tests {
     // ── Permission ───────────────────────────────────────────────────
 
     #[tokio::test]
-    async fn test_check_permissions_always_allows() {
+    async fn test_check_permissions_defers_to_pipeline() {
         let tool = WebSearchTool::new(None);
         let result = tool.check_permissions(&json!({"query": "test"})).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Allow));
+        // Search queries go to third-party APIs, so defer to permission pipeline
+        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
     }
 
     #[test]
