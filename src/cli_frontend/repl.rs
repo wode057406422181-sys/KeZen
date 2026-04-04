@@ -279,13 +279,13 @@ fn print_help() {
     println!();
     println!("  {}", "Available Commands:".bold());
     println!("  {}  — Show this help message", "/help".cyan());
-    println!("  {}  — Exit Infini", "/quit".cyan());
+    println!("  {}  — Exit KeZen", "/quit".cyan());
     println!("  {} — Clear conversation history", "/clear".cyan());
     println!("  {} — Show current model", "/model".cyan());
     println!("  {}  — Resume [id] or latest session", "/resume".cyan());
     println!();
     println!("  {}", "Keyboard Shortcuts:".bold());
     println!("  {}  — Cancel current response", "Ctrl+C".cyan());
-    println!("  {}  — Exit Infini", "Ctrl+D".cyan());
+    println!("  {}  — Exit KeZen", "Ctrl+D".cyan());
     println!();
 }

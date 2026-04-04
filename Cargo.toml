@@ -1,17 +1,17 @@
 [package]
-name = "infini"
+name = "kezen"
 version = "0.1.0"
 edition = "2024"
 description = "A fast, modern AI coding CLI built in Rust"
 authors = ["oboard"]
 license = "MIT"
-repository = "https://github.com/wode057406422181-sys/infini"
+repository = "https://github.com/wode057406422181-sys/kezen"
 readme = "README.md"
 keywords = ["cli", "ai", "coding", "llm"]
 categories = ["command-line-utilities"]
 
 [[bin]]
-name = "infini"
+name = "kezen"
 path = "src/main.rs"
 
 [dependencies]

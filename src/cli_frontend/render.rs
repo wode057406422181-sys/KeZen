@@ -9,7 +9,7 @@ pub fn print_welcome(config: &AppConfig) {
     println!(
         "\n  {} {}",
         "⚡".bold(),
-        "Infini — AI Coding Assistant".bright_cyan().bold()
+        "KeZen — AI Coding Assistant".bright_cyan().bold()
     );
     println!(
         "  Provider: {} | Model: {}",
