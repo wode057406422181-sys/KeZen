@@ -23,13 +23,24 @@ fn parse_frontmatter(text: &str) -> (Option<Vec<String>>, String) {
         return (None, text.to_string());
     }
 
-    let end_idx = text.find("\n---").map(|i| i + 4).unwrap_or(0);
-    if end_idx == 0 {
-        return (None, text.to_string());
+    let start_idx = text.find('\n').unwrap() + 1;
+    
+    let end_relative_idx = match text[start_idx..].find("\n---") {
+        Some(i) => i,
+        None => return (None, text.to_string()),
+    };
+    
+    let end_idx = start_idx + end_relative_idx;
+    let frontmatter = &text[start_idx..end_idx];
+    
+    let mut content_start = end_idx + 4;
+    if text[content_start..].starts_with("\r\n") {
+        content_start += 2;
+    } else if text[content_start..].starts_with('\n') {
+        content_start += 1;
     }
 
-    let frontmatter = &text[..end_idx - 4];
-    let content = &text[end_idx..];
+    let content = &text[content_start..];
 
     let mut paths = Vec::new();
     let mut in_paths = false;

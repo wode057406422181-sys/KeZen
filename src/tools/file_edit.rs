@@ -168,53 +168,12 @@ impl Tool for FileEditTool {
 
     async fn check_permissions(&self, input: &serde_json::Value) -> crate::permissions::PermissionResult {
         let file_path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
-
-        // Path traversal → deny
-        if crate::permissions::safety::contains_path_traversal(file_path) {
-            return crate::permissions::PermissionResult::Deny {
-                message: format!("Path contains traversal (..): {}", file_path),
-            };
-        }
-
-        // Dangerous files → ask
-        if crate::permissions::safety::is_dangerous_path(file_path) {
-            return crate::permissions::PermissionResult::Ask {
-                message: format!("⚠️ Target is a sensitive file: {}", file_path),
-            };
-        }
-
-        // Working directory check
-        if let Ok(cwd) = std::env::current_dir() {
-            let cwd_str = cwd.to_string_lossy();
-            if !crate::permissions::safety::is_within_working_directory(file_path, &cwd_str).await {
-                return crate::permissions::PermissionResult::Ask {
-                    message: format!("⚠️ File is outside the working directory: {}", file_path),
-                };
-            }
-        }
-
-        crate::permissions::PermissionResult::Passthrough
+        crate::permissions::safety::check_file_permissions(file_path).await
     }
 
     fn permission_matcher(&self, input: &serde_json::Value) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
         let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        Some(Box::new(move |pattern: &str| {
-            if let Some(dir) = pattern.strip_suffix("/**") {
-                // Resolve the directory prefix:
-                // - relative (e.g. "src") → <cwd>/src/
-                // - absolute (e.g. "/tmp") → /tmp/
-                let prefix = if dir.starts_with('/') {
-                    format!("{}/", dir)
-                } else if let Ok(cwd) = std::env::current_dir() {
-                    format!("{}/{}/", cwd.display(), dir)
-                } else {
-                    format!("{}/", dir)
-                };
-                path.starts_with(&prefix)
-            } else {
-                path == pattern
-            }
-        }))
+        Some(crate::permissions::safety::file_permission_matcher(path))
     }
 
     fn permission_suggestion(&self, input: &serde_json::Value) -> Option<String> {

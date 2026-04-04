@@ -48,12 +48,13 @@ impl InfiniEngine {
         let client = api::create_client(&config)?;
         // Build the system prompt asynchronously (git commands + memory file I/O).
         let system_prompt = build_system_prompt(config.model.as_deref()).await;
-        let pricing = crate::cost::get_model_pricing(config.model.as_deref().unwrap_or(""));
+        let model_name = config.model.clone().unwrap_or_default();
+        let pricing = crate::cost::get_model_pricing(&model_name);
         
         Ok(Self {
             config,
             client,
-            session: Session::new(pricing),
+            session: Session::new(model_name, pricing),
             system_prompt,
             action_rx,
             event_tx,

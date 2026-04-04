@@ -98,7 +98,7 @@ pub fn get_model_pricing(model: &str) -> CostPricing {
     result
 }
 
-pub fn calculate_cost(input_tokens: u32, output_tokens: u32, pricing: &CostPricing) -> f64 {
+pub fn calculate_cost(input_tokens: u64, output_tokens: u64, pricing: &CostPricing) -> f64 {
     let in_cost = (input_tokens as f64 / 1_000_000.0) * pricing.input_cost_per_mtoken;
     let out_cost = (output_tokens as f64 / 1_000_000.0) * pricing.output_cost_per_mtoken;
     in_cost + out_cost

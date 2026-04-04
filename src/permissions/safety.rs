@@ -75,13 +75,15 @@ pub async fn is_within_working_directory(path: &str, working_dir: &str) -> bool 
     match (canonical_path, canonical_wd) {
         (Ok(cp), Ok(cwd)) => cp.starts_with(&cwd),
         _ => {
-            // Fallback: absolute prefix check.
-            let p = if path.starts_with('/') || path.starts_with('~') {
-                path.to_string()
-            } else {
-                format!("{}/{}", working_dir, path)
-            };
-            p.starts_with(working_dir)
+            // Try canonicalizing the parent directory (which should exist for writes)
+            if let Some(parent) = Path::new(path).parent() {
+                if let Ok(cp) = tokio::fs::canonicalize(parent).await {
+                    if let Ok(cwd) = tokio::fs::canonicalize(working_dir).await {
+                        return cp.starts_with(&cwd);
+                    }
+                }
+            }
+            false // Fail closed
         }
     }
 }
@@ -114,6 +116,12 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 /// Matching is prefix-based for multi-word entries (e.g. `git status foo`
 /// matches `git status`).
 pub fn is_read_only_command(command: &str) -> bool {
+    // Reject if it contains shell operators
+    if command.contains(';') || command.contains("&&") || command.contains("||") 
+        || command.contains('|') || command.contains('`') || command.contains("$(") {
+        return false;
+    }
+
     let trimmed = command.trim();
     READ_ONLY_COMMANDS.iter().any(|&ro| {
         // Exact match or prefix match (command starts with ro + space/end)
@@ -171,6 +179,53 @@ pub fn extract_file_suggestion(file_path: &str, working_dir: &str) -> Option<Str
     }
 
     None
+}
+
+// ── Shared file tool capabilities ─────────────────────────────────────
+
+pub async fn check_file_permissions(file_path: &str) -> crate::permissions::PermissionResult {
+    // Path traversal → deny
+    if contains_path_traversal(file_path) {
+        return crate::permissions::PermissionResult::Deny {
+            message: format!("Path contains traversal (..): {}", file_path),
+        };
+    }
+
+    // Dangerous files → ask
+    if is_dangerous_path(file_path) {
+        return crate::permissions::PermissionResult::Ask {
+            message: format!("⚠️ Target is a sensitive file: {}", file_path),
+        };
+    }
+
+    // Working directory check
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd_str = cwd.to_string_lossy();
+        if !is_within_working_directory(file_path, &cwd_str).await {
+            return crate::permissions::PermissionResult::Ask {
+                message: format!("⚠️ File is outside the working directory: {}", file_path),
+            };
+        }
+    }
+
+    crate::permissions::PermissionResult::Passthrough
+}
+
+pub fn file_permission_matcher(path: String) -> Box<dyn Fn(&str) -> bool> {
+    Box::new(move |pattern: &str| {
+        if let Some(dir) = pattern.strip_suffix("/**") {
+            let prefix = if dir.starts_with('/') {
+                format!("{}/", dir)
+            } else if let Ok(cwd) = std::env::current_dir() {
+                format!("{}/{}/", cwd.display(), dir)
+            } else {
+                format!("{}/", dir)
+            };
+            path.starts_with(&prefix)
+        } else {
+            path == pattern
+        }
+    })
 }
 
 #[cfg(test)]

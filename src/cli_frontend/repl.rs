@@ -34,7 +34,7 @@ pub async fn run_repl(
             .map_err(|e| anyhow::anyhow!("Failed to send message: {}", e))?;
         handle_engine_events(&action_tx, &mut event_rx, &mut session_in_tokens, &mut session_out_tokens).await;
         
-        let cost = crate::cost::calculate_cost(session_in_tokens as u32, session_out_tokens as u32, &pricing);
+        let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, &pricing);
         println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
         return Ok(());
     }
@@ -58,7 +58,7 @@ pub async fn run_repl(
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
                     match parts[0] {
                         "/quit" | "/exit" => {
-                            let cost = crate::cost::calculate_cost(session_in_tokens as u32, session_out_tokens as u32, &pricing);
+                            let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, &pricing);
                             println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
                             println!("\n  👋 {}\n", "Goodbye!".dimmed());
                             break;
@@ -130,7 +130,7 @@ pub async fn run_repl(
             }
             Err(rustyline::error::ReadlineError::Eof) => {
                 // Ctrl-D: exit
-                let cost = crate::cost::calculate_cost(session_in_tokens as u32, session_out_tokens as u32, &pricing);
+                let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, &pricing);
                 println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
                 println!("\n  👋 {}\n", "Goodbye!".dimmed());
                 break;

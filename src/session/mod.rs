@@ -6,6 +6,7 @@ pub struct SessionSnapshot {
     pub id: String,
     pub created_at: String,
     pub updated_at: String,
+    pub model_name: String,
     pub messages: Vec<crate::api::types::Message>,
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -77,6 +78,7 @@ mod tests {
             id: id.to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: updated_at.to_string(),
+            model_name: "test-model".to_string(),
             messages: vec![],
             input_tokens: 100,
             output_tokens: 50,
@@ -162,6 +164,7 @@ mod tests {
             id: "field-test".to_string(),
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-04-03T12:00:00Z".to_string(),
+            model_name: "gpt-4o".to_string(),
             messages: vec![
                 crate::api::types::Message {
                     role: crate::api::types::Role::User,
