@@ -30,7 +30,7 @@ pub async fn run_tui(
     let (event_tx, event_rx) = mpsc::channel::<EngineEvent>(32);
 
     // ── 2. Start Engine in background ──────────────────────────────────
-    let registry = create_default_registry();
+    let registry = create_default_registry(&config);
     let engine =
         KezenEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode).await?;
     tokio::spawn(async move {

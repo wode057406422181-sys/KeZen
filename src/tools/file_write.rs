@@ -38,48 +38,33 @@ impl Tool for FileWriteTool {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(path) => path,
             None => {
-                return ToolResult {
-                    content: "Error: missing or invalid 'file_path'".to_string(),
-                    is_error: true,
-                }
+                return ToolResult::err("Error: missing or invalid 'file_path'".to_string())
             }
         };
 
         let content = match input.get("content").and_then(|v| v.as_str()) {
             Some(c) => c,
             None => {
-                return ToolResult {
-                    content: "Error: missing or invalid 'content'".to_string(),
-                    is_error: true,
-                }
+                return ToolResult::err("Error: missing or invalid 'content'".to_string())
             }
         };
 
         let path = PathBuf::from(file_path);
         if let Some(parent) = path.parent()
             && let Err(e) = fs::create_dir_all(parent).await {
-                return ToolResult {
-                    content: format!("Failed to create parent directories: {}", e),
-                    is_error: true,
-                };
+                return ToolResult::err(format!("Failed to create parent directories: {}", e));
             }
 
         // Use async metadata check instead of blocking path.exists()
         let is_create = fs::metadata(&path).await.is_err();
 
         match fs::write(&path, content).await {
-            Ok(_) => ToolResult {
-                content: if is_create {
-                    format!("File created successfully at: {}", file_path)
-                } else {
-                    format!("The file {} has been updated successfully.", file_path)
-                },
-                is_error: false,
-            },
-            Err(e) => ToolResult {
-                content: format!("Failed to write file: {}", e),
-                is_error: true,
-            },
+            Ok(_) => ToolResult::ok(if is_create {
+                format!("File created successfully at: {}", file_path)
+            } else {
+                format!("The file {} has been updated successfully.", file_path)
+            }),
+            Err(e) => ToolResult::err(format!("Failed to write file: {}", e)),
         }
     }
 

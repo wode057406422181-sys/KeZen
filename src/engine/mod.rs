@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 
 use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
-use crate::api::{self, LlmClient};
+use crate::api::{self, LlmClient, StreamOptions};
 use crate::config::AppConfig;
 use crate::prompts::build_system_prompt;
 use crate::tools::registry::ToolRegistry;
@@ -37,6 +37,8 @@ pub struct KezenEngine {
     event_tx: mpsc::Sender<EngineEvent>,
     registry: ToolRegistry,
     permission_state: PermissionState,
+    /// Pre-computed stream options (native search settings etc.)
+    stream_options: StreamOptions,
 }
 
 impl KezenEngine {
@@ -53,6 +55,18 @@ impl KezenEngine {
         let model_name = config.model.clone().unwrap_or_default();
         let pricing = crate::cost::get_model_pricing(&model_name);
         
+        // No [search] section: search is OFF, fetch is client-side.
+        // Only enable server-side features when explicitly configured as "native".
+        let search_cfg = config.search.as_ref();
+        let stream_options = StreamOptions {
+            enable_server_search: search_cfg
+                .map_or(false, |s| s.search_mode == "native"),
+            enable_server_fetch: search_cfg
+                .map_or(false, |s| s.fetch_mode == "native"),
+            search_strategy: search_cfg
+                .and_then(|s| s.search_strategy.clone()),
+        };
+
         if !config.no_mcp {
             match crate::mcp::client::connect_all_servers().await {
                 Ok(result) => {
@@ -84,6 +98,7 @@ impl KezenEngine {
             event_tx,
             registry,
             permission_state: PermissionState::new(permission_mode),
+            stream_options,
         })
     }
 
@@ -143,7 +158,7 @@ impl KezenEngine {
 
             let stream_result = self
                 .client
-                .stream(self.session.messages(), Some(&self.system_prompt), tools_arg, None)
+                .stream(self.session.messages(), Some(&self.system_prompt), tools_arg, &self.stream_options, None)
                 .await;
 
             let mut assistant_text = String::new();
@@ -285,6 +300,7 @@ impl KezenEngine {
                                 denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
                                     content: format!("Tool {} not found", name),
                                     is_error: true,
+                                    extraction_usage: None,
                                 }));
                                 continue;
                             }
@@ -322,6 +338,7 @@ impl KezenEngine {
                                 denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
                                     content: message,
                                     is_error: true,
+                                    extraction_usage: None,
                                 }));
                             }
                             PermissionDecision::NeedsApproval { tool_name, description, risk_level, suggestion } => {
@@ -375,6 +392,7 @@ impl KezenEngine {
                                     denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
                                         content: "User denied permission to execute this tool".to_string(),
                                         is_error: true,
+                                        extraction_usage: None,
                                     }));
                                 }
                             }
@@ -400,7 +418,15 @@ impl KezenEngine {
                     indexed_results.sort_by_key(|(idx, _, _, _)| *idx);
 
                     let mut tool_results = Vec::new();
+                    // Track extraction usage from sub-LLM calls (e.g. WebFetch content extraction)
+                    let mut extraction_usage_total = Usage::default();
                     for (_idx, id, _name, result) in indexed_results {
+                        // Accumulate any extraction usage into the turn total
+                        if let Some(eu) = &result.extraction_usage {
+                            extraction_usage_total.input_tokens += eu.input_tokens;
+                            extraction_usage_total.output_tokens += eu.output_tokens;
+                        }
+
                         let _ = self.event_tx.send(EngineEvent::ToolResult {
                             id: id.clone(),
                             output: result.content.clone(),
@@ -412,6 +438,12 @@ impl KezenEngine {
                             content: result.content,
                             is_error: result.is_error,
                         });
+                    }
+
+                    // Report extraction usage to session and frontend
+                    if extraction_usage_total.input_tokens > 0 || extraction_usage_total.output_tokens > 0 {
+                        self.session.update_usage(&extraction_usage_total);
+                        let _ = self.event_tx.send(EngineEvent::CostUpdate(extraction_usage_total)).await;
                     }
 
                     // Feed tool results back as a "user" message so the LLM
@@ -564,7 +596,7 @@ impl KezenEngine {
         let mut last_error: Option<String> = None;
 
         for attempt in 1..=MAX_COMPACT_RETRIES {
-            match self.client.stream(&messages_to_summarize, None, None, Some(compact::COMPACT_MAX_OUTPUT_TOKENS)).await {
+            match self.client.stream(&messages_to_summarize, None, None, &crate::api::StreamOptions::default(), Some(compact::COMPACT_MAX_OUTPUT_TOKENS)).await {
                 Ok(mut stream) => {
                     let mut assistant_text = String::new();
                     let mut stream_errors = Vec::new();

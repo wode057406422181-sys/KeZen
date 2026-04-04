@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
-use crate::api::{BoxStream, LlmClient};
+use crate::api::{BoxStream, LlmClient, StreamOptions};
 use crate::config::AppConfig;
 use crate::constants::api::{ANTHROPIC_VERSION, CONTENT_TYPE_JSON};
 use crate::constants::defaults::DEFAULT_MAX_TOKENS;
@@ -91,6 +91,7 @@ impl LlmClient for AnthropicClient {
         messages: &[Message],
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
+        _options: &StreamOptions,
         max_tokens_override: Option<u32>,
     ) -> Result<BoxStream<'_, StreamEvent>, KezenError> {
         let url = normalize_anthropic_url(&self.base_url);
@@ -156,6 +157,17 @@ impl LlmClient for AnthropicClient {
                 // Default to `auto` tool choice unless otherwise constrained
                 body["tool_choice"] = json!({"type": "auto"});
             }
+
+        // TODO: Anthropic native web search / web fetch support.
+        // When `options.enable_server_search` is true, inject server-side tools:
+        //   tools[].push({"type": "web_search_20250305", "name": "web_search", "max_uses": 5})
+        //   tools[].push({"type": "web_fetch_20250910",  "name": "web_fetch",  "max_uses": 10})
+        // And extend the SSE parser to handle:
+        //   - "server_tool_use" content block type
+        //   - "web_search_tool_result" content block type
+        //   - "web_fetch_tool_result" content block type
+        // See: https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
+        //      https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-fetch-tool
 
         debug_logger::log_request("anthropic", &url, &body);
 

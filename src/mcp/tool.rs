@@ -52,8 +52,8 @@ impl Tool for McpTool {
         // Fix #1: No Mutex lock needed — call_tool takes &self and the
         // transport handles concurrency internally via channels.
         match self.client.call_tool(&self.tool_name, input).await {
-            Ok(output) => ToolResult { content: output, is_error: false },
-            Err(e) => ToolResult { content: e.to_string(), is_error: true },
+            Ok(output) => ToolResult::ok(output),
+            Err(e) => ToolResult::err(e.to_string()),
         }
     }
 
