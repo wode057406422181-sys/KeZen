@@ -95,9 +95,9 @@ async fn load_memory_file(path: PathBuf, memory_type: MemoryType) -> Option<Memo
 pub async fn load_memory_files() -> Vec<MemoryFile> {
     let mut results = Vec::new();
 
-    // 1. User Layer: ~/.infini/.infini.md
+    // 1. User Layer: ~/.kezen/.kezen.md
     if let Some(home) = dirs::home_dir() {
-        let user_mem = home.join(".infini").join(".infini.md");
+        let user_mem = home.join(".kezen").join(".kezen.md");
         if tokio::fs::try_exists(&user_mem).await.unwrap_or(false)
             && let Some(mf) = load_memory_file(user_mem, MemoryType::User).await {
                 results.push(mf);
@@ -137,15 +137,15 @@ pub async fn load_memory_files() -> Vec<MemoryFile> {
     traverse_dirs.reverse();
 
     for dir in traverse_dirs {
-        // Project: .infini.md
-        let prj_md = dir.join(".infini.md");
+        // Project: .kezen.md
+        let prj_md = dir.join(".kezen.md");
         if tokio::fs::try_exists(&prj_md).await.unwrap_or(false)
             && let Some(mf) = load_memory_file(prj_md, MemoryType::Project).await {
                 results.push(mf);
             }
 
-        // Project Rules: .infini/rules/*.md
-        let rules_dir = dir.join(".infini").join("rules");
+        // Project Rules: .kezen/rules/*.md
+        let rules_dir = dir.join(".kezen").join("rules");
         if tokio::fs::try_exists(&rules_dir).await.unwrap_or(false)
             && let Ok(mut entries) = tokio::fs::read_dir(&rules_dir).await {
                 while let Ok(Some(entry)) = entries.next_entry().await {
@@ -157,8 +157,8 @@ pub async fn load_memory_files() -> Vec<MemoryFile> {
                 }
             }
 
-        // Local: .infini.local.md
-        let local_md = dir.join(".infini.local.md");
+        // Local: .kezen.local.md
+        let local_md = dir.join(".kezen.local.md");
         if tokio::fs::try_exists(&local_md).await.unwrap_or(false)
             && let Some(mf) = load_memory_file(local_md, MemoryType::Local).await {
                 results.push(mf);
@@ -251,7 +251,7 @@ mod tests {
     fn test_format_global_files_only() {
         let files = vec![
             MemoryFile {
-                path: PathBuf::from("/home/user/.infini.md"),
+                path: PathBuf::from("/home/user/.kezen.md"),
                 memory_type: MemoryType::User,
                 content: "Always use tabs.".into(),
                 globs: None,
@@ -267,7 +267,7 @@ mod tests {
         // File with globs should be excluded
         let files = vec![
             MemoryFile {
-                path: PathBuf::from("/project/.infini/rules/rust.md"),
+                path: PathBuf::from("/project/.kezen/rules/rust.md"),
                 memory_type: MemoryType::Project,
                 content: "Use unwrap sparingly.".into(),
                 globs: Some(vec!["src/**/*.rs".into()]),
@@ -280,13 +280,13 @@ mod tests {
     fn test_format_mixed_global_and_conditional() {
         let files = vec![
             MemoryFile {
-                path: PathBuf::from("/home/user/.infini.md"),
+                path: PathBuf::from("/home/user/.kezen.md"),
                 memory_type: MemoryType::User,
                 content: "Global rule.".into(),
                 globs: None,
             },
             MemoryFile {
-                path: PathBuf::from("/project/.infini/rules/ts.md"),
+                path: PathBuf::from("/project/.kezen/rules/ts.md"),
                 memory_type: MemoryType::Project,
                 content: "TypeScript only.".into(),
                 globs: Some(vec!["*.ts".into()]),
@@ -301,7 +301,7 @@ mod tests {
     fn test_format_project_type_label() {
         let files = vec![
             MemoryFile {
-                path: PathBuf::from("/project/.infini.md"),
+                path: PathBuf::from("/project/.kezen.md"),
                 memory_type: MemoryType::Project,
                 content: "Project rules.".into(),
                 globs: None,
@@ -315,7 +315,7 @@ mod tests {
     fn test_format_local_type_label() {
         let files = vec![
             MemoryFile {
-                path: PathBuf::from("/project/.infini.local.md"),
+                path: PathBuf::from("/project/.kezen.local.md"),
                 memory_type: MemoryType::Local,
                 content: "Local rules.".into(),
                 globs: None,
@@ -330,7 +330,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_memory_file_basic() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(".infini.md");
+        let path = dir.path().join(".kezen.md");
         std::fs::write(&path, "Use Rust best practices.").unwrap();
 
         let mf = load_memory_file(path.clone(), MemoryType::User).await.unwrap();

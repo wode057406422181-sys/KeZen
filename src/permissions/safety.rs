@@ -19,7 +19,7 @@ const DANGEROUS_FILES: &[&str] = &[
     ".zshrc",
     ".zprofile",
     ".profile",
-    ".infini.md",
+    ".kezen.md",
 ];
 
 /// Directories whose contents should always prompt for permission.

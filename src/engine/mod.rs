@@ -23,7 +23,7 @@ use crate::permissions::{PermissionDecision, PermissionMode, PermissionState};
 /// - Sends `EngineEvent` to frontends via `event_tx`
 ///
 /// **Invariant**: This module MUST NOT import std::io, crossterm, or rustyline.
-pub struct InfiniEngine {
+pub struct KezenEngine {
     #[allow(dead_code)] // TODO: Use config for runtime settings (e.g. dynamic model switch, permission mode)
     config: AppConfig,
     client: Box<dyn LlmClient>,
@@ -37,14 +37,14 @@ pub struct InfiniEngine {
     permission_state: PermissionState,
 }
 
-impl InfiniEngine {
+impl KezenEngine {
     pub async fn new(
         config: AppConfig,
         action_rx: mpsc::Receiver<UserAction>,
         event_tx: mpsc::Sender<EngineEvent>,
         registry: ToolRegistry,
         permission_mode: PermissionMode,
-    ) -> Result<Self, crate::error::InfiniError> {
+    ) -> Result<Self, crate::error::KezenError> {
         let client = api::create_client(&config)?;
         // Build the system prompt asynchronously (git commands + memory file I/O).
         let system_prompt = build_system_prompt(config.model.as_deref()).await;
