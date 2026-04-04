@@ -37,6 +37,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub max_tokens: Option<u32>,
 
+    /// Use classic text REPL instead of TUI
+    #[arg(long, global = true)]
+    pub classic: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
