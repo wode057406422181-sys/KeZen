@@ -37,6 +37,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub max_tokens: Option<u32>,
 
+    /// Disable MCP server connections
+    #[arg(long, global = true)]
+    pub no_mcp: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
