@@ -49,8 +49,16 @@ pub const USING_TOOLS: &str = "\
    - To create files use FileWriteTool instead of cat with heredoc or echo redirection
    - To search for files use GlobTool instead of find or ls
    - To search the content of files, use GrepTool instead of grep or rg
+   - To search the web for current information, use WebSearch instead of curl or manual browsing
+   - To fetch and read web page content, use WebFetch instead of curl or wget
    - Reserve using the BashTool exclusively for system commands and terminal operations that require shell execution. If you are unsure and there is a relevant dedicated tool, default to using the dedicated tool and only fallback on using the BashTool tool for these if it is absolutely necessary.
- - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead.";
+ - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead.
+
+# WebSearch and WebFetch usage
+ - Use WebSearch to find up-to-date information, documentation, or API references beyond your knowledge cutoff. After using WebSearch results, include a Sources section with markdown hyperlinks.
+ - Use WebFetch to read specific web pages. When you provide a prompt parameter, the tool will use the configured LLM to extract and summarize relevant information from the page.
+ - WebFetch cached results for 15 minutes. Subsequent fetches of the same URL within the TTL will return the cached content instantly.
+ - For GitHub URLs, prefer using the gh CLI via Bash instead (e.g., gh pr view, gh issue view, gh api).";
 
 pub const TONE_AND_STYLE: &str = "\
 # Tone and style

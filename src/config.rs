@@ -25,6 +25,25 @@ impl fmt::Display for Provider {
     }
 }
 
+/// Configuration for the web search backend.
+///
+/// Supported providers: "brave", "searxng", "google_cse", "bing".
+/// Set via `[search]` section in `~/.kezen/config/config.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchConfig {
+    /// Search backend provider name.
+    #[serde(default = "default_search_provider")]
+    pub provider: String,
+    /// API key for the search provider.
+    pub api_key: Option<String>,
+    /// Base URL (e.g. SearXNG instance URL, or Google CSE CX id).
+    pub base_url: Option<String>,
+}
+
+fn default_search_provider() -> String {
+    "brave".to_string()
+}
+
 /// Application configuration
 ///
 /// Loading priority (high → low):
@@ -63,6 +82,9 @@ pub struct AppConfig {
     /// Ollama, vLLM, etc.). Defaults to `true` for the official OpenAI API.
     #[serde(default = "default_true")]
     pub include_stream_usage: bool,
+
+    /// Web search configuration (loaded from [search] section).
+    pub search: Option<SearchConfig>,
 }
 
 impl Default for AppConfig {
@@ -76,6 +98,7 @@ impl Default for AppConfig {
             thinking: false,
             user_agent: None,
             include_stream_usage: true,
+            search: None,
         }
     }
 }
@@ -135,6 +158,22 @@ impl AppConfig {
             config.model = Some(val);
         }
 
+        // Search-specific env overrides
+        if let Ok(val) = std::env::var("KEZEN_SEARCH_PROVIDER") {
+            config.search.get_or_insert_with(|| SearchConfig {
+                provider: default_search_provider(),
+                api_key: None,
+                base_url: None,
+            }).provider = val;
+        }
+        if let Ok(val) = std::env::var("KEZEN_SEARCH_API_KEY") {
+            config.search.get_or_insert_with(|| SearchConfig {
+                provider: default_search_provider(),
+                api_key: None,
+                base_url: None,
+            }).api_key = Some(val);
+        }
+
         Ok(config)
     }
 
@@ -185,6 +224,7 @@ impl fmt::Debug for AppConfig {
             .field("thinking", &self.thinking)
             .field("user_agent", &self.user_agent)
             .field("include_stream_usage", &self.include_stream_usage)
+            .field("search", &self.search)
             .finish()
     }
 }

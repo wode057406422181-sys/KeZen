@@ -7,6 +7,9 @@ pub mod file_write;
 pub mod file_edit;
 pub mod grep;
 pub mod glob;
+pub mod web_cache;
+pub mod web_search;
+pub mod web_fetch;
 
 use crate::permissions::PermissionResult;
 

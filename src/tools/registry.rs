@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::Tool;
+use crate::config::AppConfig;
 
 /// Central registry mapping tool names to their implementations.
 ///
@@ -47,7 +48,11 @@ impl Default for ToolRegistry {
 }
 
 /// Create a registry pre-loaded with all built-in tools.
-pub fn create_default_registry() -> ToolRegistry {
+///
+/// `config` is needed for tools that require API keys or provider
+/// settings (e.g. WebSearchTool needs SearchConfig, WebFetchTool needs
+/// the full AppConfig for sub-LLM content extraction).
+pub fn create_default_registry(config: &AppConfig) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(super::bash::BashTool));
     registry.register(Arc::new(super::file_read::FileReadTool));
@@ -55,6 +60,8 @@ pub fn create_default_registry() -> ToolRegistry {
     registry.register(Arc::new(super::file_edit::FileEditTool));
     registry.register(Arc::new(super::grep::GrepTool));
     registry.register(Arc::new(super::glob::GlobTool));
+    registry.register(Arc::new(super::web_search::WebSearchTool::new(config.search.clone())));
+    registry.register(Arc::new(super::web_fetch::WebFetchTool::new(Some(config.clone()))));
     registry
 }
 
@@ -82,13 +89,17 @@ mod tests {
 
     #[test]
     fn test_create_default_registry() {
-        let registry = create_default_registry();
+        let config = AppConfig::default();
+        let registry = create_default_registry(&config);
         assert!(registry.get("Bash").is_some());
         assert!(registry.get("FileRead").is_some());
         assert!(registry.get("FileWrite").is_some());
         assert!(registry.get("FileEdit").is_some());
         assert!(registry.get("Grep").is_some());
         assert!(registry.get("Glob").is_some());
-        assert_eq!(registry.schemas().len(), 6);
+        assert!(registry.get("WebSearch").is_some());
+        assert!(registry.get("WebFetch").is_some());
+        assert_eq!(registry.schemas().len(), 8);
     }
 }
+
