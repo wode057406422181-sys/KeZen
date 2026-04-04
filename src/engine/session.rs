@@ -101,6 +101,19 @@ impl Session {
         self.messages = messages;
     }
 
+    /// Reset token counters after compaction (Fix #3).
+    ///
+    /// After context compaction, the old cumulative `total_input_tokens` no
+    /// longer reflects the actual conversation size.  If we leave them as-is,
+    /// `should_auto_compact` will immediately re-trigger, causing an infinite
+    /// compact loop.  Resetting to zero lets the counters build back up
+    /// naturally from the compacted conversation.
+    pub fn reset_usage_counters(&mut self) {
+        self.total_input_tokens = 0;
+        self.total_output_tokens = 0;
+        self.total_cost_usd = 0.0;
+    }
+
     /// Return the number of current messages.
     pub fn message_count(&self) -> usize {
         self.messages.len()

@@ -26,8 +26,8 @@ pub trait LlmClient: Send + Sync {
     /// Returns a stream of `StreamEvent` items that the Engine consumes.
     ///
     /// * `max_tokens_override` — When `Some(n)`, overrides the client's default
-    ///   `max_tokens` for this single request (e.g. compact uses 20,000 to
-    ///   match Claude Code's `COMPACT_MAX_OUTPUT_TOKENS`).
+    ///   `max_tokens` for this single request (e.g. compact uses 20,000 as
+    ///   `COMPACT_MAX_OUTPUT_TOKENS`).
     async fn stream(
         &self,
         messages: &[Message],

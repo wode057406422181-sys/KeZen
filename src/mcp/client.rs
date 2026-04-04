@@ -6,6 +6,7 @@ use std::time::Duration;
 use super::config::{McpConfig, McpServerConfig};
 use super::transport::StdioTransport;
 use super::tool::McpTool;
+use crate::constants::api::MCP_PROTOCOL_VERSION;
 use crate::tools::Tool;
 
 #[derive(Debug, Clone)]
@@ -30,7 +31,7 @@ impl McpClient {
 
         // 1. initialize
         let init_req = json!({
-            "protocolVersion": "2024-11-05",
+            "protocolVersion": MCP_PROTOCOL_VERSION,
             "capabilities": {
                 "roots": { "listChanged": true },
                 "sampling": {}
@@ -115,7 +116,7 @@ impl McpClient {
         }
     }
 
-    pub async fn shutdown(&mut self) {
+    pub async fn shutdown(&self) {
         self.transport.shutdown().await;
     }
 }
@@ -136,38 +137,46 @@ pub async fn connect_all_servers() -> Result<McpConnectResult> {
     let mut mcp_tools: Vec<Arc<dyn Tool>> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     
-    if let Ok(Some(config)) = McpConfig::load().await {
-        for (server_name, server_cfg) in config.servers {
-            // Check deny list first
-            if config.denied_servers.contains(&server_name) {
-                warnings.push(format!("[MCP] Skipping '{}': server is in denied list", server_name));
-                continue;
-            }
-            
-            // Check allow list if it's not empty
-            if !config.allowed_servers.is_empty() && !config.allowed_servers.contains(&server_name) {
-                warnings.push(format!("[MCP] Skipping '{}': server is not in allowed list", server_name));
-                continue;
-            }
+    // Fix #6: Match on all arms instead of silently swallowing Err
+    match McpConfig::load().await {
+        Ok(Some(config)) => {
+            for (server_name, server_cfg) in config.servers {
+                // Check deny list first
+                if config.denied_servers.contains(&server_name) {
+                    warnings.push(format!("[MCP] Skipping '{}': server is in denied list", server_name));
+                    continue;
+                }
+                
+                // Check allow list if it's not empty
+                if !config.allowed_servers.is_empty() && !config.allowed_servers.contains(&server_name) {
+                    warnings.push(format!("[MCP] Skipping '{}': server is not in allowed list", server_name));
+                    continue;
+                }
 
-            match McpClient::connect(&server_name, &server_cfg).await {
-                Ok(client) => {
-                    let client_arc = Arc::new(tokio::sync::Mutex::new(client));
-                    // Register each tool info into an McpTool wrapper
-                    let tools_info = {
-                        let c = client_arc.lock().await;
-                        c.tools.clone()
-                    };
-                    
-                    for info in tools_info {
-                        let wrapper = McpTool::new(&server_name, info, client_arc.clone());
-                        mcp_tools.push(Arc::new(wrapper));
+                match McpClient::connect(&server_name, &server_cfg).await {
+                    Ok(client) => {
+                        // Fix #1: Use Arc<McpClient> directly instead of
+                        // Arc<Mutex<McpClient>>.  call_tool() only needs &self
+                        // and the transport is already concurrency-safe internally.
+                        let client_arc = Arc::new(client);
+                        let tools_info = client_arc.tools.clone();
+                        
+                        for info in tools_info {
+                            let wrapper = McpTool::new(&server_name, info, client_arc.clone());
+                            mcp_tools.push(Arc::new(wrapper));
+                        }
+                    }
+                    Err(e) => {
+                        warnings.push(format!("Failed to connect to MCP server '{}': {}", server_name, e));
                     }
                 }
-                Err(e) => {
-                    warnings.push(format!("Failed to connect to MCP server '{}': {}", server_name, e));
-                }
             }
+        }
+        Ok(None) => {
+            // No mcp.json config file found, nothing to do
+        }
+        Err(e) => {
+            warnings.push(format!("[MCP] Failed to load config: {}", e));
         }
     }
 

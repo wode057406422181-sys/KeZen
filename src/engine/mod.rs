@@ -124,8 +124,12 @@ impl KezenEngine {
         // Agentic loop: keeps calling the LLM until it stops requesting tools
         // or we hit the safety cap.
         loop {
-            if compact::should_auto_compact(self.session.total_usage().input_tokens, &self.session.model_name, self.config.context_window) {
-                self.compact_context().await;
+            // Fix #4: Skip auto-compact for very short conversations (< 4 messages)
+            // to avoid edge cases where keep_count logic produces empty results.
+            if self.session.message_count() >= 4
+                && compact::should_auto_compact(self.session.total_usage().input_tokens, &self.session.model_name, self.config.context_window)
+            {
+                self.compact_context(None).await;
             }
 
             if iterations >= max_iterations {
@@ -448,7 +452,9 @@ impl KezenEngine {
                 let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
             }
             "compact" => {
-                self.compact_context().await;
+                // Fix #7: Pass the user-supplied topic to compact_context
+                let topic = if args.is_empty() { None } else { Some(args.to_string()) };
+                self.compact_context(topic).await;
             }
             "model" => {
                 if args.is_empty() {
@@ -534,7 +540,10 @@ impl KezenEngine {
         }
     }
 
-    async fn compact_context(&mut self) {
+    /// Compact the conversation context into a summary.
+    ///
+    /// * `topic` — Optional focus area for the summary (e.g. "/compact MCP implementation").
+    async fn compact_context(&mut self, topic: Option<String>) {
         const MAX_COMPACT_RETRIES: usize = 2;
 
         let _ = self.event_tx.send(EngineEvent::CompactProgress {
@@ -542,9 +551,14 @@ impl KezenEngine {
         }).await;
 
         let mut messages_to_summarize = self.session.messages().to_vec();
+        let mut prompt = compact::compact_prompt();
+        // Fix #7: If the user specified a topic, append it to the compact prompt
+        if let Some(ref t) = topic {
+            prompt.push_str(&format!("\n\nFocus particularly on: {}", t));
+        }
         messages_to_summarize.push(Message {
             role: Role::User,
-            content: vec![ContentBlock::Text { text: compact::compact_prompt() }],
+            content: vec![ContentBlock::Text { text: prompt }],
         });
 
         let mut last_error: Option<String> = None;
@@ -591,8 +605,6 @@ impl KezenEngine {
                             // Ensure role alternation: summary is User, so if
                             // the kept tail also starts with User, insert an
                             // empty Assistant placeholder to satisfy the API.
-                            // (Aligned with Claude Code's normalizeMessagesForAPI
-                            // approach.)
                             if keep_count > 0 {
                                 let start_idx = original_messages.len() - keep_count;
                                 if original_messages[start_idx].role == Role::User {
@@ -607,6 +619,11 @@ impl KezenEngine {
                             }
 
                             self.session.replace_messages(new_messages);
+
+                            // Fix #3: Reset token counters after successful compaction
+                            // to prevent should_auto_compact from immediately re-triggering
+                            // on the next agentic loop iteration (infinite compact loop).
+                            self.session.reset_usage_counters();
 
                             let _ = self.event_tx.send(EngineEvent::CompactProgress {
                                 message: "Context compacted.".into(),

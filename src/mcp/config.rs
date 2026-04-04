@@ -8,7 +8,7 @@ use tokio::fs;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpConfig {
     /// `IndexMap` preserves insertion order from the JSON file, matching
-    /// the behaviour of JS `Object.entries()` in Claude Code. This means
+    /// the behaviour of JS `Object.entries()`. This means
     /// servers appear in the tool schema in the order the user wrote them,
     /// which is both deterministic and intuitive.
     #[serde(default, rename = "mcpServers")]

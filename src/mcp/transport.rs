@@ -6,15 +6,19 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::oneshot;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use std::collections::HashMap;
 
 use super::config::McpServerConfig;
 
 pub struct StdioTransport {
-    pub(crate) child: Child,
-    pub(crate) next_id: AtomicU64,
-    pub(crate) request_tx: mpsc::Sender<(Value, oneshot::Sender<Result<Value>>)>,
-    pub(crate) notify_tx: mpsc::Sender<Value>,
+    /// Wrapped in `Option` so `Drop` can take ownership and spawn an async
+    /// kill task via `tokio::spawn`.  The `Option` is always `Some` during
+    /// normal operation; it is only `None` inside `Drop`.
+    child: Mutex<Option<Child>>,
+    next_id: AtomicU64,
+    request_tx: mpsc::Sender<(Value, oneshot::Sender<Result<Value>>)>,
+    notify_tx: mpsc::Sender<Value>,
 }
 
 impl StdioTransport {
@@ -40,7 +44,7 @@ impl StdioTransport {
         tokio::spawn(Self::io_loop(stdin, stdout, request_rx, notify_rx));
 
         Ok(Self {
-            child,
+            child: Mutex::new(Some(child)),
             next_id: AtomicU64::new(1),
             request_tx,
             notify_tx,
@@ -51,7 +55,7 @@ impl StdioTransport {
     ///
     /// Takes `&self` (not `&mut self`) thanks to `AtomicU64` for ID generation
     /// and channel-based I/O. This allows concurrent tool calls without holding
-    /// the Mutex for the entire round-trip.
+    /// any external lock for the entire round-trip.
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
@@ -79,8 +83,11 @@ impl StdioTransport {
         Ok(())
     }
 
-    pub async fn shutdown(&mut self) {
-        let _ = self.child.kill().await;
+    pub async fn shutdown(&self) {
+        let mut guard = self.child.lock().await;
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill().await;
+        }
     }
 
     async fn io_loop(
@@ -152,6 +159,27 @@ impl StdioTransport {
                     }
                 }
             }
+        }
+
+        // Fix #2: Drain all pending requests with explicit error messages
+        // so callers get "MCP server connection closed" instead of a cryptic
+        // "channel closed" RecvError.
+        for (_, tx) in pending_requests.drain() {
+            let _ = tx.send(Err(anyhow::anyhow!("MCP server connection closed")));
+        }
+    }
+}
+
+/// Fix #5: Ensure the child process is killed when the transport is dropped.
+/// Uses `tokio::spawn` to run the async kill from a synchronous `Drop` context.
+impl Drop for StdioTransport {
+    fn drop(&mut self) {
+        // `get_mut()` avoids the async lock — safe in Drop since we have &mut self.
+        let child_opt = self.child.get_mut().take();
+        if let Some(mut child) = child_opt {
+            tokio::spawn(async move {
+                let _ = child.kill().await;
+            });
         }
     }
 }

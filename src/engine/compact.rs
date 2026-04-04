@@ -1,10 +1,6 @@
 use crate::constants::prompts::{COMPACT_NO_TOOLS_PREAMBLE, COMPACT_PROMPT, COMPACT_NO_TOOLS_TRAILER};
 
-/// Maximum output tokens for compact operations.
-///
-/// Aligned with Claude Code's `COMPACT_MAX_OUTPUT_TOKENS = 20_000`.
-/// Based on their p99.99 data, compact summaries never exceed ~17,387 tokens.
-pub const COMPACT_MAX_OUTPUT_TOKENS: u32 = 20_000;
+pub use crate::constants::defaults::COMPACT_MAX_OUTPUT_TOKENS;
 
 /// Returns the context window size for a given model.
 pub fn context_window_for_model(model: &str) -> u64 {

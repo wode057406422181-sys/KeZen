@@ -2,7 +2,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use crate::tools::{Tool, ToolResult};
 use super::client::{McpClient, McpToolInfo};
@@ -14,11 +13,14 @@ pub struct McpTool {
     description: String,
     schema: Value,
     read_only_hint: bool,
-    client: Arc<Mutex<McpClient>>,
+    /// Fix #1: Use `Arc<McpClient>` instead of `Arc<Mutex<McpClient>>`.
+    /// `call_tool()` only needs `&self` and the transport is internally
+    /// concurrency-safe (AtomicU64 + channels), so no external lock is needed.
+    client: Arc<McpClient>,
 }
 
 impl McpTool {
-    pub fn new(server_name: &str, info: McpToolInfo, client: Arc<Mutex<McpClient>>) -> Self {
+    pub fn new(server_name: &str, info: McpToolInfo, client: Arc<McpClient>) -> Self {
         let display_name = build_mcp_tool_name(server_name, &info.name);
         Self {
             display_name,
@@ -47,8 +49,9 @@ impl Tool for McpTool {
     }
 
     async fn call(&self, input: Value) -> ToolResult {
-        let client = self.client.lock().await;
-        match client.call_tool(&self.tool_name, input).await {
+        // Fix #1: No Mutex lock needed — call_tool takes &self and the
+        // transport handles concurrency internally via channels.
+        match self.client.call_tool(&self.tool_name, input).await {
             Ok(output) => ToolResult { content: output, is_error: false },
             Err(e) => ToolResult { content: e.to_string(), is_error: true },
         }
@@ -90,9 +93,9 @@ impl Tool for McpTool {
 
 /// Build display name: mcp__<server>__<tool>
 ///
-/// Aligns with Claude Code's `normalizeNameForMCP`: replaces non-alphanumeric
-/// characters with `_`, collapses consecutive underscores, and strips
-/// leading/trailing underscores to avoid delimiter confusion.
+/// Replaces non-alphanumeric characters with `_`, collapses consecutive
+/// underscores, and strips leading/trailing underscores to avoid delimiter
+/// confusion.
 fn normalize_name(name: &str) -> String {
     let replaced: String = name.chars()
         .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
@@ -116,7 +119,7 @@ fn normalize_name(name: &str) -> String {
 }
 
 pub fn build_mcp_tool_name(server: &str, tool: &str) -> String {
-    format!("mcp__{}__{}" , normalize_name(server), normalize_name(tool))
+    format!("mcp__{}__{}",  normalize_name(server), normalize_name(tool))
 }
 
 #[cfg(test)]
