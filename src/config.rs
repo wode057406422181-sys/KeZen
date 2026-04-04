@@ -109,7 +109,7 @@ impl AppConfig {
                 config = file_config;
                 // Ensure defaults for missing optional fields
                 if config.max_tokens.is_none() {
-                    config.max_tokens = Some(8192);
+                    config.max_tokens = Some(DEFAULT_MAX_TOKENS);
                 }
             }
         }
@@ -214,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn default_max_tokens_is_8192() {
+    fn default_max_tokens_is_correct() {
         assert_eq!(default_config().max_tokens, Some(DEFAULT_MAX_TOKENS));
     }
 
