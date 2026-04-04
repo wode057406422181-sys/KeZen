@@ -155,6 +155,17 @@ impl AppConfig {
     ///
     /// Priority: config file < ANTHROPIC/OPENAI env < KEZEN_* env
     /// (CLI overrides are applied in main.rs after this call)
+    ///
+    /// # Blocking I/O
+    ///
+    /// This method uses `std::fs::read_to_string` and `path.exists()`
+    /// (synchronous / blocking I/O) **intentionally**.  It is called
+    /// from the synchronous `main()` entry point *before* the tokio
+    /// runtime is started, so there is no async runtime to block.
+    ///
+    /// **Do NOT call this from an async context.**  If you need to
+    /// reload config at runtime (e.g. from `/model`), create a
+    /// separate async variant using `tokio::fs`.
     pub fn load() -> Result<Self> {
         let mut config = Self::default();
 
@@ -218,7 +229,13 @@ impl AppConfig {
         Ok(config)
     }
 
-    /// Save configuration to the default config file
+    /// Save configuration to the default config file.
+    ///
+    /// # Blocking I/O
+    ///
+    /// Uses synchronous `std::fs::write`.  Only call from a synchronous
+    /// context or from `tokio::task::spawn_blocking`.  See [`load()`]
+    /// for rationale.
     pub fn save(&self) -> Result<()> {
         let path = Self::config_path()?;
         if let Some(parent) = path.parent() {
