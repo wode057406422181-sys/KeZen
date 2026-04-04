@@ -13,58 +13,58 @@ pub struct SessionSnapshot {
 }
 
 pub fn get_sessions_dir() -> PathBuf {
-    dirs::data_local_dir()
+    dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("infini")
+        .join(".infini")
         .join("sessions")
 }
 
-pub fn save_snapshot(snap: &SessionSnapshot) -> anyhow::Result<()> {
+pub async fn save_snapshot(snap: &SessionSnapshot) -> anyhow::Result<()> {
     let dir = get_sessions_dir();
-    std::fs::create_dir_all(&dir)?;
+    tokio::fs::create_dir_all(&dir).await?;
     let p = dir.join(format!("{}.json", snap.id));
     let json = serde_json::to_string_pretty(snap)?;
-    std::fs::write(p, json)?;
+    tokio::fs::write(p, json).await?;
     Ok(())
 }
 
-pub fn list_sessions() -> anyhow::Result<Vec<SessionSnapshot>> {
+pub async fn list_sessions() -> anyhow::Result<Vec<SessionSnapshot>> {
     let dir = get_sessions_dir();
-    if !dir.exists() {
+    if !tokio::fs::try_exists(&dir).await.unwrap_or(false) {
         return Ok(vec![]);
     }
     let mut snaps = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
+    let mut entries = tokio::fs::read_dir(dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
         if entry.path().extension().is_some_and(|e| e == "json")
-            && let Ok(c) = std::fs::read_to_string(entry.path())
-            && let Ok(snap) = serde_json::from_str::<SessionSnapshot>(&c) {
-                snaps.push(snap);
-            }
+            && let Ok(c) = tokio::fs::read_to_string(entry.path()).await
+                && let Ok(snap) = serde_json::from_str::<SessionSnapshot>(&c) {
+                    snaps.push(snap);
+                }
     }
     snaps.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)); // Descending
     Ok(snaps)
 }
 
-pub fn load_latest_snapshot() -> anyhow::Result<SessionSnapshot> {
-    let snaps = list_sessions()?;
+pub async fn load_latest_snapshot() -> anyhow::Result<SessionSnapshot> {
+    let snaps = list_sessions().await?;
     snaps
         .into_iter()
         .next()
         .ok_or_else(|| anyhow::anyhow!("No previous session found"))
 }
 
-pub fn load_snapshot_by_id(id: &str) -> anyhow::Result<SessionSnapshot> {
+pub async fn load_snapshot_by_id(id: &str) -> anyhow::Result<SessionSnapshot> {
     let p = get_sessions_dir().join(format!("{}.json", id));
-    let c = std::fs::read_to_string(p)?;
+    let c = tokio::fs::read_to_string(p).await?;
     Ok(serde_json::from_str(&c)?)
 }
 
-pub fn load_snapshot(id: Option<&str>) -> anyhow::Result<SessionSnapshot> {
+pub async fn load_snapshot(id: Option<&str>) -> anyhow::Result<SessionSnapshot> {
     if let Some(target) = id {
-        load_snapshot_by_id(target)
+        load_snapshot_by_id(target).await
     } else {
-        load_latest_snapshot()
+        load_latest_snapshot().await
     }
 }
 

@@ -111,7 +111,7 @@ impl Tool for GlobTool {
         true
     }
 
-    fn check_permissions(&self, _input: &serde_json::Value) -> crate::permissions::PermissionResult {
+    async fn check_permissions(&self, _input: &serde_json::Value) -> crate::permissions::PermissionResult {
         crate::permissions::PermissionResult::Allow
     }
 }

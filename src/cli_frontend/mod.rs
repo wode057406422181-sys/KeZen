@@ -19,7 +19,7 @@ pub async fn run_cli(
     let (event_tx, event_rx) = mpsc::channel::<EngineEvent>(32);
 
     let registry = create_default_registry();
-    let engine = InfiniEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode)?;
+    let engine = InfiniEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode).await?;
 
     // Spawn the engine loop in a background task
     tokio::spawn(async move {

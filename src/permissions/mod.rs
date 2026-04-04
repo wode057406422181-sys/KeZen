@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub enum RiskLevel {
     Low,
     Medium,
+    /// TODO: Produce High for extremely dangerous operations (e.g. rm -rf /, format disk)
     High,
 }
 
@@ -90,7 +91,7 @@ impl PermissionState {
     }
 
     /// Add a deny rule.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Expose via /deny command or config file
     pub fn add_deny_rule(&mut self, tool_name: &str, content: Option<&str>) {
         let rule = PermissionRuleValue {
             tool_name: tool_name.to_string(),

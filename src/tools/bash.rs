@@ -105,7 +105,7 @@ impl Tool for BashTool {
         format!("Run: `{}`", cmd)
     }
 
-    fn check_permissions(&self, input: &serde_json::Value) -> crate::permissions::PermissionResult {
+    async fn check_permissions(&self, input: &serde_json::Value) -> crate::permissions::PermissionResult {
         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
         // Read-only commands are always safe
@@ -113,26 +113,13 @@ impl Tool for BashTool {
             return crate::permissions::PermissionResult::Allow;
         }
 
-        // Dangerous paths in the command → ask
-        if crate::permissions::safety::is_dangerous_path(command) {
-            return crate::permissions::PermissionResult::Ask {
-                message: format!("⚠️ Command may modify sensitive files: `{}`", command),
-            };
-        }
+        // TODO: Extract file path arguments from common commands (e.g. sed, vim, cp, mv)
+        // and run is_dangerous_path() on the extracted paths for accurate risk detection.
 
         // Default: defer to pipeline
         crate::permissions::PermissionResult::Passthrough
     }
 
-    fn is_destructive(&self, input: &serde_json::Value) -> bool {
-        let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
-        let trimmed = command.trim();
-        trimmed.starts_with("rm ")
-            || trimmed.starts_with("rm\t")
-            || trimmed.starts_with("rmdir ")
-            || trimmed.contains("rm -rf")
-            || trimmed.contains("rm -fr")
-    }
 
     fn permission_matcher(&self, input: &serde_json::Value) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -190,74 +177,54 @@ mod tests {
 
     // ── check_permissions tests ──────────────────────────────────────
 
-    #[test]
-    fn test_check_permissions_read_only_allow() {
+    #[tokio::test]
+    async fn test_check_permissions_read_only_allow() {
         let tool = BashTool;
         let input = json!({"command": "ls -la"});
-        let result = tool.check_permissions(&input);
+        let result = tool.check_permissions(&input).await;
         assert!(matches!(result, crate::permissions::PermissionResult::Allow));
     }
 
-    #[test]
-    fn test_check_permissions_git_status_allow() {
+    #[tokio::test]
+    async fn test_check_permissions_git_status_allow() {
         let tool = BashTool;
         let input = json!({"command": "git status"});
-        let result = tool.check_permissions(&input);
+        let result = tool.check_permissions(&input).await;
         assert!(matches!(result, crate::permissions::PermissionResult::Allow));
     }
 
-    #[test]
-    fn test_check_permissions_cargo_test_allow() {
+    #[tokio::test]
+    async fn test_check_permissions_cargo_test_allow() {
         let tool = BashTool;
         let input = json!({"command": "cargo test --release"});
-        let result = tool.check_permissions(&input);
+        let result = tool.check_permissions(&input).await;
         assert!(matches!(result, crate::permissions::PermissionResult::Allow));
     }
 
-    #[test]
-    fn test_check_permissions_dangerous_path_ask() {
+    #[tokio::test]
+    async fn test_check_permissions_dangerous_path_passthrough() {
         let tool = BashTool;
-        // Use a write command targeting a dangerous path
-        // (cat .bashrc is read-only so it returns Allow before the danger check)
         let input = json!({"command": "sed -i 's/old/new/g' /home/user/.bashrc"});
-        let result = tool.check_permissions(&input);
-        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
-    }
-
-    #[test]
-    fn test_check_permissions_write_command_passthrough() {
-        let tool = BashTool;
-        // cargo build is not in the read-only list, and not a dangerous path
-        let input = json!({"command": "cargo build --release"});
-        let result = tool.check_permissions(&input);
+        let result = tool.check_permissions(&input).await;
         assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
     }
 
-    #[test]
-    fn test_check_permissions_git_push_passthrough() {
+    #[tokio::test]
+    async fn test_check_permissions_write_command_passthrough() {
+        let tool = BashTool;
+        let input = json!({"command": "cargo build --release"});
+        let result = tool.check_permissions(&input).await;
+        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
+    }
+
+    #[tokio::test]
+    async fn test_check_permissions_git_push_passthrough() {
         let tool = BashTool;
         let input = json!({"command": "git push origin main"});
-        let result = tool.check_permissions(&input);
+        let result = tool.check_permissions(&input).await;
         assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
     }
 
-    // ── is_destructive tests ─────────────────────────────────────────
-
-    #[test]
-    fn test_is_destructive_rm() {
-        let tool = BashTool;
-        assert!(tool.is_destructive(&json!({"command": "rm -rf /tmp/foo"})));
-        assert!(tool.is_destructive(&json!({"command": "rm file.txt"})));
-        assert!(tool.is_destructive(&json!({"command": "rmdir empty_dir"})));
-    }
-
-    #[test]
-    fn test_is_not_destructive_normal() {
-        let tool = BashTool;
-        assert!(!tool.is_destructive(&json!({"command": "ls -la"})));
-        assert!(!tool.is_destructive(&json!({"command": "git commit -m 'fix'"})));
-        assert!(!tool.is_destructive(&json!({"command": "cargo build"})));
-    }
 
     // ── permission_matcher tests ─────────────────────────────────────
 

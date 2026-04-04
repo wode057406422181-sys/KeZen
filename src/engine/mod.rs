@@ -24,7 +24,7 @@ use crate::permissions::{PermissionDecision, PermissionMode, PermissionState};
 ///
 /// **Invariant**: This module MUST NOT import std::io, crossterm, or rustyline.
 pub struct InfiniEngine {
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Use config for runtime settings (e.g. dynamic model switch, permission mode)
     config: AppConfig,
     client: Box<dyn LlmClient>,
     session: Session,
@@ -38,7 +38,7 @@ pub struct InfiniEngine {
 }
 
 impl InfiniEngine {
-    pub fn new(
+    pub async fn new(
         config: AppConfig,
         action_rx: mpsc::Receiver<UserAction>,
         event_tx: mpsc::Sender<EngineEvent>,
@@ -46,11 +46,8 @@ impl InfiniEngine {
         permission_mode: PermissionMode,
     ) -> Result<Self, crate::error::InfiniError> {
         let client = api::create_client(&config)?;
-        // Build the system prompt once at construction.
-        // NOTE: `build_system_prompt` calls `std::process::Command` (blocking).
-        // This runs on the tokio thread that calls `InfiniEngine::new()`; callers
-        // should wrap this in `tokio::task::spawn_blocking` if latency is critical.
-        let system_prompt = build_system_prompt(config.model.as_deref());
+        // Build the system prompt asynchronously (git commands + memory file I/O).
+        let system_prompt = build_system_prompt(config.model.as_deref()).await;
         let pricing = crate::cost::get_model_pricing(config.model.as_deref().unwrap_or(""));
         
         Ok(Self {
@@ -260,7 +257,7 @@ impl InfiniEngine {
                         let is_read_only = tool.is_read_only(&input);
                         let is_file_tool = tool.is_file_tool();
                         let desc = tool.permission_description(&input);
-                        let tool_check = tool.check_permissions(&input);
+                        let tool_check = tool.check_permissions(&input).await;
                         let suggestion = tool.permission_suggestion(&input);
 
                         // Compute the permission decision in a scope so the matcher

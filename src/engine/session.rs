@@ -74,7 +74,7 @@ impl Session {
     }
 
     /// Get cumulative usage across all turns.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Expose via /usage command or status bar
     pub fn total_usage(&self) -> Usage {
         Usage {
             input_tokens: self.total_input_tokens,
@@ -83,7 +83,7 @@ impl Session {
     }
 
     /// Clear all messages (for /clear command).
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Wire up to /clear REPL command
     pub fn clear(&mut self) {
         self.messages.clear();
     }

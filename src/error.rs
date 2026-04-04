@@ -20,7 +20,7 @@ pub enum InfiniError {
     #[error("Stream error: {0}")]
     Stream(String),
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Use for HTTP 5xx error responses from LLM providers
     #[error("Server error: {0}")]
     Server(String),
 

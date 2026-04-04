@@ -16,14 +16,14 @@ pub enum EngineEvent {
     Done,
     /// Tool execution started
     ToolUseStart {
-        #[allow(dead_code)] // reserved for permission gating
+        #[allow(dead_code)] // TODO: Use id for frontend tool-output correlation and cancellation
         id: String,
         name: String,
         input: serde_json::Value,
     },
     /// Tool execution result
     ToolResult {
-        #[allow(dead_code)] // reserved for permission gating
+        #[allow(dead_code)] // TODO: Use id for frontend tool-output correlation and cancellation
         id: String,
         output: String,
         is_error: bool,

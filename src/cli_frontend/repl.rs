@@ -65,7 +65,7 @@ pub async fn run_repl(
                         }
                         "/resume" => {
                             let target = if parts.len() > 1 { Some(parts[1]) } else { None };
-                            match crate::session::load_snapshot(target) {
+                            match crate::session::load_snapshot(target).await {
                                 Ok(snap) => {
                                     println!("  {} Resuming session: {}", "ℹ".blue(), snap.id);
                                     session_in_tokens = snap.input_tokens;
@@ -193,7 +193,7 @@ async fn handle_engine_events(
                         print_cost(&usage);
                     }
                     Some(EngineEvent::SessionSnapshotUpdate { snapshot }) => {
-                        let _ = crate::session::save_snapshot(&snapshot);
+                        let _ = crate::session::save_snapshot(&snapshot).await;
                     }
                     Some(EngineEvent::Error { message }) => {
                         print_error(&message);

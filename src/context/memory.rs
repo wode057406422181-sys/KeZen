@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 
 const MAX_MEMORY_CHARACTER_COUNT: usize = 40_000;
@@ -57,8 +56,8 @@ fn parse_frontmatter(text: &str) -> (Option<Vec<String>>, String) {
     (globs, content.trim_start().to_string())
 }
 
-fn load_memory_file(path: PathBuf, memory_type: MemoryType) -> Option<MemoryFile> {
-    if let Ok(mut text) = fs::read_to_string(&path) {
+async fn load_memory_file(path: PathBuf, memory_type: MemoryType) -> Option<MemoryFile> {
+    if let Ok(mut text) = tokio::fs::read_to_string(&path).await {
         if text.len() > MAX_MEMORY_CHARACTER_COUNT {
             // Truncate to word boundary or just limit chars
             let mut byte_idx = MAX_MEMORY_CHARACTER_COUNT.min(text.len());
@@ -82,26 +81,27 @@ fn load_memory_file(path: PathBuf, memory_type: MemoryType) -> Option<MemoryFile
     }
 }
 
-pub fn load_memory_files() -> Vec<MemoryFile> {
+pub async fn load_memory_files() -> Vec<MemoryFile> {
     let mut results = Vec::new();
 
-    // 1. User Layer: ~/.infini.md
+    // 1. User Layer: ~/.infini/.infini.md
     if let Some(home) = dirs::home_dir() {
-        let user_mem = home.join(".infini.md");
-        if user_mem.exists()
-            && let Some(mf) = load_memory_file(user_mem, MemoryType::User) {
+        let user_mem = home.join(".infini").join(".infini.md");
+        if tokio::fs::try_exists(&user_mem).await.unwrap_or(false)
+            && let Some(mf) = load_memory_file(user_mem, MemoryType::User).await {
                 results.push(mf);
             }
     }
 
     // 2. Project Layers
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    
-    // Find git root via blocking command
-    let git_root = match std::process::Command::new("git")
+
+    // Find git root via async command
+    let git_root = match tokio::process::Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .current_dir(&cwd)
         .output()
+        .await
     {
         Ok(out) if out.status.success() => {
             let root_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -128,19 +128,19 @@ pub fn load_memory_files() -> Vec<MemoryFile> {
     for dir in traverse_dirs {
         // Project: .infini.md
         let prj_md = dir.join(".infini.md");
-        if prj_md.exists()
-            && let Some(mf) = load_memory_file(prj_md, MemoryType::Project) {
+        if tokio::fs::try_exists(&prj_md).await.unwrap_or(false)
+            && let Some(mf) = load_memory_file(prj_md, MemoryType::Project).await {
                 results.push(mf);
             }
 
         // Project Rules: .infini/rules/*.md
         let rules_dir = dir.join(".infini").join("rules");
-        if rules_dir.exists() && rules_dir.is_dir()
-            && let Ok(entries) = fs::read_dir(&rules_dir) {
-                for entry in entries.flatten() {
+        if tokio::fs::try_exists(&rules_dir).await.unwrap_or(false)
+            && let Ok(mut entries) = tokio::fs::read_dir(&rules_dir).await {
+                while let Ok(Some(entry)) = entries.next_entry().await {
                     let path = entry.path();
-                    if path.is_file() && path.extension().is_some_and(|e| e == "md")
-                        && let Some(mf) = load_memory_file(path, MemoryType::Project) {
+                    if path.extension().is_some_and(|e| e == "md")
+                        && let Some(mf) = load_memory_file(path, MemoryType::Project).await {
                             results.push(mf);
                         }
                 }
@@ -148,8 +148,8 @@ pub fn load_memory_files() -> Vec<MemoryFile> {
 
         // Local: .infini.local.md
         let local_md = dir.join(".infini.local.md");
-        if local_md.exists()
-            && let Some(mf) = load_memory_file(local_md, MemoryType::Local) {
+        if tokio::fs::try_exists(&local_md).await.unwrap_or(false)
+            && let Some(mf) = load_memory_file(local_md, MemoryType::Local).await {
                 results.push(mf);
             }
     }
@@ -162,6 +162,8 @@ pub fn format_memory_prompt(files: &[MemoryFile]) -> Option<String> {
         return None;
     }
 
+    // TODO: Implement conditional rule matching — when the engine operates on a file,
+    // check if its path matches any MemoryFile.globs and inject those rules too.
     // For now, exclude rules that have specific `paths:` (conditional rules).
     let global_files: Vec<_> = files.iter().filter(|f| f.globs.is_none()).collect();
     if global_files.is_empty() {
@@ -314,44 +316,43 @@ mod tests {
 
     // ── load_memory_file tests ───────────────────────────────────────
 
-    #[test]
-    fn test_load_memory_file_basic() {
+    #[tokio::test]
+    async fn test_load_memory_file_basic() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".infini.md");
         std::fs::write(&path, "Use Rust best practices.").unwrap();
 
-        let mf = load_memory_file(path.clone(), MemoryType::User).unwrap();
+        let mf = load_memory_file(path.clone(), MemoryType::User).await.unwrap();
         assert_eq!(mf.memory_type, MemoryType::User);
         assert_eq!(mf.content, "Use Rust best practices.");
         assert!(mf.globs.is_none());
     }
 
-    #[test]
-    fn test_load_memory_file_with_frontmatter() {
+    #[tokio::test]
+    async fn test_load_memory_file_with_frontmatter() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("rules.md");
         std::fs::write(&path, "---\npaths:\n- \"*.rs\"\n---\nRust rules.").unwrap();
 
-        let mf = load_memory_file(path, MemoryType::Project).unwrap();
+        let mf = load_memory_file(path, MemoryType::Project).await.unwrap();
         assert_eq!(mf.globs, Some(vec!["*.rs".to_string()]));
         assert_eq!(mf.content, "Rust rules.");
     }
 
-    #[test]
-    fn test_load_memory_file_nonexistent() {
-        let result = load_memory_file(PathBuf::from("/nonexistent/path.md"), MemoryType::User);
+    #[tokio::test]
+    async fn test_load_memory_file_nonexistent() {
+        let result = load_memory_file(PathBuf::from("/nonexistent/path.md"), MemoryType::User).await;
         assert!(result.is_none());
     }
 
-    #[test]
-    fn test_load_memory_file_truncation() {
+    #[tokio::test]
+    async fn test_load_memory_file_truncation() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("big.md");
-        // Create content larger than 40k chars
         let content = "x".repeat(50_000);
         std::fs::write(&path, &content).unwrap();
 
-        let mf = load_memory_file(path, MemoryType::User).unwrap();
+        let mf = load_memory_file(path, MemoryType::User).await.unwrap();
         assert!(mf.content.len() < 50_000);
         assert!(mf.content.contains("[Warning: Memory file exceeded 40k characters and was truncated]"));
     }

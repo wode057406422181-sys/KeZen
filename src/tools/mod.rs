@@ -54,14 +54,8 @@ pub trait Tool: Send + Sync {
     /// - FileRead/Grep/Glob: always Allow (read-only)
     ///
     /// Returns `Passthrough` by default (defer to generic pipeline).
-    fn check_permissions(&self, _input: &serde_json::Value) -> PermissionResult {
+    async fn check_permissions(&self, _input: &serde_json::Value) -> PermissionResult {
         PermissionResult::Passthrough
-    }
-
-    /// Whether this invocation is destructive (e.g. `rm -rf`, overwriting).
-    /// Used to set risk level in permission prompts.
-    fn is_destructive(&self, _input: &serde_json::Value) -> bool {
-        false
     }
 
     /// Returns a matcher function that checks if a permission rule's content

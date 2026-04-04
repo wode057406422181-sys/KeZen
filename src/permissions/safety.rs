@@ -68,9 +68,9 @@ pub fn contains_path_traversal(path: &str) -> bool {
 ///
 /// Both paths are canonicalized; failure to canonicalize the working dir
 /// falls back to a simple `starts_with` check on the raw strings.
-pub fn is_within_working_directory(path: &str, working_dir: &str) -> bool {
-    let canonical_wd = std::fs::canonicalize(working_dir);
-    let canonical_path = std::fs::canonicalize(path);
+pub async fn is_within_working_directory(path: &str, working_dir: &str) -> bool {
+    let canonical_wd = tokio::fs::canonicalize(working_dir).await;
+    let canonical_path = tokio::fs::canonicalize(path).await;
 
     match (canonical_path, canonical_wd) {
         (Ok(cp), Ok(cwd)) => cp.starts_with(&cwd),

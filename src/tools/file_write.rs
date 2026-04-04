@@ -96,7 +96,7 @@ impl Tool for FileWriteTool {
         true
     }
 
-    fn check_permissions(&self, input: &serde_json::Value) -> crate::permissions::PermissionResult {
+    async fn check_permissions(&self, input: &serde_json::Value) -> crate::permissions::PermissionResult {
         let file_path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
 
         // Path traversal → deny
@@ -116,7 +116,7 @@ impl Tool for FileWriteTool {
         // Working directory check
         if let Ok(cwd) = std::env::current_dir() {
             let cwd_str = cwd.to_string_lossy();
-            if !crate::permissions::safety::is_within_working_directory(file_path, &cwd_str) {
+            if !crate::permissions::safety::is_within_working_directory(file_path, &cwd_str).await {
                 return crate::permissions::PermissionResult::Ask {
                     message: format!("⚠️ File is outside the working directory: {}", file_path),
                 };
@@ -129,18 +129,18 @@ impl Tool for FileWriteTool {
     fn permission_matcher(&self, input: &serde_json::Value) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
         let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
         Some(Box::new(move |pattern: &str| {
-            // Support "src/**" glob matching
-            if let Some(prefix) = pattern.strip_suffix("/**") {
-                // Check if the file is under the directory prefix
-                let path_obj = std::path::Path::new(&path);
-                let mut components = path_obj.components();
-                components.any(|c| {
-                    if let std::path::Component::Normal(s) = c {
-                        s.to_str() == Some(prefix)
-                    } else {
-                        false
-                    }
-                })
+            if let Some(dir) = pattern.strip_suffix("/**") {
+                // Resolve the directory prefix:
+                // - relative (e.g. "src") → <cwd>/src/
+                // - absolute (e.g. "/tmp") → /tmp/
+                let prefix = if dir.starts_with('/') {
+                    format!("{}/", dir)
+                } else if let Ok(cwd) = std::env::current_dir() {
+                    format!("{}/{}/", cwd.display(), dir)
+                } else {
+                    format!("{}/", dir)
+                };
+                path.starts_with(&prefix)
             } else {
                 path == pattern
             }
@@ -217,39 +217,37 @@ mod tests {
 
     // ── check_permissions tests ──────────────────────────────────────
 
-    #[test]
-    fn test_check_permissions_path_traversal_deny() {
+    #[tokio::test]
+    async fn test_check_permissions_path_traversal_deny() {
         let tool = FileWriteTool;
         let input = json!({"file_path": "/project/../etc/passwd", "content": "x"});
-        let result = tool.check_permissions(&input);
+        let result = tool.check_permissions(&input).await;
         assert!(matches!(result, crate::permissions::PermissionResult::Deny { .. }));
     }
 
-    #[test]
-    fn test_check_permissions_dangerous_path_ask() {
+    #[tokio::test]
+    async fn test_check_permissions_dangerous_path_ask() {
         let tool = FileWriteTool;
         let input = json!({"file_path": "/project/.git/hooks/post-commit", "content": "x"});
-        let result = tool.check_permissions(&input);
+        let result = tool.check_permissions(&input).await;
         assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
     }
 
-    #[test]
-    fn test_check_permissions_bashrc_ask() {
+    #[tokio::test]
+    async fn test_check_permissions_bashrc_ask() {
         let tool = FileWriteTool;
         let input = json!({"file_path": "/home/user/.bashrc", "content": "x"});
-        let result = tool.check_permissions(&input);
+        let result = tool.check_permissions(&input).await;
         assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
     }
 
-    #[test]
-    fn test_check_permissions_normal_path() {
+    #[tokio::test]
+    async fn test_check_permissions_normal_path() {
         let tool = FileWriteTool;
-        // Use current working directory so path is within it
         let cwd = std::env::current_dir().unwrap();
         let file = cwd.join("src").join("test_output.rs");
         let input = json!({"file_path": file.to_str().unwrap(), "content": "x"});
-        let result = tool.check_permissions(&input);
-        // Should be Passthrough (safe file in working dir)
+        let result = tool.check_permissions(&input).await;
         assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
     }
 
@@ -272,10 +270,21 @@ mod tests {
     #[test]
     fn test_matcher_glob() {
         let tool = FileWriteTool;
-        let input = json!({"file_path": "/project/src/main.rs"});
+        let cwd = std::env::current_dir().unwrap();
+        let file_path = format!("{}/src/main.rs", cwd.display());
+        let input = json!({"file_path": file_path});
         let matcher = tool.permission_matcher(&input).unwrap();
-        assert!(matcher("src/**")); // matches src directory
+        assert!(matcher("src/**")); // relative: resolves to <cwd>/src/
         assert!(!matcher("tests/**")); // does not match tests directory
+    }
+
+    #[test]
+    fn test_matcher_absolute_glob() {
+        let tool = FileWriteTool;
+        let input = json!({"file_path": "/tmp/project/src/main.rs"});
+        let matcher = tool.permission_matcher(&input).unwrap();
+        assert!(matcher("/tmp/project/src/**")); // absolute prefix
+        assert!(!matcher("/other/**")); // different root
     }
 
     #[test]
