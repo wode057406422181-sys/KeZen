@@ -16,13 +16,13 @@ struct SearchResult {
 
 /// Web search tool supporting multiple search backends.
 ///
-/// Backends are selected via `SearchConfig.mode`:
+/// Backends are selected via `SearchConfig.search_mode`:
 /// - `"brave"`       — Brave Search API
 /// - `"searxng"`     — Self-hosted SearXNG instance
 /// - `"google_cse"`  — Google Custom Search Engine
 /// - `"bing"`        — Bing Web Search API
 ///
-/// Note: `mode = "native"` is handled at the API layer (server-side search)
+/// Note: `search_mode = "native"` is handled at the API layer (server-side search)
 /// and should never reach this tool — it should not be registered.
 pub struct WebSearchTool {
     config: Option<Arc<SearchConfig>>,
@@ -43,7 +43,7 @@ impl WebSearchTool {
             "WebSearch is not configured. Add a [search] section to ~/.kezen/config/config.toml with provider and api_key.".to_string()
         })?;
 
-        match config.mode.as_str() {
+        match config.search_mode.as_str() {
             "brave" => self.search_brave(config, query, max_results).await,
             "searxng" => self.search_searxng(config, query, max_results).await,
             "google_cse" => self.search_google_cse(config, query, max_results).await,
@@ -498,10 +498,9 @@ mod tests {
     #[tokio::test]
     async fn test_unknown_mode_returns_error() {
         let config = SearchConfig {
-            mode: "unknown_mode".into(),
+            search_mode: "unknown_mode".into(),
             api_key: Some("key".into()),
-            base_url: None,
-            search_strategy: None,
+            ..SearchConfig::default()
         };
         let tool = WebSearchTool::new(Some(config));
         let result = tool.call(json!({"query": "test"})).await;
@@ -512,10 +511,9 @@ mod tests {
     #[tokio::test]
     async fn test_brave_missing_api_key() {
         let config = SearchConfig {
-            mode: "brave".into(),
+            search_mode: "brave".into(),
             api_key: None,
-            base_url: None,
-            search_strategy: None,
+            ..SearchConfig::default()
         };
         let tool = WebSearchTool::new(Some(config));
         let result = tool.call(json!({"query": "test"})).await;
@@ -661,10 +659,10 @@ mod tests {
     #[tokio::test]
     async fn test_google_cse_missing_api_key() {
         let config = SearchConfig {
-            mode: "google_cse".into(),
+            search_mode: "google_cse".into(),
             api_key: None,
             base_url: Some("cx-id".into()),
-            search_strategy: None,
+            ..SearchConfig::default()
         };
         let tool = WebSearchTool::new(Some(config));
         let result = tool.call(json!({"query": "test"})).await;
@@ -675,10 +673,10 @@ mod tests {
     #[tokio::test]
     async fn test_google_cse_missing_base_url() {
         let config = SearchConfig {
-            mode: "google_cse".into(),
+            search_mode: "google_cse".into(),
             api_key: Some("key".into()),
             base_url: None,
-            search_strategy: None,
+            ..SearchConfig::default()
         };
         let tool = WebSearchTool::new(Some(config));
         let result = tool.call(json!({"query": "test"})).await;
@@ -689,10 +687,9 @@ mod tests {
     #[tokio::test]
     async fn test_bing_missing_api_key() {
         let config = SearchConfig {
-            mode: "bing".into(),
+            search_mode: "bing".into(),
             api_key: None,
-            base_url: None,
-            search_strategy: None,
+            ..SearchConfig::default()
         };
         let tool = WebSearchTool::new(Some(config));
         let result = tool.call(json!({"query": "test"})).await;

@@ -52,6 +52,12 @@ impl Default for ToolRegistry {
 /// `config` is needed for tools that require API keys or provider
 /// settings (e.g. WebSearchTool needs SearchConfig, WebFetchTool needs
 /// the full AppConfig for sub-LLM content extraction).
+///
+/// Web tool registration rules:
+///   - `search_mode = "native"` (or no config) → skip WebSearchTool
+///   - `search_mode = "brave"|…`              → register WebSearchTool
+///   - `fetch_mode  = "native"` (or no config) → skip WebFetchTool
+///   - `fetch_mode  = "client"`               → register WebFetchTool
 pub fn create_default_registry(config: &AppConfig) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(super::bash::BashTool));
@@ -60,32 +66,36 @@ pub fn create_default_registry(config: &AppConfig) -> ToolRegistry {
     registry.register(Arc::new(super::file_edit::FileEditTool));
     registry.register(Arc::new(super::grep::GrepTool));
     registry.register(Arc::new(super::glob::GlobTool));
-    // Web tools: conditional registration based on search mode.
-    //
-    // • mode = "native"  → Server-side search & fetch; don't register client-side tools.
-    // • mode = "brave"/… → Client-side search + generic fetch.
-    // • No search config → Only generic WebFetchTool (always useful for URL retrieval).
-    match config.search.as_ref().map(|s| s.mode.as_str()) {
-        Some("native") => {
-            // Server-side search & fetch handled by the API layer.
-            // No client-side tools needed — saves API schema tokens.
-        }
-        Some(_) => {
-            // Client-side search backend configured.
-            registry.register(Arc::new(super::web_search::WebSearchTool::new(config.search.clone())));
-            registry.register(Arc::new(super::web_fetch::WebFetchTool::new(Some(config.clone()))));
-        }
-        None => {
-            // No search config — still register WebFetch for generic URL retrieval.
-            registry.register(Arc::new(super::web_fetch::WebFetchTool::new(Some(config.clone()))));
-        }
+
+    // Resolve effective modes (default = native when no [search] section).
+    let search_mode = config.search.as_ref()
+        .map(|s| s.search_mode.as_str())
+        .unwrap_or("native");
+    let fetch_mode = config.search.as_ref()
+        .map(|s| s.fetch_mode.as_str())
+        .unwrap_or("native");
+
+    // WebSearchTool: only for client-side backends.
+    if search_mode != "native" {
+        registry.register(Arc::new(
+            super::web_search::WebSearchTool::new(config.search.clone()),
+        ));
     }
+
+    // WebFetchTool: only when user explicitly wants client-side fetch.
+    if fetch_mode != "native" {
+        registry.register(Arc::new(
+            super::web_fetch::WebFetchTool::new(Some(config.clone())),
+        ));
+    }
+
     registry
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SearchConfig;
 
     #[test]
     fn test_registry_register_and_get() {
@@ -101,33 +111,71 @@ mod tests {
         registry.register(Arc::new(crate::tools::bash::BashTool));
         let schemas = registry.schemas();
         assert_eq!(schemas.len(), 1);
-        let schema = &schemas[0];
-        assert_eq!(schema["name"], "Bash");
+        assert_eq!(schemas[0]["name"], "Bash");
     }
 
+    // No [search] section → both modes default to native → no web tools
     #[test]
-    fn test_create_default_registry_without_search() {
+    fn test_no_search_config_defaults_to_native() {
         let config = AppConfig::default();
         let registry = create_default_registry(&config);
         assert!(registry.get("Bash").is_some());
-        assert!(registry.get("FileRead").is_some());
-        assert!(registry.get("FileWrite").is_some());
-        assert!(registry.get("FileEdit").is_some());
-        assert!(registry.get("Grep").is_some());
-        assert!(registry.get("Glob").is_some());
-        assert!(registry.get("WebSearch").is_none()); // Not registered without config
+        assert!(registry.get("WebSearch").is_none());
+        assert!(registry.get("WebFetch").is_none());
+        assert_eq!(registry.schemas().len(), 6);
+    }
+
+    // Explicit native for both
+    #[test]
+    fn test_explicit_native_both() {
+        let mut config = AppConfig::default();
+        config.search = Some(SearchConfig::default());
+        let registry = create_default_registry(&config);
+        assert!(registry.get("WebSearch").is_none());
+        assert!(registry.get("WebFetch").is_none());
+        assert_eq!(registry.schemas().len(), 6);
+    }
+
+    // Client search (brave) + native fetch → only WebSearchTool
+    #[test]
+    fn test_client_search_native_fetch() {
+        let mut config = AppConfig::default();
+        config.search = Some(SearchConfig {
+            search_mode: "brave".into(),
+            fetch_mode: "native".into(),
+            api_key: Some("key".into()),
+            ..SearchConfig::default()
+        });
+        let registry = create_default_registry(&config);
+        assert!(registry.get("WebSearch").is_some());
+        assert!(registry.get("WebFetch").is_none());
+        assert_eq!(registry.schemas().len(), 7);
+    }
+
+    // Native search + client fetch → only WebFetchTool
+    #[test]
+    fn test_native_search_client_fetch() {
+        let mut config = AppConfig::default();
+        config.search = Some(SearchConfig {
+            search_mode: "native".into(),
+            fetch_mode: "client".into(),
+            ..SearchConfig::default()
+        });
+        let registry = create_default_registry(&config);
+        assert!(registry.get("WebSearch").is_none());
         assert!(registry.get("WebFetch").is_some());
         assert_eq!(registry.schemas().len(), 7);
     }
 
+    // Both client → both tools
     #[test]
-    fn test_create_default_registry_with_search() {
+    fn test_client_search_client_fetch() {
         let mut config = AppConfig::default();
-        config.search = Some(crate::config::SearchConfig {
-            mode: "brave".into(),
-            api_key: Some("test-key".into()),
-            base_url: None,
-            search_strategy: None,
+        config.search = Some(SearchConfig {
+            search_mode: "brave".into(),
+            fetch_mode: "client".into(),
+            api_key: Some("key".into()),
+            ..SearchConfig::default()
         });
         let registry = create_default_registry(&config);
         assert!(registry.get("WebSearch").is_some());
@@ -135,14 +183,29 @@ mod tests {
         assert_eq!(registry.schemas().len(), 8);
     }
 
+    // SearXNG search + client fetch
     #[test]
-    fn test_create_default_registry_native_mode_no_web_tools() {
+    fn test_searxng_search_client_fetch() {
         let mut config = AppConfig::default();
-        config.search = Some(crate::config::SearchConfig {
-            mode: "native".into(),
-            api_key: None,
-            base_url: None,
-            search_strategy: Some("turbo".into()),
+        config.search = Some(SearchConfig {
+            search_mode: "searxng".into(),
+            fetch_mode: "client".into(),
+            base_url: Some("http://localhost:8080".into()),
+            ..SearchConfig::default()
+        });
+        let registry = create_default_registry(&config);
+        assert!(registry.get("WebSearch").is_some());
+        assert!(registry.get("WebFetch").is_some());
+        assert_eq!(registry.schemas().len(), 8);
+    }
+
+    // Native + search_strategy does not affect tool registration
+    #[test]
+    fn test_native_with_search_strategy() {
+        let mut config = AppConfig::default();
+        config.search = Some(SearchConfig {
+            search_strategy: Some("agent_max".into()),
+            ..SearchConfig::default()
         });
         let registry = create_default_registry(&config);
         assert!(registry.get("WebSearch").is_none());
@@ -153,7 +216,6 @@ mod tests {
     #[test]
     fn test_registry_default_impl() {
         let registry = ToolRegistry::default();
-        assert!(registry.get("Bash").is_none());
         assert!(registry.schemas().is_empty());
     }
 
@@ -169,40 +231,9 @@ mod tests {
     fn test_schemas_contain_required_fields() {
         let mut registry = ToolRegistry::new();
         registry.register(Arc::new(crate::tools::bash::BashTool));
-        let schemas = registry.schemas();
-        let s = &schemas[0];
+        let s = &registry.schemas()[0];
         assert!(s.get("name").is_some());
         assert!(s.get("description").is_some());
         assert!(s.get("input_schema").is_some());
-    }
-
-    #[test]
-    fn test_create_default_registry_with_searxng() {
-        let mut config = AppConfig::default();
-        config.search = Some(crate::config::SearchConfig {
-            mode: "searxng".into(),
-            api_key: None,
-            base_url: Some("http://localhost:8080".into()),
-            search_strategy: None,
-        });
-        let registry = create_default_registry(&config);
-        assert!(registry.get("WebSearch").is_some());
-        assert!(registry.get("WebFetch").is_some());
-        assert_eq!(registry.schemas().len(), 8);
-    }
-
-    #[test]
-    fn test_create_default_registry_native_agent_max() {
-        let mut config = AppConfig::default();
-        config.search = Some(crate::config::SearchConfig {
-            mode: "native".into(),
-            api_key: None,
-            base_url: None,
-            search_strategy: Some("agent_max".into()),
-        });
-        let registry = create_default_registry(&config);
-        assert!(registry.get("WebSearch").is_none());
-        assert!(registry.get("WebFetch").is_none());
-        assert_eq!(registry.schemas().len(), 6);
     }
 }

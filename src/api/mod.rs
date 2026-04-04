@@ -23,6 +23,8 @@ pub type BoxStream<'a, T> = Pin<Box<dyn Stream<Item = Result<T, KezenError>> + S
 pub struct StreamOptions {
     /// Enable server-side web search (DashScope `enable_search`, etc.).
     pub enable_server_search: bool,
+    /// Enable server-side web fetch (Anthropic `web_fetch_20250910`, etc.).
+    pub enable_server_fetch: bool,
     /// Search strategy hint for providers that support it.
     /// DashScope values: "turbo", "max", "agent", "agent_max".
     pub search_strategy: Option<String>,
@@ -62,6 +64,7 @@ mod tests {
     fn stream_options_default_has_no_search() {
         let opts = StreamOptions::default();
         assert!(!opts.enable_server_search);
+        assert!(!opts.enable_server_fetch);
         assert!(opts.search_strategy.is_none());
     }
 
@@ -69,10 +72,12 @@ mod tests {
     fn stream_options_clone_preserves_fields() {
         let opts = StreamOptions {
             enable_server_search: true,
+            enable_server_fetch: true,
             search_strategy: Some("agent_max".to_string()),
         };
         let cloned = opts.clone();
         assert!(cloned.enable_server_search);
+        assert!(cloned.enable_server_fetch);
         assert_eq!(cloned.search_strategy.as_deref(), Some("agent_max"));
     }
 
@@ -80,10 +85,12 @@ mod tests {
     fn stream_options_debug_output() {
         let opts = StreamOptions {
             enable_server_search: true,
+            enable_server_fetch: false,
             search_strategy: Some("turbo".to_string()),
         };
         let debug = format!("{:?}", opts);
         assert!(debug.contains("enable_server_search: true"));
+        assert!(debug.contains("enable_server_fetch: false"));
         assert!(debug.contains("turbo"));
     }
 }

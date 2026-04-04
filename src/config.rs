@@ -25,30 +25,52 @@ impl fmt::Display for Provider {
     }
 }
 
-/// Configuration for the web search backend.
+/// Configuration for web search and fetch capabilities.
 ///
-/// Supported modes:
-///   - `"native"`: Use the LLM provider's built-in web search (DashScope enable_search,
-///     etc.). No extra API key needed.
-///   - `"brave"`, `"searxng"`, `"google_cse"`, `"bing"`: Client-side search via 3rd-party API.
+/// Both `search_mode` and `fetch_mode` default to `"native"`, meaning
+/// the LLM provider's built-in tooling is used (DashScope `enable_search`,
+/// Anthropic server tools, etc.) and no client-side tool is registered.
+///
+/// `search_mode` values:
+///   - `"native"`: Server-side search via provider API.
+///   - `"brave"`, `"searxng"`, `"google_cse"`, `"bing"`: Client-side search.
+///
+/// `fetch_mode` values:
+///   - `"native"`: Server-side fetch via provider API.
+///   - `"client"`: Client-side WebFetchTool (HTML→Markdown + optional LLM extraction).
 ///
 /// Set via `[search]` section in `~/.kezen/config/config.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchConfig {
-    /// Search mode.
-    #[serde(default = "default_search_mode")]
-    pub mode: String,
+    /// Web search mode. Default: `"native"`.
+    #[serde(default = "default_native")]
+    pub search_mode: String,
+    /// Web fetch mode. Default: `"native"`.
+    #[serde(default = "default_native")]
+    pub fetch_mode: String,
     /// API key for the search provider (not needed for `native` mode).
     pub api_key: Option<String>,
     /// Base URL (e.g. SearXNG instance URL, or Google CSE CX id).
     pub base_url: Option<String>,
     /// Search strategy hint for native mode (DashScope: turbo/max/agent/agent_max).
-    /// Defaults to "turbo" when omitted.
+    /// Defaults to `"turbo"` when omitted.
     pub search_strategy: Option<String>,
 }
 
-fn default_search_mode() -> String {
-    "brave".to_string()
+fn default_native() -> String {
+    "native".to_string()
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            search_mode: default_native(),
+            fetch_mode: default_native(),
+            api_key: None,
+            base_url: None,
+            search_strategy: None,
+        }
+    }
 }
 
 /// Application configuration
@@ -167,28 +189,16 @@ impl AppConfig {
 
         // Search-specific env overrides
         if let Ok(val) = std::env::var("KEZEN_SEARCH_MODE") {
-            config.search.get_or_insert_with(|| SearchConfig {
-                mode: default_search_mode(),
-                api_key: None,
-                base_url: None,
-                search_strategy: None,
-            }).mode = val;
+            config.search.get_or_insert_with(SearchConfig::default).search_mode = val;
+        }
+        if let Ok(val) = std::env::var("KEZEN_FETCH_MODE") {
+            config.search.get_or_insert_with(SearchConfig::default).fetch_mode = val;
         }
         if let Ok(val) = std::env::var("KEZEN_SEARCH_API_KEY") {
-            config.search.get_or_insert_with(|| SearchConfig {
-                mode: default_search_mode(),
-                api_key: None,
-                base_url: None,
-                search_strategy: None,
-            }).api_key = Some(val);
+            config.search.get_or_insert_with(SearchConfig::default).api_key = Some(val);
         }
         if let Ok(val) = std::env::var("KEZEN_SEARCH_STRATEGY") {
-            config.search.get_or_insert_with(|| SearchConfig {
-                mode: default_search_mode(),
-                api_key: None,
-                base_url: None,
-                search_strategy: None,
-            }).search_strategy = Some(val);
+            config.search.get_or_insert_with(SearchConfig::default).search_strategy = Some(val);
         }
 
         Ok(config)
@@ -364,47 +374,59 @@ mod tests {
     }
 
     #[test]
-    fn search_config_default_mode_is_brave() {
-        let sc: SearchConfig = toml::from_str("[dummy]\n").unwrap_or(SearchConfig {
-            mode: default_search_mode(),
-            api_key: None,
-            base_url: None,
-            search_strategy: None,
-        });
-        assert_eq!(sc.mode, "brave");
-    }
-
-    #[test]
-    fn search_config_deserializes_native_mode() {
-        let toml_str = r#"
-            mode = "native"
-            search_strategy = "agent_max"
-        "#;
-        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(sc.mode, "native");
-        assert_eq!(sc.search_strategy.as_deref(), Some("agent_max"));
+    fn search_config_default_is_native() {
+        let sc = SearchConfig::default();
+        assert_eq!(sc.search_mode, "native");
+        assert_eq!(sc.fetch_mode, "native");
         assert!(sc.api_key.is_none());
-    }
-
-    #[test]
-    fn search_config_deserializes_brave_with_key() {
-        let toml_str = r#"
-            mode = "brave"
-            api_key = "BSA-test-key"
-        "#;
-        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(sc.mode, "brave");
-        assert_eq!(sc.api_key.as_deref(), Some("BSA-test-key"));
         assert!(sc.search_strategy.is_none());
     }
 
     #[test]
-    fn search_config_mode_defaults_when_omitted() {
+    fn search_config_deserializes_defaults_when_empty() {
         let toml_str = r#"
             api_key = "test"
         "#;
         let sc: SearchConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(sc.mode, "brave"); // default
+        assert_eq!(sc.search_mode, "native"); // default
+        assert_eq!(sc.fetch_mode, "native");  // default
+    }
+
+    #[test]
+    fn search_config_deserializes_native_search_with_strategy() {
+        let toml_str = r#"
+            search_mode = "native"
+            search_strategy = "agent_max"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.search_mode, "native");
+        assert_eq!(sc.fetch_mode, "native"); // default
+        assert_eq!(sc.search_strategy.as_deref(), Some("agent_max"));
+    }
+
+    #[test]
+    fn search_config_deserializes_brave_with_client_fetch() {
+        let toml_str = r#"
+            search_mode = "brave"
+            fetch_mode = "client"
+            api_key = "BSA-test-key"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.search_mode, "brave");
+        assert_eq!(sc.fetch_mode, "client");
+        assert_eq!(sc.api_key.as_deref(), Some("BSA-test-key"));
+    }
+
+    #[test]
+    fn search_config_independent_modes() {
+        let toml_str = r#"
+            search_mode = "brave"
+            fetch_mode = "native"
+            api_key = "key"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.search_mode, "brave");
+        assert_eq!(sc.fetch_mode, "native");
     }
 
     #[test]
@@ -412,13 +434,15 @@ mod tests {
         let toml_str = r#"
             provider = "openai"
             [search]
-            mode = "native"
+            search_mode = "native"
+            fetch_mode = "client"
             search_strategy = "turbo"
         "#;
         let config: AppConfig = toml::from_str(toml_str).unwrap();
         assert!(config.search.is_some());
         let search = config.search.unwrap();
-        assert_eq!(search.mode, "native");
+        assert_eq!(search.search_mode, "native");
+        assert_eq!(search.fetch_mode, "client");
         assert_eq!(search.search_strategy.as_deref(), Some("turbo"));
     }
 
@@ -429,5 +453,17 @@ mod tests {
         "#;
         let config: AppConfig = toml::from_str(toml_str).unwrap();
         assert!(config.search.is_none());
+    }
+
+    #[test]
+    fn app_config_empty_search_section_defaults_to_native() {
+        let toml_str = r#"
+            provider = "openai"
+            [search]
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        let search = config.search.unwrap();
+        assert_eq!(search.search_mode, "native");
+        assert_eq!(search.fetch_mode, "native");
     }
 }
