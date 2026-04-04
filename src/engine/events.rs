@@ -42,6 +42,15 @@ pub enum EngineEvent {
     SessionSnapshotUpdate {
         snapshot: crate::session::SessionSnapshot,
     },
+    /// Result of a slash command execution
+    SlashCommandResult {
+        command: String,
+        output: String,
+    },
+    /// Progress update during context compaction
+    CompactProgress {
+        message: String,
+    },
 }
 
 /// Actions sent from Frontend to Engine

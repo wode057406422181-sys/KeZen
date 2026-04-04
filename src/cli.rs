@@ -41,6 +41,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub classic: bool,
 
+    /// Disable MCP server connections
+    #[arg(long, global = true)]
+    pub no_mcp: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

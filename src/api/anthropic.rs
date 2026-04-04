@@ -91,6 +91,7 @@ impl LlmClient for AnthropicClient {
         messages: &[Message],
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
+        max_tokens_override: Option<u32>,
     ) -> Result<BoxStream<'_, StreamEvent>, KezenError> {
         let url = normalize_anthropic_url(&self.base_url);
 
@@ -136,9 +137,11 @@ impl LlmClient for AnthropicClient {
             })
             .collect();
 
+        let effective_max_tokens = max_tokens_override.unwrap_or(self.max_tokens);
+
         let mut body = json!({
             "model": self.model,
-            "max_tokens": self.max_tokens,
+            "max_tokens": effective_max_tokens,
             "messages": cleaned_messages,
             "stream": true,
         });

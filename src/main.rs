@@ -7,6 +7,7 @@ mod cost;
 mod engine;
 mod error;
 mod frontend;
+mod mcp;
 mod permissions;
 mod prompts;
 mod server;
@@ -49,6 +50,9 @@ async fn main() -> Result<()> {
     }
     if let Some(t) = cli.max_tokens {
         config.max_tokens = Some(t);
+    }
+    if cli.no_mcp {
+        config.no_mcp = true;
     }
 
     // Enable API debug logging if --verbose

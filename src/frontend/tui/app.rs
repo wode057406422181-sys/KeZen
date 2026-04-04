@@ -296,6 +296,24 @@ impl App {
             EngineEvent::SessionSnapshotUpdate { snapshot: _ } => {
                 // Handled at the event-loop level (see handle_snapshot).
             }
+            EngineEvent::SlashCommandResult { command, output } => {
+                self.messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: format!("/{} → {}", command, output),
+                });
+                if self.auto_scroll {
+                    self.scroll_to_bottom();
+                }
+            }
+            EngineEvent::CompactProgress { message } => {
+                self.messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: format!("🗜 {}", message),
+                });
+                if self.auto_scroll {
+                    self.scroll_to_bottom();
+                }
+            }
         }
     }
 

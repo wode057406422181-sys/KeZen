@@ -9,7 +9,7 @@ pub struct Session {
     messages: Vec<Message>,
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
-    pricing: CostPricing,
+    pub pricing: CostPricing,
     pub total_cost_usd: f64,
 }
 
@@ -78,7 +78,6 @@ impl Session {
     }
 
     /// Get cumulative usage across all turns.
-    #[allow(dead_code)] // TODO: Expose via /usage command or status bar
     pub fn total_usage(&self) -> Usage {
         Usage {
             input_tokens: self.total_input_tokens,
@@ -86,10 +85,38 @@ impl Session {
         }
     }
 
-    /// Clear all messages (for /clear command).
-    #[allow(dead_code)] // TODO: Wire up to /clear REPL command
+    /// Clear all messages and reset usage counters (for /clear command).
+    ///
+    /// Resets token counts and cost so that `/cost` shows fresh data and
+    /// `should_auto_compact` doesn't trigger based on stale counters.
     pub fn clear(&mut self) {
         self.messages.clear();
+        self.total_input_tokens = 0;
+        self.total_output_tokens = 0;
+        self.total_cost_usd = 0.0;
+    }
+
+    /// Replace the entire message history (for /compact).
+    pub fn replace_messages(&mut self, messages: Vec<Message>) {
+        self.messages = messages;
+    }
+
+    /// Reset token counters after compaction (Fix #3).
+    ///
+    /// After context compaction, the old cumulative `total_input_tokens` no
+    /// longer reflects the actual conversation size.  If we leave them as-is,
+    /// `should_auto_compact` will immediately re-trigger, causing an infinite
+    /// compact loop.  Resetting to zero lets the counters build back up
+    /// naturally from the compacted conversation.
+    pub fn reset_usage_counters(&mut self) {
+        self.total_input_tokens = 0;
+        self.total_output_tokens = 0;
+        self.total_cost_usd = 0.0;
+    }
+
+    /// Return the number of current messages.
+    pub fn message_count(&self) -> usize {
+        self.messages.len()
     }
 }
 
@@ -145,15 +172,22 @@ mod tests {
     }
 
     #[test]
-    fn test_clear_empties_messages() {
-        let mut s = Session::new("test-model".into(), zero_pricing());
+    fn test_clear_empties_messages_and_resets_usage() {
+        let mut s = Session::new("test-model".into(), sonnet_pricing());
         s.add_message(Message {
             role: Role::User,
             content: vec![ContentBlock::Text { text: "hello".into() }],
         });
+        s.update_usage(&Usage { input_tokens: 500, output_tokens: 200 });
         assert_eq!(s.messages().len(), 1);
+        assert!(s.total_cost_usd > 0.0);
+
         s.clear();
+
         assert!(s.messages().is_empty());
+        assert_eq!(s.total_input_tokens, 0);
+        assert_eq!(s.total_output_tokens, 0);
+        assert_eq!(s.total_cost_usd, 0.0);
     }
 
     #[test]
