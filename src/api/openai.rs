@@ -174,8 +174,8 @@ impl LlmClient for OpenAiClient {
             "stream": true,
         });
 
-        if let Some(t) = tools {
-            if !t.is_empty() {
+        if let Some(t) = tools
+            && !t.is_empty() {
                 let functions: Vec<_> = t.iter().map(|s| {
                     json!({
                         "type": "function",
@@ -188,7 +188,6 @@ impl LlmClient for OpenAiClient {
                 }).collect();
                 body["tools"] = json!(functions);
             }
-        }
 
         // `stream_options.include_usage` is an OpenAI extension not supported by
         // all compatible endpoints (DashScope, Ollama, vLLM, etc.). Only send it
@@ -264,11 +263,10 @@ impl LlmClient for OpenAiClient {
                                         let id = t.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
                                         out.push(Ok(StreamEvent::ToolUseStart { id, name: name.to_string() }));
                                     }
-                                    if let Some(args) = f.get("arguments").and_then(|a| a.as_str()) {
-                                        if !args.is_empty() {
+                                    if let Some(args) = f.get("arguments").and_then(|a| a.as_str())
+                                        && !args.is_empty() {
                                             out.push(Ok(StreamEvent::ToolUseInputDelta { text: args.to_string() }));
                                         }
-                                    }
                                 }
                             }
                         }

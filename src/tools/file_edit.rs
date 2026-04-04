@@ -152,6 +152,38 @@ impl Tool for FileEditTool {
             is_error: false,
         }
     }
+
+    fn permission_description(&self, input: &serde_json::Value) -> String {
+        let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("unknown");
+        format!("Edit file: {}", path)
+    }
+
+    fn is_read_only(&self, _input: &serde_json::Value) -> bool {
+        false
+    }
+
+    fn is_file_tool(&self) -> bool {
+        true
+    }
+
+    async fn check_permissions(&self, input: &serde_json::Value) -> crate::permissions::PermissionResult {
+        let file_path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+        crate::permissions::safety::check_file_permissions(file_path).await
+    }
+
+    fn permission_matcher(&self, input: &serde_json::Value) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
+        let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        Some(crate::permissions::safety::file_permission_matcher(path))
+    }
+
+    fn permission_suggestion(&self, input: &serde_json::Value) -> Option<String> {
+        let file_path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+        if let Ok(cwd) = std::env::current_dir() {
+            crate::permissions::safety::extract_file_suggestion(file_path, &cwd.to_string_lossy())
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -232,5 +264,86 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.content.contains("not found in file"));
+    }
+
+    // ── check_permissions tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_check_permissions_path_traversal_deny() {
+        let tool = FileEditTool;
+        let input = json!({"file_path": "/project/../etc/shadow", "old_string": "x", "new_string": "y"});
+        let result = tool.check_permissions(&input).await;
+        assert!(matches!(result, crate::permissions::PermissionResult::Deny { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_check_permissions_dangerous_path_ask() {
+        let tool = FileEditTool;
+        let input = json!({"file_path": "/project/.git/config", "old_string": "x", "new_string": "y"});
+        let result = tool.check_permissions(&input).await;
+        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_check_permissions_gitmodules_ask() {
+        let tool = FileEditTool;
+        let input = json!({"file_path": "/project/.gitmodules", "old_string": "x", "new_string": "y"});
+        let result = tool.check_permissions(&input).await;
+        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_check_permissions_normal_path_passthrough() {
+        let tool = FileEditTool;
+        let cwd = std::env::current_dir().unwrap();
+        let file = cwd.join("src").join("main.rs");
+        let input = json!({"file_path": file.to_str().unwrap(), "old_string": "x", "new_string": "y"});
+        let result = tool.check_permissions(&input).await;
+        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
+    }
+
+    // ── trait method tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_is_file_tool() {
+        let tool = FileEditTool;
+        assert!(tool.is_file_tool());
+    }
+
+    #[test]
+    fn test_is_not_read_only() {
+        let tool = FileEditTool;
+        assert!(!tool.is_read_only(&json!({})));
+    }
+
+    // ── permission_matcher tests ─────────────────────────────────────
+
+    #[test]
+    fn test_matcher_glob() {
+        let tool = FileEditTool;
+        let cwd = std::env::current_dir().unwrap();
+        let file_path = format!("{}/src/lib.rs", cwd.display());
+        let input = json!({"file_path": file_path});
+        let matcher = tool.permission_matcher(&input).unwrap();
+        assert!(matcher("src/**")); // relative: resolves to <cwd>/src/
+        assert!(!matcher("tests/**"));
+    }
+
+    #[test]
+    fn test_matcher_absolute_glob() {
+        let tool = FileEditTool;
+        let input = json!({"file_path": "/tmp/project/src/lib.rs"});
+        let matcher = tool.permission_matcher(&input).unwrap();
+        assert!(matcher("/tmp/project/src/**")); // absolute prefix
+        assert!(!matcher("/other/**")); // different root
+    }
+
+    #[test]
+    fn test_matcher_exact_path() {
+        let tool = FileEditTool;
+        let input = json!({"file_path": "/project/Cargo.toml"});
+        let matcher = tool.permission_matcher(&input).unwrap();
+        assert!(matcher("/project/Cargo.toml"));
+        assert!(!matcher("/project/Cargo.lock"));
     }
 }

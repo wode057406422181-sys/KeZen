@@ -14,6 +14,8 @@ use crate::tools::registry::ToolRegistry;
 use self::events::{EngineEvent, UserAction};
 use self::session::Session;
 
+use crate::permissions::{PermissionDecision, PermissionMode, PermissionState};
+
 /// The core engine that orchestrates LLM interactions.
 ///
 /// Engine communicates with frontends exclusively through channels:
@@ -22,7 +24,7 @@ use self::session::Session;
 ///
 /// **Invariant**: This module MUST NOT import std::io, crossterm, or rustyline.
 pub struct InfiniEngine {
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Use config for runtime settings (e.g. dynamic model switch, permission mode)
     config: AppConfig,
     client: Box<dyn LlmClient>,
     session: Session,
@@ -32,29 +34,32 @@ pub struct InfiniEngine {
     action_rx: mpsc::Receiver<UserAction>,
     event_tx: mpsc::Sender<EngineEvent>,
     registry: ToolRegistry,
+    permission_state: PermissionState,
 }
 
 impl InfiniEngine {
-    pub fn new(
+    pub async fn new(
         config: AppConfig,
         action_rx: mpsc::Receiver<UserAction>,
         event_tx: mpsc::Sender<EngineEvent>,
         registry: ToolRegistry,
+        permission_mode: PermissionMode,
     ) -> Result<Self, crate::error::InfiniError> {
         let client = api::create_client(&config)?;
-        // Build the system prompt once at construction.
-        // NOTE: `build_system_prompt` calls `std::process::Command` (blocking).
-        // This runs on the tokio thread that calls `InfiniEngine::new()`; callers
-        // should wrap this in `tokio::task::spawn_blocking` if latency is critical.
-        let system_prompt = build_system_prompt(config.model.as_deref());
+        // Build the system prompt asynchronously (git commands + memory file I/O).
+        let system_prompt = build_system_prompt(config.model.as_deref()).await;
+        let model_name = config.model.clone().unwrap_or_default();
+        let pricing = crate::cost::get_model_pricing(&model_name);
+        
         Ok(Self {
             config,
             client,
-            session: Session::new(),
+            session: Session::new(model_name, pricing),
             system_prompt,
             action_rx,
             event_tx,
             registry,
+            permission_state: PermissionState::new(permission_mode),
         })
     }
 
@@ -67,6 +72,12 @@ impl InfiniEngine {
                 }
                 UserAction::Cancel => {
                     // Ignored if not currently streaming
+                }
+                UserAction::PermissionResponse { .. } => {
+                    // Handled synchronously during the tool execution loop
+                }
+                UserAction::RestoreSession { snapshot } => {
+                    self.session.restore(snapshot);
                 }
             }
         }
@@ -155,12 +166,11 @@ impl InfiniEngine {
                                             StreamEvent::MessageStart { usage: Some(u), .. } => {
                                                 turn_usage.input_tokens = u.input_tokens;
                                             }
-                                            StreamEvent::MessageDelta { usage, .. } => {
-                                                if let Some(u) = usage {
-                                                    if u.output_tokens > 0 { turn_usage.output_tokens = u.output_tokens; }
-                                                    if u.input_tokens > 0 { turn_usage.input_tokens = u.input_tokens; }
-                                                }
+                                            StreamEvent::MessageDelta { usage: Some(u), .. } => {
+                                                if u.output_tokens > 0 { turn_usage.output_tokens = u.output_tokens; }
+                                                if u.input_tokens > 0 { turn_usage.input_tokens = u.input_tokens; }
                                             }
+                                            StreamEvent::MessageDelta { usage: None, .. } => {}
                                             // Flush pending tool on MessageStop in case
                                             // ContentBlockStop was not emitted (some providers).
                                             StreamEvent::MessageStop => {
@@ -201,6 +211,7 @@ impl InfiniEngine {
 
                     if stream_interrupted {
                         let _ = self.event_tx.send(EngineEvent::Done).await;
+                        let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
                         break;
                     }
 
@@ -223,34 +234,128 @@ impl InfiniEngine {
                     // No tools requested: the LLM is done, exit the loop.
                     if pending_tools.is_empty() {
                         let _ = self.event_tx.send(EngineEvent::Done).await;
+                        let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
                         break;
                     }
 
-                    // Execute requested tools concurrently.
-                    let mut join_set = tokio::task::JoinSet::new();
+                    // Phase 1: Filter and prompt for permissions
+                    let mut approved_tools = Vec::new();
+                    let mut denied_results = Vec::new();
+
                     for (idx, (id, name, input)) in pending_tools.into_iter().enumerate() {
-                        match self.registry.get(&name) {
-                            Some(tool) => {
-                                // Arc<dyn Tool> is cheaply cloneable and Send + Sync,
-                                // so we can move it into the spawned future directly.
-                                join_set.spawn(async move {
-                                    let result = tool.call(input).await;
-                                    (idx, id, name, result)
-                                });
-                            }
+                        let tool = match self.registry.get(&name) {
+                            Some(t) => t,
                             None => {
-                                join_set.spawn(async move {
-                                    (idx, id.clone(), name.clone(), crate::tools::ToolResult {
-                                        content: format!("Tool {} not found", name),
+                                denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
+                                    content: format!("Tool {} not found", name),
+                                    is_error: true,
+                                }));
+                                continue;
+                            }
+                        };
+
+                        // Gather fine-grained permission inputs from the tool
+                        let is_read_only = tool.is_read_only(&input);
+                        let is_file_tool = tool.is_file_tool();
+                        let desc = tool.permission_description(&input);
+                        let tool_check = tool.check_permissions(&input).await;
+                        let suggestion = tool.permission_suggestion(&input);
+
+                        // Compute the permission decision in a scope so the matcher
+                        // (which borrows `tool`) is dropped before we move `tool`.
+                        let decision = {
+                            let matcher = tool.permission_matcher(&input);
+                            let matcher_ref = matcher.as_deref();
+                            self.permission_state.check(
+                                &name,
+                                &input,
+                                &tool_check,
+                                is_read_only,
+                                is_file_tool,
+                                desc.clone(),
+                                matcher_ref,
+                                suggestion,
+                            )
+                        };
+
+                        match decision {
+                            PermissionDecision::Allow => {
+                                approved_tools.push((idx, id, name, input, tool));
+                            }
+                            PermissionDecision::Deny { message } => {
+                                denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
+                                    content: message,
+                                    is_error: true,
+                                }));
+                            }
+                            PermissionDecision::NeedsApproval { tool_name, description, risk_level, suggestion } => {
+                                // Block and ask user
+                                // Borrow suggestion before moving tool_name into event
+                                let suggestion_ref: Option<&str> = suggestion.as_deref();
+                                let _ = self.event_tx.send(EngineEvent::PermissionRequest {
+                                    id: id.clone(),
+                                    tool: tool_name,
+                                    description,
+                                    risk_level,
+                                    suggestion: suggestion.clone(),
+                                }).await;
+
+                                // Wait for UserAction::PermissionResponse
+                                let mut was_allowed = false;
+                                while let Some(action) = self.action_rx.recv().await {
+                                    match action {
+                                        UserAction::PermissionResponse { id: resp_id, allowed, always_allow } => {
+                                            if resp_id == id {
+                                                if always_allow && allowed {
+                                                    // Fine-grained: store rule content from suggestion
+                                                    self.permission_state.add_allow_rule(
+                                                        &name,
+                                                        suggestion_ref,
+                                                    );
+                                                }
+                                                was_allowed = allowed;
+                                                break;
+                                            }
+                                        }
+                                        UserAction::Cancel => {
+                                            // Handle cancel as deny
+                                            break;
+                                        }
+                                        UserAction::RestoreSession { .. } => {
+                                            // Ignore
+                                        }
+                                        UserAction::SendMessage { .. } => {
+                                            // Interleave message not allowed while asking permission
+                                            let _ = self.event_tx.send(EngineEvent::Error { 
+                                                message: "Cannot send message while waiting for permission approval".into() 
+                                            }).await;
+                                        }
+                                    }
+                                }
+
+                                if was_allowed {
+                                    approved_tools.push((idx, id, name, input, tool));
+                                } else {
+                                    denied_results.push((idx, id.clone(), name.clone(), crate::tools::ToolResult {
+                                        content: "User denied permission to execute this tool".to_string(),
                                         is_error: true,
-                                    })
-                                });
+                                    }));
+                                }
                             }
                         }
                     }
 
+                    // Phase 2: Execute approved tools concurrently.
+                    let mut join_set = tokio::task::JoinSet::new();
+                    for (idx, id, name, input, tool) in approved_tools {
+                        join_set.spawn(async move {
+                            let result = tool.call(input).await;
+                            (idx, id, name, result)
+                        });
+                    }
+
                     // Collect results and sort by original index to preserve order.
-                    let mut indexed_results = Vec::new();
+                    let mut indexed_results = denied_results;
                     while let Some(join_result) = join_set.join_next().await {
                         if let Ok(r) = join_result {
                             indexed_results.push(r);
@@ -280,6 +385,7 @@ impl InfiniEngine {
                 Err(e) => {
                     let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
                     let _ = self.event_tx.send(EngineEvent::Done).await;
+                    let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
                     break;
                 }
             }

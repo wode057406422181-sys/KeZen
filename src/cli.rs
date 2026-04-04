@@ -17,6 +17,10 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
+    /// Bypass permission checks for tool execution
+    #[arg(short = 'y', long = "yes", global = true)]
+    pub yes: bool,
+
     /// Override model
     #[arg(long, global = true)]
     pub model: Option<String>,

@@ -20,7 +20,7 @@ pub fn print_welcome(config: &AppConfig) {
 }
 
 /// Render a complete markdown string to the terminal using termimad.
-#[allow(dead_code)]
+#[allow(dead_code)] // TODO: Use for rendering tool output or help text with rich formatting
 pub fn render_markdown(text: &str) {
     let skin = MadSkin::default();
     skin.print_text(text);
@@ -80,4 +80,10 @@ pub fn print_tool_result(output: &str, is_error: bool) {
     } else {
         println!("  {} {}", "✓".green(), preview.dimmed());
     }
+}
+
+/// Print permission request
+pub fn print_permission_request(tool: &str, desc: &str) {
+    println!("\n  {} {} wants to execute:", "⚠".yellow().bold(), tool.bold());
+    println!("     {}", desc);
 }

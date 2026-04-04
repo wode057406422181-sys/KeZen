@@ -127,6 +127,14 @@ impl Tool for GrepTool {
             },
         }
     }
+
+    fn is_read_only(&self, _input: &serde_json::Value) -> bool {
+        true
+    }
+
+    async fn check_permissions(&self, _input: &serde_json::Value) -> crate::permissions::PermissionResult {
+        crate::permissions::PermissionResult::Allow
+    }
 }
 
 #[cfg(test)]

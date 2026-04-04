@@ -147,13 +147,12 @@ impl LlmClient for AnthropicClient {
             body["system"] = json!(sys_prompt);
         }
 
-        if let Some(t) = tools {
-            if !t.is_empty() {
+        if let Some(t) = tools
+            && !t.is_empty() {
                 body["tools"] = json!(t);
                 // Default to `auto` tool choice unless otherwise constrained
                 body["tool_choice"] = json!({"type": "auto"});
             }
-        }
 
         debug_logger::log_request("anthropic", &url, &body);
 

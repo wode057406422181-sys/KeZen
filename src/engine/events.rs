@@ -1,4 +1,5 @@
 use crate::api::types::Usage;
+use crate::permissions::RiskLevel;
 
 /// Events sent from Engine to Frontend
 #[derive(Debug, Clone)]
@@ -15,19 +16,32 @@ pub enum EngineEvent {
     Done,
     /// Tool execution started
     ToolUseStart {
-        #[allow(dead_code)] // reserved for permission gating
+        #[allow(dead_code)] // TODO: Use id for frontend tool-output correlation and cancellation
         id: String,
         name: String,
         input: serde_json::Value,
     },
     /// Tool execution result
     ToolResult {
-        #[allow(dead_code)] // reserved for permission gating
+        #[allow(dead_code)] // TODO: Use id for frontend tool-output correlation and cancellation
         id: String,
         output: String,
         is_error: bool,
     },
-    // PermissionRequest { id: String, tool: String, desc: String },
+    /// Request user permission for a potentially unsafe tool invocation
+    PermissionRequest {
+        id: String,
+        tool: String,
+        description: String,
+        /// Risk level of the operation (Low, Medium, High)
+        risk_level: RiskLevel,
+        /// Suggested always-allow rule content (e.g. "git commit:*")
+        suggestion: Option<String>,
+    },
+    /// Provide current session snapshot to frontend
+    SessionSnapshotUpdate {
+        snapshot: crate::session::SessionSnapshot,
+    },
 }
 
 /// Actions sent from Frontend to Engine
@@ -37,5 +51,14 @@ pub enum UserAction {
     SendMessage { content: String },
     /// User cancels the current streaming response
     Cancel,
-    // PermissionResponse { id: String, allowed: bool },
+    /// User responds to a permission request
+    PermissionResponse {
+        id: String,
+        allowed: bool,
+        always_allow: bool,
+    },
+    /// Restore a previous session state
+    RestoreSession {
+        snapshot: crate::session::SessionSnapshot,
+    },
 }
