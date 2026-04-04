@@ -263,6 +263,13 @@ async fn handle_engine_events(
                         println!(); // Final newline
                         break;
                     }
+                    Some(EngineEvent::SlashCommandResult { command, output }) => {
+                        println!("  {} {}\n{}", "ℹ".blue(), command.dimmed(), output);
+                        break;
+                    }
+                    Some(EngineEvent::CompactProgress { message }) => {
+                        println!("  {} {}", "ℹ".blue(), message.dimmed());
+                    }
                     None => {
                         // Channel closed, engine died
                         print_error("Engine disconnected unexpectedly.");

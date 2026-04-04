@@ -9,7 +9,7 @@ pub struct Session {
     messages: Vec<Message>,
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
-    pricing: CostPricing,
+    pub pricing: CostPricing,
     pub total_cost_usd: f64,
 }
 
@@ -78,7 +78,6 @@ impl Session {
     }
 
     /// Get cumulative usage across all turns.
-    #[allow(dead_code)] // TODO: Expose via /usage command or status bar
     pub fn total_usage(&self) -> Usage {
         Usage {
             input_tokens: self.total_input_tokens,
@@ -87,9 +86,18 @@ impl Session {
     }
 
     /// Clear all messages (for /clear command).
-    #[allow(dead_code)] // TODO: Wire up to /clear REPL command
     pub fn clear(&mut self) {
         self.messages.clear();
+    }
+
+    /// Replace the entire message history (for /compact).
+    pub fn replace_messages(&mut self, messages: Vec<Message>) {
+        self.messages = messages;
+    }
+
+    /// Return the number of current messages.
+    pub fn message_count(&self) -> usize {
+        self.messages.len()
     }
 }
 

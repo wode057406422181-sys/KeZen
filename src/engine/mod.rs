@@ -1,5 +1,7 @@
+pub mod compact;
 pub mod events;
 pub mod session;
+pub mod slash_commands;
 
 use futures::StreamExt;
 use tokio::sync::mpsc;
@@ -42,7 +44,7 @@ impl KezenEngine {
         config: AppConfig,
         action_rx: mpsc::Receiver<UserAction>,
         event_tx: mpsc::Sender<EngineEvent>,
-        registry: ToolRegistry,
+        mut registry: ToolRegistry,
         permission_mode: PermissionMode,
     ) -> Result<Self, crate::error::KezenError> {
         let client = api::create_client(&config)?;
@@ -51,6 +53,21 @@ impl KezenEngine {
         let model_name = config.model.clone().unwrap_or_default();
         let pricing = crate::cost::get_model_pricing(&model_name);
         
+        if !config.no_mcp {
+            match crate::mcp::client::connect_all_servers().await {
+                Ok(mcp_tools) => {
+                    for tool in mcp_tools {
+                        registry.register(tool);
+                    }
+                }
+                Err(e) => {
+                    let _ = event_tx.send(EngineEvent::Error {
+                        message: format!("MCP init error: {}", e),
+                    }).await;
+                }
+            }
+        }
+
         Ok(Self {
             config,
             client,
@@ -68,7 +85,11 @@ impl KezenEngine {
         while let Some(action) = self.action_rx.recv().await {
             match action {
                 UserAction::SendMessage { content } => {
-                    self.handle_send_message(content).await;
+                    if let Some((cmd, args)) = slash_commands::parse(&content) {
+                        self.handle_slash_command(cmd, args).await;
+                    } else {
+                        self.handle_send_message(content).await;
+                    }
                 }
                 UserAction::Cancel => {
                     // Ignored if not currently streaming
@@ -96,6 +117,10 @@ impl KezenEngine {
         // Agentic loop: keeps calling the LLM until it stops requesting tools
         // or we hit the safety cap.
         loop {
+            if compact::should_auto_compact(self.session.total_usage().input_tokens, &self.session.model_name) {
+                self.compact_context().await;
+            }
+
             if iterations >= max_iterations {
                 let _ = self.event_tx.send(EngineEvent::Error { message: "Max tool loop iterations reached".into() }).await;
                 break;
@@ -391,5 +416,167 @@ impl KezenEngine {
             }
         }
     }
-}
 
+    async fn handle_slash_command(&mut self, cmd: &str, args: &str) {
+        match cmd {
+            "help" => {
+                let output = "Available commands:
+  /help       - Provide help on available commands
+  /clear      - Clear your chat history
+  /compact    - Compact conversation context to save tokens
+  /model      - Switch the current model
+  /cost       - Show current session cost and token usage
+  /resume     - List and resume available sessions";
+                let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                    command: "/help".into(),
+                    output: output.to_string(),
+                }).await;
+            }
+            "clear" => {
+                self.session.clear();
+                let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                    command: "/clear".into(),
+                    output: "Chat history cleared.".into(),
+                }).await;
+                let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+            }
+            "compact" => {
+                self.compact_context().await;
+            }
+            "model" => {
+                if args.is_empty() {
+                    let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                        command: "/model".into(),
+                        output: format!("Current model: {}. Usage: /model <name>", self.config.model.as_deref().unwrap_or("none")),
+                    }).await;
+                } else {
+                    self.config.model = Some(args.to_string());
+                    match api::create_client(&self.config) {
+                        Ok(client) => {
+                            self.client = client;
+                            let pricing = crate::cost::get_model_pricing(args);
+                            self.session.pricing = pricing;
+                            self.session.model_name = args.to_string();
+                            let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                                command: "/model".into(),
+                                output: format!("Model switched to {}", args),
+                            }).await;
+                        }
+                        Err(e) => {
+                            let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                                command: "/model".into(),
+                                output: format!("Failed to switch model: {}", e),
+                            }).await;
+                        }
+                    }
+                }
+            }
+            "cost" => {
+                let usage = self.session.total_usage();
+                let params = crate::cost::get_model_pricing(&self.session.model_name);
+                let cost = crate::cost::calculate_cost(usage.input_tokens, usage.output_tokens, &params);
+                let output = format!("Tokens: {} in, {} out.\nCost: ${:.4} (Model: {})", usage.input_tokens, usage.output_tokens, cost, self.session.model_name);
+                let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                    command: "/cost".into(),
+                    output,
+                }).await;
+            }
+            "resume" => {
+                match crate::session::list_sessions().await {
+                    Ok(sessions) => {
+                        if args.is_empty() {
+                            let mut out = String::from("Available sessions:\n");
+                            for s in sessions {
+                                out.push_str(&format!("- ID: {} (Model: {}, Msgs: {})\n", s.id, s.model_name, s.messages.len()));
+                            }
+                            out.push_str("Usage: /resume <id>");
+                            let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                                command: "/resume".into(),
+                                output: out,
+                            }).await;
+                        } else {
+                            if let Some(s) = sessions.into_iter().find(|s| s.id == args) {
+                                self.session.restore(s);
+                                let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                                    command: "/resume".into(),
+                                    output: format!("Resumed session {}", args),
+                                }).await;
+                                let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+                            } else {
+                                let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                                    command: "/resume".into(),
+                                    output: format!("Session {} not found.", args),
+                                }).await;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                            command: "/resume".into(),
+                            output: format!("Failed to list sessions: {}", e),
+                        }).await;
+                    }
+                }
+            }
+            _ => {
+                let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                    command: format!("/{}", cmd),
+                    output: format!("Unknown command: /{}", cmd),
+                }).await;
+            }
+        }
+    }
+
+    async fn compact_context(&mut self) {
+        let _ = self.event_tx.send(EngineEvent::CompactProgress {
+            message: "Compacting context...".into(),
+        }).await;
+
+        let mut messages_to_summarize = self.session.messages().to_vec();
+        messages_to_summarize.push(Message {
+            role: Role::User,
+            content: vec![ContentBlock::Text { text: compact::compact_prompt() }],
+        });
+
+        match self.client.stream(&messages_to_summarize, None, None).await {
+            Ok(mut stream) => {
+                let mut assistant_text = String::new();
+                while let Some(evt_opt) = stream.next().await {
+                    if let Ok(StreamEvent::TextDelta { text }) = evt_opt {
+                        assistant_text.push_str(&text);
+                    }
+                }
+                
+                let summary = compact::extract_summary(&assistant_text);
+                let summary_msg = Message {
+                    role: Role::User,
+                    content: vec![ContentBlock::Text { text: format!("[Previous conversation summary]\n\n{}", summary) }],
+                };
+
+                let original_messages = self.session.messages();
+                let mut keep_count = original_messages.len().min(8); // Keep last 4 turns (8 msgs)
+                if keep_count % 2 != 0 {
+                    keep_count -= 1; // Make sure we don't sever a user->assistant pairing
+                }
+                
+                let mut new_messages = vec![summary_msg];
+                if keep_count > 0 {
+                    let start_idx = original_messages.len() - keep_count;
+                    new_messages.extend(original_messages[start_idx..].iter().cloned());
+                }
+
+                self.session.replace_messages(new_messages);
+
+                let _ = self.event_tx.send(EngineEvent::CompactProgress {
+                    message: "Context compacted.".into(),
+                }).await;
+                let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+            }
+            Err(e) => {
+                let _ = self.event_tx.send(EngineEvent::CompactProgress {
+                    message: format!("Failed to compact: {}", e),
+                }).await;
+            }
+        }
+    }
+}

@@ -57,6 +57,10 @@ pub struct AppConfig {
     /// Custom User-Agent header (useful for Coding Plan endpoints)
     pub user_agent: Option<String>,
 
+    /// Disable MCP server connections
+    #[serde(default)]
+    pub no_mcp: bool,
+
     /// Send stream_options.include_usage in OpenAI streaming requests.
     ///
     /// Set to `false` for endpoints that don't support this field (DashScope,
@@ -75,6 +79,7 @@ impl Default for AppConfig {
             max_tokens: Some(DEFAULT_MAX_TOKENS),
             thinking: false,
             user_agent: None,
+            no_mcp: false,
             include_stream_usage: true,
         }
     }
