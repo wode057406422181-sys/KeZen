@@ -47,10 +47,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 # Terminal UI & Output
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
 colored = "3"
 rustyline = "15"
 termimad = "0.31"
+
+# TUI framework
+ratatui = "0.29"
+unicode-width = "0.2"
 
 # Configuration
 toml = "0.8"

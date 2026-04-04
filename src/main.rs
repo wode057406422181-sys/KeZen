@@ -1,12 +1,12 @@
 mod api;
 mod cli;
-mod cli_frontend;
 mod config;
 mod constants;
 mod context;
 mod cost;
 mod engine;
 mod error;
+mod frontend;
 mod mcp;
 mod permissions;
 mod prompts;
@@ -72,7 +72,11 @@ async fn main() -> Result<()> {
         Some(Command::Chat { prompt }) => {
             // Chat subcommand: use its --prompt or fall back to top-level --prompt
             let effective_prompt = prompt.or(cli.prompt);
-            cli_frontend::run_cli(config, effective_prompt, permission_mode).await
+            if cli.classic {
+                frontend::repl::run_cli(config, effective_prompt, permission_mode).await
+            } else {
+                frontend::tui::run_tui(config, effective_prompt, permission_mode).await
+            }
         }
         Some(Command::Init) => {
             println!("Initializing KeZen in current directory...");
@@ -93,8 +97,12 @@ async fn main() -> Result<()> {
             Ok(())
         }
         None => {
-            // Default: if --prompt is given, single-shot; otherwise interactive
-            cli_frontend::run_cli(config, cli.prompt, permission_mode).await
+            // Default: TUI mode unless --classic is given
+            if cli.classic {
+                frontend::repl::run_cli(config, cli.prompt, permission_mode).await
+            } else {
+                frontend::tui::run_tui(config, cli.prompt, permission_mode).await
+            }
         }
     }
 }
