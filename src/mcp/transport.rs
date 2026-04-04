@@ -10,10 +10,10 @@ use std::collections::HashMap;
 use super::config::McpServerConfig;
 
 pub struct StdioTransport {
-    child: Child,
-    next_id: u64,
-    request_tx: mpsc::Sender<(Value, oneshot::Sender<Result<Value>>)>,
-    notify_tx: mpsc::Sender<Value>,
+    pub(crate) child: Child,
+    pub(crate) next_id: u64,
+    pub(crate) request_tx: mpsc::Sender<(Value, oneshot::Sender<Result<Value>>)>,
+    pub(crate) notify_tx: mpsc::Sender<Value>,
 }
 
 impl StdioTransport {

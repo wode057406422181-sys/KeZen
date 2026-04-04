@@ -13,11 +13,12 @@ pub struct McpToolInfo {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
+    pub read_only_hint: bool,
 }
 
 pub struct McpClient {
     pub name: String,
-    transport: StdioTransport,
+    pub(crate) transport: StdioTransport,
     pub tools: Vec<McpToolInfo>,
 }
 
@@ -60,10 +61,16 @@ impl McpClient {
                     t.get("description").and_then(|d| d.as_str()),
                     t.get("inputSchema")
                 ) {
+                    let read_only_hint = t.get("annotations")
+                        .and_then(|a| a.get("readOnlyHint"))
+                        .and_then(|r| r.as_bool())
+                        .unwrap_or(false);
+
                     tools.push(McpToolInfo {
                         name: t_name.to_string(),
                         description: t_desc.to_string(),
                         input_schema: t_schema.clone(),
+                        read_only_hint,
                     });
                 }
             }
@@ -116,6 +123,18 @@ pub async fn connect_all_servers() -> Result<Vec<Arc<dyn Tool>>> {
     
     if let Ok(Some(config)) = McpConfig::load().await {
         for (server_name, server_cfg) in config.servers {
+            // Check deny list first
+            if config.denied_servers.contains(&server_name) {
+                eprintln!("[MCP] Skipping '{}': server is in denied list", server_name);
+                continue;
+            }
+            
+            // Check allow list if it's not empty
+            if !config.allowed_servers.is_empty() && !config.allowed_servers.contains(&server_name) {
+                eprintln!("[MCP] Skipping '{}': server is not in allowed list", server_name);
+                continue;
+            }
+
             match McpClient::connect(&server_name, &server_cfg).await {
                 Ok(client) => {
                     let client_arc = Arc::new(tokio::sync::Mutex::new(client));

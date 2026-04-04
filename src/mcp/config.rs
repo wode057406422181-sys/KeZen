@@ -9,6 +9,10 @@ use tokio::fs;
 pub struct McpConfig {
     #[serde(default, rename = "mcpServers")]
     pub servers: HashMap<String, McpServerConfig>,
+    #[serde(default, rename = "allowedServers")]
+    pub allowed_servers: Vec<String>,
+    #[serde(default, rename = "deniedServers")]
+    pub denied_servers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,3 +39,41 @@ impl McpConfig {
         Ok(Some(config))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_deserialize_mcp_config() {
+        let json_data = json!({
+            "mcpServers": {
+                "filesystem": {
+                    "command": "node",
+                    "args": ["-e", "println('hi')"]
+                }
+            },
+            "allowedServers": ["filesystem"],
+            "deniedServers": ["git"]
+        });
+
+        let config: McpConfig = serde_json::from_value(json_data).unwrap();
+        assert_eq!(config.servers.len(), 1);
+        assert!(config.servers.contains_key("filesystem"));
+        assert_eq!(config.allowed_servers, vec!["filesystem".to_string()]);
+        assert_eq!(config.denied_servers, vec!["git".to_string()]);
+    }
+
+    #[test]
+    fn test_deserialize_mcp_config_defaults() {
+        let json_data = json!({
+            "mcpServers": {}
+        });
+
+        let config: McpConfig = serde_json::from_value(json_data).unwrap();
+        assert!(config.allowed_servers.is_empty());
+        assert!(config.denied_servers.is_empty());
+    }
+}
+

@@ -16,3 +16,59 @@ pub fn parse(input: &str) -> Option<(&str, &str)> {
         None => Some((without_slash, "")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_basic_command() {
+        assert_eq!(parse("/help"), Some(("help", "")));
+    }
+
+    #[test]
+    fn parse_command_with_args() {
+        assert_eq!(parse("/model gpt-4o"), Some(("model", "gpt-4o")));
+    }
+
+    #[test]
+    fn parse_command_with_multi_word_args() {
+        assert_eq!(parse("/compact custom prompt here"), Some(("compact", "custom prompt here")));
+    }
+
+    #[test]
+    fn parse_not_a_slash_command() {
+        assert_eq!(parse("hello world"), None);
+    }
+
+    #[test]
+    fn parse_bare_slash() {
+        assert_eq!(parse("/"), None);
+    }
+
+    #[test]
+    fn parse_leading_trailing_whitespace() {
+        assert_eq!(parse("  /help  "), Some(("help", "")));
+    }
+
+    #[test]
+    fn parse_args_trimmed() {
+        assert_eq!(parse("/model   gpt-4o  "), Some(("model", "gpt-4o")));
+    }
+
+    #[test]
+    fn parse_empty_string() {
+        assert_eq!(parse(""), None);
+    }
+
+    #[test]
+    fn parse_whitespace_only() {
+        assert_eq!(parse("   "), None);
+    }
+
+    #[test]
+    fn parse_tab_separated_args() {
+        assert_eq!(parse("/cmd\targ1"), Some(("cmd", "arg1")));
+    }
+}
+
