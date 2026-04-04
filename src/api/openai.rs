@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
-use crate::api::{BoxStream, LlmClient};
+use crate::api::{BoxStream, LlmClient, StreamOptions};
 use crate::config::AppConfig;
 use crate::constants::api::CONTENT_TYPE_JSON;
 use crate::constants::defaults::DEFAULT_MAX_TOKENS;
@@ -93,6 +93,7 @@ impl LlmClient for OpenAiClient {
         messages: &[Message],
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
+        options: &StreamOptions,
     ) -> Result<BoxStream<'_, StreamEvent>, KezenError> {
         let url = normalize_openai_url(&self.base_url);
 
@@ -194,6 +195,21 @@ impl LlmClient for OpenAiClient {
         // when explicitly enabled (default: true for the official OpenAI API).
         if self.include_stream_usage {
             body["stream_options"] = json!({"include_usage": true});
+        }
+
+        // ── Native server-side search (DashScope / Bailian compatible) ──
+        // When enabled, inject `enable_search` and optional `search_options`
+        // into the request body. Standard OpenAI endpoints silently ignore
+        // these extra fields, so this is safe for all OpenAI-compatible APIs.
+        if options.enable_server_search {
+            body["enable_search"] = json!(true);
+            let mut search_opts = serde_json::Map::new();
+            if let Some(strategy) = &options.search_strategy {
+                search_opts.insert("search_strategy".into(), json!(strategy));
+            }
+            if !search_opts.is_empty() {
+                body["search_options"] = serde_json::Value::Object(search_opts);
+            }
         }
 
         debug_logger::log_request("openai", &url, &body);

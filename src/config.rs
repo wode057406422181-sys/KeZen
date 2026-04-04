@@ -27,20 +27,27 @@ impl fmt::Display for Provider {
 
 /// Configuration for the web search backend.
 ///
-/// Supported providers: "brave", "searxng", "google_cse", "bing".
+/// Supported modes:
+///   - `"native"`: Use the LLM provider's built-in web search (DashScope enable_search,
+///     etc.). No extra API key needed.
+///   - `"brave"`, `"searxng"`, `"google_cse"`, `"bing"`: Client-side search via 3rd-party API.
+///
 /// Set via `[search]` section in `~/.kezen/config/config.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchConfig {
-    /// Search backend provider name.
-    #[serde(default = "default_search_provider")]
-    pub provider: String,
-    /// API key for the search provider.
+    /// Search mode.
+    #[serde(default = "default_search_mode")]
+    pub mode: String,
+    /// API key for the search provider (not needed for `native` mode).
     pub api_key: Option<String>,
     /// Base URL (e.g. SearXNG instance URL, or Google CSE CX id).
     pub base_url: Option<String>,
+    /// Search strategy hint for native mode (DashScope: turbo/max/agent/agent_max).
+    /// Defaults to "turbo" when omitted.
+    pub search_strategy: Option<String>,
 }
 
-fn default_search_provider() -> String {
+fn default_search_mode() -> String {
     "brave".to_string()
 }
 
@@ -159,19 +166,29 @@ impl AppConfig {
         }
 
         // Search-specific env overrides
-        if let Ok(val) = std::env::var("KEZEN_SEARCH_PROVIDER") {
+        if let Ok(val) = std::env::var("KEZEN_SEARCH_MODE") {
             config.search.get_or_insert_with(|| SearchConfig {
-                provider: default_search_provider(),
+                mode: default_search_mode(),
                 api_key: None,
                 base_url: None,
-            }).provider = val;
+                search_strategy: None,
+            }).mode = val;
         }
         if let Ok(val) = std::env::var("KEZEN_SEARCH_API_KEY") {
             config.search.get_or_insert_with(|| SearchConfig {
-                provider: default_search_provider(),
+                mode: default_search_mode(),
                 api_key: None,
                 base_url: None,
+                search_strategy: None,
             }).api_key = Some(val);
+        }
+        if let Ok(val) = std::env::var("KEZEN_SEARCH_STRATEGY") {
+            config.search.get_or_insert_with(|| SearchConfig {
+                mode: default_search_mode(),
+                api_key: None,
+                base_url: None,
+                search_strategy: None,
+            }).search_strategy = Some(val);
         }
 
         Ok(config)

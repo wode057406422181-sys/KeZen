@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 
 use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
-use crate::api::{self, LlmClient};
+use crate::api::{self, LlmClient, StreamOptions};
 use crate::config::AppConfig;
 use crate::prompts::build_system_prompt;
 use crate::tools::registry::ToolRegistry;
@@ -35,6 +35,8 @@ pub struct KezenEngine {
     event_tx: mpsc::Sender<EngineEvent>,
     registry: ToolRegistry,
     permission_state: PermissionState,
+    /// Pre-computed stream options (native search settings etc.)
+    stream_options: StreamOptions,
 }
 
 impl KezenEngine {
@@ -51,6 +53,14 @@ impl KezenEngine {
         let model_name = config.model.clone().unwrap_or_default();
         let pricing = crate::cost::get_model_pricing(&model_name);
         
+        let is_native = config.search.as_ref()
+            .is_some_and(|s| s.mode == "native");
+        let stream_options = StreamOptions {
+            enable_server_search: is_native,
+            search_strategy: config.search.as_ref()
+                .and_then(|s| s.search_strategy.clone()),
+        };
+
         Ok(Self {
             config,
             client,
@@ -60,6 +70,7 @@ impl KezenEngine {
             event_tx,
             registry,
             permission_state: PermissionState::new(permission_mode),
+            stream_options,
         })
     }
 
@@ -107,7 +118,7 @@ impl KezenEngine {
 
             let stream_result = self
                 .client
-                .stream(self.session.messages(), Some(&self.system_prompt), tools_arg)
+                .stream(self.session.messages(), Some(&self.system_prompt), tools_arg, &self.stream_options)
                 .await;
 
             let mut assistant_text = String::new();

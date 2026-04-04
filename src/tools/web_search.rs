@@ -16,11 +16,14 @@ struct SearchResult {
 
 /// Web search tool supporting multiple search backends.
 ///
-/// Backends are selected via `SearchConfig.provider`:
+/// Backends are selected via `SearchConfig.mode`:
 /// - `"brave"`       — Brave Search API
 /// - `"searxng"`     — Self-hosted SearXNG instance
 /// - `"google_cse"`  — Google Custom Search Engine
 /// - `"bing"`        — Bing Web Search API
+///
+/// Note: `mode = "native"` is handled at the API layer (server-side search)
+/// and should never reach this tool — it should not be registered.
 pub struct WebSearchTool {
     config: Option<Arc<SearchConfig>>,
     http: reqwest::Client,
@@ -40,13 +43,13 @@ impl WebSearchTool {
             "WebSearch is not configured. Add a [search] section to ~/.kezen/config/config.toml with provider and api_key.".to_string()
         })?;
 
-        match config.provider.as_str() {
+        match config.mode.as_str() {
             "brave" => self.search_brave(config, query, max_results).await,
             "searxng" => self.search_searxng(config, query, max_results).await,
             "google_cse" => self.search_google_cse(config, query, max_results).await,
             "bing" => self.search_bing(config, query, max_results).await,
             other => Err(format!(
-                "Unknown search provider: '{}'. Supported: brave, searxng, google_cse, bing",
+                "Unknown search mode: '{}'. Supported: brave, searxng, google_cse, bing (or use 'native' for provider-side search)",
                 other
             )),
         }
@@ -493,24 +496,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_unknown_provider_returns_error() {
+    async fn test_unknown_mode_returns_error() {
         let config = SearchConfig {
-            provider: "unknown_provider".into(),
+            mode: "unknown_mode".into(),
             api_key: Some("key".into()),
             base_url: None,
+            search_strategy: None,
         };
         let tool = WebSearchTool::new(Some(config));
         let result = tool.call(json!({"query": "test"})).await;
         assert!(result.is_error);
-        assert!(result.content.contains("Unknown search provider"));
+        assert!(result.content.contains("Unknown search mode"));
     }
 
     #[tokio::test]
     async fn test_brave_missing_api_key() {
         let config = SearchConfig {
-            provider: "brave".into(),
+            mode: "brave".into(),
             api_key: None,
             base_url: None,
+            search_strategy: None,
         };
         let tool = WebSearchTool::new(Some(config));
         let result = tool.call(json!({"query": "test"})).await;
