@@ -76,12 +76,11 @@ pub async fn is_within_working_directory(path: &str, working_dir: &str) -> bool 
         (Ok(cp), Ok(cwd)) => cp.starts_with(&cwd),
         _ => {
             // Try canonicalizing the parent directory (which should exist for writes)
-            if let Some(parent) = Path::new(path).parent() {
-                if let Ok(cp) = tokio::fs::canonicalize(parent).await {
-                    if let Ok(cwd) = tokio::fs::canonicalize(working_dir).await {
-                        return cp.starts_with(&cwd);
-                    }
-                }
+            if let Some(parent) = Path::new(path).parent()
+                && let Ok(cp) = tokio::fs::canonicalize(parent).await
+                && let Ok(cwd) = tokio::fs::canonicalize(working_dir).await
+            {
+                return cp.starts_with(&cwd);
             }
             false // Fail closed
         }

@@ -25,6 +25,59 @@ impl fmt::Display for Provider {
     }
 }
 
+/// Configuration for web search and fetch capabilities.
+///
+/// Defaults when no `[search]` section is present (or fields are omitted):
+///   - `search_mode = "off"` — no search at all (neither native nor client-side).
+///   - `fetch_mode  = "client"` — WebFetchTool is always registered.
+///
+/// `search_mode` values:
+///   - `"off"`: No web search (default).
+///   - `"native"`: Server-side search via provider API (DashScope `enable_search`, etc.).
+///   - `"brave"`, `"searxng"`, `"google_cse"`, `"bing"`: Client-side search.
+///
+/// `fetch_mode` values:
+///   - `"client"`: Client-side WebFetchTool (HTML→Markdown + optional LLM extraction) (default).
+///   - `"native"`: Server-side fetch via provider API.
+///
+/// Set via `[search]` section in `~/.kezen/config/config.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchConfig {
+    /// Web search mode. Default: `"off"`.
+    #[serde(default = "default_search_mode")]
+    pub search_mode: String,
+    /// Web fetch mode. Default: `"client"`.
+    #[serde(default = "default_fetch_mode")]
+    pub fetch_mode: String,
+    /// API key for the search provider (not needed for `native` mode).
+    pub api_key: Option<String>,
+    /// Base URL (e.g. SearXNG instance URL, or Google CSE CX id).
+    pub base_url: Option<String>,
+    /// Search strategy hint for native mode (DashScope: turbo/max/agent/agent_max).
+    /// Defaults to `"turbo"` when omitted.
+    pub search_strategy: Option<String>,
+}
+
+fn default_search_mode() -> String {
+    "off".to_string()
+}
+
+fn default_fetch_mode() -> String {
+    "client".to_string()
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            search_mode: default_search_mode(),
+            fetch_mode: default_fetch_mode(),
+            api_key: None,
+            base_url: None,
+            search_strategy: None,
+        }
+    }
+}
+
 /// Application configuration
 ///
 /// Loading priority (high → low):
@@ -70,6 +123,9 @@ pub struct AppConfig {
     /// Ollama, vLLM, etc.). Defaults to `true` for the official OpenAI API.
     #[serde(default = "default_true")]
     pub include_stream_usage: bool,
+
+    /// Web search configuration (loaded from [search] section).
+    pub search: Option<SearchConfig>,
 }
 
 impl Default for AppConfig {
@@ -85,6 +141,7 @@ impl Default for AppConfig {
             user_agent: None,
             no_mcp: false,
             include_stream_usage: true,
+            search: None,
         }
     }
 }
@@ -144,6 +201,20 @@ impl AppConfig {
             config.model = Some(val);
         }
 
+        // Search-specific env overrides
+        if let Ok(val) = std::env::var("KEZEN_SEARCH_MODE") {
+            config.search.get_or_insert_with(SearchConfig::default).search_mode = val;
+        }
+        if let Ok(val) = std::env::var("KEZEN_FETCH_MODE") {
+            config.search.get_or_insert_with(SearchConfig::default).fetch_mode = val;
+        }
+        if let Ok(val) = std::env::var("KEZEN_SEARCH_API_KEY") {
+            config.search.get_or_insert_with(SearchConfig::default).api_key = Some(val);
+        }
+        if let Ok(val) = std::env::var("KEZEN_SEARCH_STRATEGY") {
+            config.search.get_or_insert_with(SearchConfig::default).search_strategy = Some(val);
+        }
+
         Ok(config)
     }
 
@@ -194,6 +265,7 @@ impl fmt::Debug for AppConfig {
             .field("thinking", &self.thinking)
             .field("user_agent", &self.user_agent)
             .field("include_stream_usage", &self.include_stream_usage)
+            .field("search", &self.search)
             .finish()
     }
 }
@@ -306,5 +378,106 @@ mod tests {
         let debug_str = format!("{:?}", config);
         // None api_key → map(|_| "[REDACTED]") → None, shown as "None"
         assert!(debug_str.contains("api_key: None"));
+    }
+
+    // ── SearchConfig ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn default_search_is_none() {
+        assert!(default_config().search.is_none());
+    }
+
+    #[test]
+    fn search_config_default_is_off_client() {
+        let sc = SearchConfig::default();
+        assert_eq!(sc.search_mode, "off");
+        assert_eq!(sc.fetch_mode, "client");
+        assert!(sc.api_key.is_none());
+        assert!(sc.search_strategy.is_none());
+    }
+
+    #[test]
+    fn search_config_deserializes_defaults_when_empty() {
+        let toml_str = r#"
+            api_key = "test"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.search_mode, "off");     // default
+        assert_eq!(sc.fetch_mode, "client");   // default
+    }
+
+    #[test]
+    fn search_config_deserializes_native_search_with_strategy() {
+        let toml_str = r#"
+            search_mode = "native"
+            search_strategy = "agent_max"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.search_mode, "native");
+        assert_eq!(sc.fetch_mode, "client"); // default
+        assert_eq!(sc.search_strategy.as_deref(), Some("agent_max"));
+    }
+
+    #[test]
+    fn search_config_deserializes_brave_with_client_fetch() {
+        let toml_str = r#"
+            search_mode = "brave"
+            fetch_mode = "client"
+            api_key = "BSA-test-key"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.search_mode, "brave");
+        assert_eq!(sc.fetch_mode, "client");
+        assert_eq!(sc.api_key.as_deref(), Some("BSA-test-key"));
+    }
+
+    #[test]
+    fn search_config_independent_modes() {
+        let toml_str = r#"
+            search_mode = "brave"
+            fetch_mode = "native"
+            api_key = "key"
+        "#;
+        let sc: SearchConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(sc.search_mode, "brave");
+        assert_eq!(sc.fetch_mode, "native");
+    }
+
+    #[test]
+    fn app_config_with_search_section() {
+        let toml_str = r#"
+            provider = "openai"
+            [search]
+            search_mode = "native"
+            fetch_mode = "client"
+            search_strategy = "turbo"
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.search.is_some());
+        let search = config.search.unwrap();
+        assert_eq!(search.search_mode, "native");
+        assert_eq!(search.fetch_mode, "client");
+        assert_eq!(search.search_strategy.as_deref(), Some("turbo"));
+    }
+
+    #[test]
+    fn app_config_without_search_section() {
+        let toml_str = r#"
+            provider = "anthropic"
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.search.is_none());
+    }
+
+    #[test]
+    fn app_config_empty_search_section_defaults_to_off_client() {
+        let toml_str = r#"
+            provider = "openai"
+            [search]
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        let search = config.search.unwrap();
+        assert_eq!(search.search_mode, "off");
+        assert_eq!(search.fetch_mode, "client");
     }
 }

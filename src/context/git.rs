@@ -22,7 +22,7 @@ pub async fn collect_git_context() -> Option<GitContext> {
     // Quick check: are we inside a git work tree?
     let ok = git(&cwd, &["rev-parse", "--is-inside-work-tree"])
         .await
-        .map_or(false, |s| s == "true");
+        .is_some_and(|s| s == "true");
     if !ok {
         return None;
     }

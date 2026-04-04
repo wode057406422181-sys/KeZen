@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 
+use crate::api::types::Usage;
+
 pub mod registry;
 pub mod bash;
 pub mod file_read;
@@ -7,6 +9,9 @@ pub mod file_write;
 pub mod file_edit;
 pub mod grep;
 pub mod glob;
+pub mod web_cache;
+pub mod web_search;
+pub mod web_fetch;
 
 use crate::permissions::PermissionResult;
 
@@ -16,6 +21,28 @@ pub struct ToolResult {
     pub content: String,
     /// Whether the tool execution failed.
     pub is_error: bool,
+    /// Optional token usage from secondary LLM calls (e.g. WebFetch extraction).
+    /// When present, the engine adds this to the turn's total usage so the user
+    /// sees the full cost of the operation.
+    pub extraction_usage: Option<Usage>,
+}
+
+impl ToolResult {
+    /// Create a successful tool result.
+    pub fn ok(content: String) -> Self {
+        Self { content, is_error: false, extraction_usage: None }
+    }
+
+    /// Create an error tool result.
+    pub fn err(content: String) -> Self {
+        Self { content, is_error: true, extraction_usage: None }
+    }
+
+    /// Attach extraction usage (from a secondary LLM sub-call) to this result.
+    pub fn with_extraction_usage(mut self, usage: Usage) -> Self {
+        self.extraction_usage = Some(usage);
+        self
+    }
 }
 
 /// Defines a tool that can be registered and invoked by the agentic loop.

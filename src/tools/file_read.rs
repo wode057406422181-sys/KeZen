@@ -42,10 +42,7 @@ impl Tool for FileReadTool {
         let file_path_str = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(path) => path,
             None => {
-                return ToolResult {
-                    content: "Error: missing or invalid 'file_path'".to_string(),
-                    is_error: true,
-                }
+                return ToolResult::err("Error: missing or invalid 'file_path'".to_string())
             }
         };
 
@@ -59,25 +56,16 @@ impl Tool for FileReadTool {
             Ok(c) => c,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    return ToolResult {
-                        content: format!("File does not exist: {}", file_path_str),
-                        is_error: true,
-                    };
+                    return ToolResult::err(format!("File does not exist: {}", file_path_str));
                 }
                 // Try reading as bytes to check if binary (check first 8KB for null bytes, like git)
                 if let Ok(bytes) = fs::read(&path).await {
                     let check_len = bytes.len().min(8192);
                     if bytes[..check_len].contains(&0) {
-                        return ToolResult {
-                            content: format!("Cannot read binary file: {}", file_path_str),
-                            is_error: true,
-                        };
+                        return ToolResult::err(format!("Cannot read binary file: {}", file_path_str));
                     }
                 }
-                return ToolResult {
-                    content: format!("Failed to read file: {}", e),
-                    is_error: true,
-                };
+                return ToolResult::err(format!("Failed to read file: {}", e));
             }
         };
 
@@ -86,15 +74,9 @@ impl Tool for FileReadTool {
 
         let start_idx = offset.saturating_sub(1);
         if start_idx >= total_lines && total_lines > 0 {
-            return ToolResult {
-                content: format!("<system-reminder>Warning: the file exists but is shorter than the provided offset ({}). The file has {} lines.</system-reminder>", offset, total_lines),
-                is_error: false,
-            };
+            return ToolResult::ok(format!("<system-reminder>Warning: the file exists but is shorter than the provided offset ({}). The file has {} lines.</system-reminder>", offset, total_lines));
         } else if total_lines == 0 {
-            return ToolResult {
-                content: "<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>".to_string(),
-                is_error: false,
-            };
+            return ToolResult::ok("<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>".to_string());
         }
 
         let end_idx = limit.map_or(total_lines, |l| (start_idx + l).min(total_lines));
@@ -104,10 +86,7 @@ impl Tool for FileReadTool {
             result_content.push_str(&format!("{}: {}\n", start_idx + i + 1, line));
         }
 
-        ToolResult {
-            content: result_content,
-            is_error: false,
-        }
+        ToolResult::ok(result_content)
     }
 
     fn is_read_only(&self, _input: &serde_json::Value) -> bool {
