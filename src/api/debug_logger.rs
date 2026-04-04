@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Local;
 
-/// Global flag: when true, raw API I/O is logged to ~/.infini/logs/
+/// Global flag: when true, raw API I/O is logged to ~/.kezen/logs/
 static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
 
 /// Cached open log file handle — opened once per process, reused for every write.
@@ -35,7 +35,7 @@ fn with_log_file(f: impl FnOnce(&mut File)) {
     let file_mutex = LOG_FILE.get_or_init(|| {
         let path = (|| -> Option<std::path::PathBuf> {
             let home = dirs::home_dir()?;
-            let log_dir = home.join(".infini").join("logs");
+            let log_dir = home.join(".kezen").join("logs");
             fs::create_dir_all(&log_dir).ok()?;
             let timestamp = Local::now().format("%Y%m%d_%H%M%S");
             Some(log_dir.join(format!("api_debug_{}.log", timestamp)))

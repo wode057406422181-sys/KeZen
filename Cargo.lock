@@ -1056,40 +1056,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "infini"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "chrono",
- "clap",
- "colored",
- "crossterm 0.28.1",
- "dirs",
- "eventsource-stream",
- "futures",
- "glob",
- "regex",
- "reqwest",
- "reqwest-eventsource",
- "rustyline",
- "serde",
- "serde_json",
- "tempfile",
- "termimad",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "toml",
- "tower",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1127,6 +1093,40 @@ dependencies = [
  "futures-util",
  "once_cell",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "kezen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "clap",
+ "colored",
+ "crossterm 0.28.1",
+ "dirs",
+ "eventsource-stream",
+ "futures",
+ "glob",
+ "regex",
+ "reqwest",
+ "reqwest-eventsource",
+ "rustyline",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "termimad",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "toml",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

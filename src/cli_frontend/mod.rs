@@ -4,7 +4,7 @@ pub mod repl;
 use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
-use crate::engine::InfiniEngine;
+use crate::engine::KezenEngine;
 use crate::engine::events::{EngineEvent, UserAction};
 
 use crate::tools::registry::create_default_registry;
@@ -19,7 +19,7 @@ pub async fn run_cli(
     let (event_tx, event_rx) = mpsc::channel::<EngineEvent>(32);
 
     let registry = create_default_registry();
-    let engine = InfiniEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode).await?;
+    let engine = KezenEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode).await?;
 
     // Spawn the engine loop in a background task
     tokio::spawn(async move {

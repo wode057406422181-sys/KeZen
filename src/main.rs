@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     // Enable API debug logging if --verbose
     if cli.verbose {
         api::debug_logger::enable_debug_logging();
-        eprintln!("  🔍 API debug logging enabled → ~/.infini/logs/");
+        eprintln!("  🔍 API debug logging enabled → ~/.kezen/logs/");
     }
 
     let permission_mode = if cli.yes {
@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
             cli_frontend::run_cli(config, effective_prompt, permission_mode).await
         }
         Some(Command::Init) => {
-            println!("Initializing Infini in current directory...");
+            println!("Initializing KeZen in current directory...");
             config.save()?;
             if let Ok(path) = config::AppConfig::config_path() {
                 println!("Configuration saved to {}", path.display());

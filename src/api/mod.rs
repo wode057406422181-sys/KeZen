@@ -10,10 +10,10 @@ use futures::Stream;
 
 use crate::api::types::{Message, StreamEvent};
 use crate::config::{AppConfig, Provider};
-use crate::error::InfiniError;
+use crate::error::KezenError;
 
 /// A pinned, boxed, Send stream of StreamEvent results.
-pub type BoxStream<'a, T> = Pin<Box<dyn Stream<Item = Result<T, InfiniError>> + Send + 'a>>;
+pub type BoxStream<'a, T> = Pin<Box<dyn Stream<Item = Result<T, KezenError>> + Send + 'a>>;
 
 /// Unified LLM client interface.
 ///
@@ -29,11 +29,11 @@ pub trait LlmClient: Send + Sync {
         messages: &[Message],
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
-    ) -> Result<BoxStream<'_, StreamEvent>, InfiniError>;
+    ) -> Result<BoxStream<'_, StreamEvent>, KezenError>;
 }
 
 /// Factory function: create the appropriate LLM client based on config.
-pub fn create_client(config: &AppConfig) -> Result<Box<dyn LlmClient>, InfiniError> {
+pub fn create_client(config: &AppConfig) -> Result<Box<dyn LlmClient>, KezenError> {
     match config.provider {
         Provider::Anthropic => Ok(Box::new(anthropic::AnthropicClient::new(config)?)),
         Provider::OpenAi => Ok(Box::new(openai::OpenAiClient::new(config)?)),
