@@ -383,11 +383,7 @@ impl Tool for WebSearchTool {
         let query = match input.get("query").and_then(|v| v.as_str()) {
             Some(q) if !q.is_empty() => q,
             _ => {
-                return ToolResult {
-                    content: "Error: missing or empty 'query' parameter".to_string(),
-                    is_error: true,
-                    extraction_usage: None,
-                }
+                return ToolResult::err("Error: missing or empty 'query' parameter".to_string())
             }
         };
 
@@ -397,16 +393,8 @@ impl Tool for WebSearchTool {
             .unwrap_or(10) as usize;
 
         match self.search(query, max_results).await {
-            Ok(results) => ToolResult {
-                content: format_results(query, &results),
-                is_error: false,
-                extraction_usage: None,
-            },
-            Err(e) => ToolResult {
-                content: format!("Search failed: {}", e),
-                is_error: true,
-                extraction_usage: None,
-            },
+            Ok(results) => ToolResult::ok(format_results(query, &results)),
+            Err(e) => ToolResult::err(format!("Search failed: {}", e)),
         }
     }
 

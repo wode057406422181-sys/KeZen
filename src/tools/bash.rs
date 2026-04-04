@@ -37,11 +37,7 @@ impl Tool for BashTool {
         let command = match input.get("command").and_then(|v| v.as_str()) {
             Some(cmd) => cmd,
             None => {
-                return ToolResult {
-                    content: "Error: missing or invalid 'command' parameter".to_string(),
-                    is_error: true,
-                    extraction_usage: None,
-                }
+                return ToolResult::err("Error: missing or invalid 'command' parameter".to_string())
             }
         };
 
@@ -59,11 +55,7 @@ impl Tool for BashTool {
         let child_proc = match child {
             Ok(c) => c,
             Err(e) => {
-                return ToolResult {
-                    content: format!("Failed to spawn shell: {}", e),
-                    is_error: true,
-                    extraction_usage: None,
-                }
+                return ToolResult::err(format!("Failed to spawn shell: {}", e))
             }
         };
 
@@ -84,23 +76,11 @@ impl Tool for BashTool {
                     content.push_str(&format!("Exit code {}", output.status.code().unwrap_or(1)));
                 }
 
-                ToolResult {
-                    content,
-                    is_error,
-                    extraction_usage: None,
-                }
+                ToolResult { content, is_error, extraction_usage: None }
             }
-            Ok(Err(e)) => ToolResult {
-                content: format!("Failed to execute command: {}", e),
-                is_error: true,
-                extraction_usage: None,
-            },
+            Ok(Err(e)) => ToolResult::err(format!("Failed to execute command: {}", e)),
             Err(_) => {
-                ToolResult {
-                    content: format!("Command killed due to timeout of {}ms", timeout_ms),
-                    is_error: true,
-                    extraction_usage: None,
-                }
+                ToolResult::err(format!("Command killed due to timeout of {}ms", timeout_ms))
             }
         }
     }

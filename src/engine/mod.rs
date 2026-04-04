@@ -53,13 +53,14 @@ impl KezenEngine {
         let model_name = config.model.clone().unwrap_or_default();
         let pricing = crate::cost::get_model_pricing(&model_name);
         
-        // When no [search] section: both default to native.
+        // No [search] section: search is OFF, fetch is client-side.
+        // Only enable server-side features when explicitly configured as "native".
         let search_cfg = config.search.as_ref();
         let stream_options = StreamOptions {
             enable_server_search: search_cfg
-                .map_or(true, |s| s.search_mode == "native"),
+                .map_or(false, |s| s.search_mode == "native"),
             enable_server_fetch: search_cfg
-                .map_or(true, |s| s.fetch_mode == "native"),
+                .map_or(false, |s| s.fetch_mode == "native"),
             search_strategy: search_cfg
                 .and_then(|s| s.search_strategy.clone()),
         };

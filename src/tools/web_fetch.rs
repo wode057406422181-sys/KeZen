@@ -345,11 +345,7 @@ impl Tool for WebFetchTool {
         let url = match input.get("url").and_then(|v| v.as_str()) {
             Some(u) if !u.is_empty() => u,
             _ => {
-                return ToolResult {
-                    content: "Error: missing or empty 'url' parameter".to_string(),
-                    is_error: true,
-                    extraction_usage: None,
-                }
+                return ToolResult::err("Error: missing or empty 'url' parameter".to_string())
             }
         };
 
@@ -361,11 +357,7 @@ impl Tool for WebFetchTool {
                 is_error: false,
                 extraction_usage,
             },
-            Err(e) => ToolResult {
-                content: format!("WebFetch failed: {}", e),
-                is_error: true,
-                extraction_usage: None,
-            },
+            Err(e) => ToolResult::err(format!("WebFetch failed: {}", e)),
         }
     }
 
@@ -377,7 +369,7 @@ impl Tool for WebFetchTool {
         &self,
         input: &serde_json::Value,
     ) -> crate::permissions::PermissionResult {
-        // Check if the URL is from a preapproved domain
+        // Preapproved documentation domains are auto-allowed
         if let Some(url_str) = input.get("url").and_then(|v| v.as_str())
             && let Ok(parsed) = url::Url::parse(url_str)
             && let Some(host) = parsed.host_str()
@@ -385,8 +377,8 @@ impl Tool for WebFetchTool {
         {
             return crate::permissions::PermissionResult::Allow;
         }
-        // Non-preapproved domains: defer to pipeline (read-only will auto-allow)
-        crate::permissions::PermissionResult::Allow
+        // Non-preapproved domains: require user approval
+        crate::permissions::PermissionResult::Passthrough
     }
 
     fn permission_description(&self, input: &serde_json::Value) -> String {
@@ -561,12 +553,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_unknown_domain_still_allows_as_read_only() {
+    async fn test_unknown_domain_needs_approval() {
         let tool = WebFetchTool::new(None);
         let input = json!({"url": "https://unknown-site.com/page"});
         let result = tool.check_permissions(&input).await;
-        // Since we return Allow for read-only tools
-        assert!(matches!(result, crate::permissions::PermissionResult::Allow));
+        // Non-preapproved domains should NOT auto-allow
+        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
     }
 
     // ── Permission matcher / suggestion ──────────────────────────────

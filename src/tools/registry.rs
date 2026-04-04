@@ -49,15 +49,13 @@ impl Default for ToolRegistry {
 
 /// Create a registry pre-loaded with all built-in tools.
 ///
-/// `config` is needed for tools that require API keys or provider
-/// settings (e.g. WebSearchTool needs SearchConfig, WebFetchTool needs
-/// the full AppConfig for sub-LLM content extraction).
+/// `config` controls which optional tools are registered:
 ///
 /// Web tool registration rules:
-///   - `search_mode = "native"` (or no config) → skip WebSearchTool
-///   - `search_mode = "brave"|…`              → register WebSearchTool
-///   - `fetch_mode  = "native"` (or no config) → skip WebFetchTool
-///   - `fetch_mode  = "client"`               → register WebFetchTool
+///   - `search_mode = "off" | "native"` (or no config) → skip WebSearchTool
+///   - `search_mode = "brave"|…`                      → register WebSearchTool
+///   - `fetch_mode  = "native"`                        → skip WebFetchTool
+///   - `fetch_mode  = "client"` (or no config)         → register WebFetchTool
 pub fn create_default_registry(config: &AppConfig) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(super::bash::BashTool));
@@ -67,22 +65,23 @@ pub fn create_default_registry(config: &AppConfig) -> ToolRegistry {
     registry.register(Arc::new(super::grep::GrepTool));
     registry.register(Arc::new(super::glob::GlobTool));
 
-    // Resolve effective modes (default = native when no [search] section).
+    // Resolve effective modes.
+    // No [search] section: search_mode defaults to "off", fetch_mode defaults to "client".
     let search_mode = config.search.as_ref()
         .map(|s| s.search_mode.as_str())
-        .unwrap_or("native");
+        .unwrap_or("off");
     let fetch_mode = config.search.as_ref()
         .map(|s| s.fetch_mode.as_str())
-        .unwrap_or("native");
+        .unwrap_or("client");
 
-    // WebSearchTool: only for client-side backends.
-    if search_mode != "native" {
+    // WebSearchTool: only for explicit client-side backends (not "off" or "native").
+    if search_mode != "off" && search_mode != "native" {
         registry.register(Arc::new(
             super::web_search::WebSearchTool::new(config.search.clone()),
         ));
     }
 
-    // WebFetchTool: only when user explicitly wants client-side fetch.
+    // WebFetchTool: registered by default ("client"), skipped only for "native".
     if fetch_mode != "native" {
         registry.register(Arc::new(
             super::web_fetch::WebFetchTool::new(Some(config.clone())),
@@ -114,26 +113,26 @@ mod tests {
         assert_eq!(schemas[0]["name"], "Bash");
     }
 
-    // No [search] section → both modes default to native → no web tools
+    // No [search] section → search off, fetch defaults to client → only WebFetchTool
     #[test]
-    fn test_no_search_config_defaults_to_native() {
+    fn test_no_search_config_defaults() {
         let config = AppConfig::default();
         let registry = create_default_registry(&config);
         assert!(registry.get("Bash").is_some());
         assert!(registry.get("WebSearch").is_none());
-        assert!(registry.get("WebFetch").is_none());
-        assert_eq!(registry.schemas().len(), 6);
+        assert!(registry.get("WebFetch").is_some()); // default fetch_mode = "client"
+        assert_eq!(registry.schemas().len(), 7);
     }
 
-    // Explicit native for both
+    // Explicit SearchConfig with defaults → search off, fetch client
     #[test]
-    fn test_explicit_native_both() {
+    fn test_explicit_default_search_config() {
         let mut config = AppConfig::default();
         config.search = Some(SearchConfig::default());
         let registry = create_default_registry(&config);
         assert!(registry.get("WebSearch").is_none());
-        assert!(registry.get("WebFetch").is_none());
-        assert_eq!(registry.schemas().len(), 6);
+        assert!(registry.get("WebFetch").is_some());
+        assert_eq!(registry.schemas().len(), 7);
     }
 
     // Client search (brave) + native fetch → only WebSearchTool
@@ -165,6 +164,21 @@ mod tests {
         assert!(registry.get("WebSearch").is_none());
         assert!(registry.get("WebFetch").is_some());
         assert_eq!(registry.schemas().len(), 7);
+    }
+
+    // Explicit native fetch → WebFetchTool NOT registered
+    #[test]
+    fn test_explicit_native_fetch() {
+        let mut config = AppConfig::default();
+        config.search = Some(SearchConfig {
+            search_mode: "off".into(),
+            fetch_mode: "native".into(),
+            ..SearchConfig::default()
+        });
+        let registry = create_default_registry(&config);
+        assert!(registry.get("WebSearch").is_none());
+        assert!(registry.get("WebFetch").is_none());
+        assert_eq!(registry.schemas().len(), 6);
     }
 
     // Both client → both tools
@@ -204,13 +218,14 @@ mod tests {
     fn test_native_with_search_strategy() {
         let mut config = AppConfig::default();
         config.search = Some(SearchConfig {
+            search_mode: "native".into(), // native = skip WebSearchTool
             search_strategy: Some("agent_max".into()),
             ..SearchConfig::default()
         });
         let registry = create_default_registry(&config);
         assert!(registry.get("WebSearch").is_none());
-        assert!(registry.get("WebFetch").is_none());
-        assert_eq!(registry.schemas().len(), 6);
+        assert!(registry.get("WebFetch").is_some()); // default fetch_mode = "client"
+        assert_eq!(registry.schemas().len(), 7);
     }
 
     #[test]

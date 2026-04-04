@@ -41,11 +41,7 @@ impl Tool for GrepTool {
         let pattern_str = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p.to_string(),
             None => {
-                return ToolResult {
-                    content: "Error: missing or invalid 'pattern'".to_string(),
-                    is_error: true,
-                    extraction_usage: None,
-                }
+                return ToolResult::err("Error: missing or invalid 'pattern'".to_string())
             }
         };
 
@@ -64,11 +60,7 @@ impl Tool for GrepTool {
             let re = match RegexBuilder::new(&pattern_str).build() {
                 Ok(r) => r,
                 Err(e) => {
-                    return ToolResult {
-                        content: format!("Invalid Regex pattern: {}", e),
-                        is_error: true,
-                        extraction_usage: None,
-                    };
+                    return ToolResult::err(format!("Invalid Regex pattern: {}", e));
                 }
             };
 
@@ -105,31 +97,19 @@ impl Tool for GrepTool {
             }
 
             if match_count == 0 {
-                return ToolResult {
-                    content: "No matches found".to_string(),
-                    is_error: false,
-                    extraction_usage: None,
-                };
+                return ToolResult::ok("No matches found".to_string());
             }
 
             if match_count >= 50 {
                 results.push_str("\n[Showing results with pagination = limit: 50]");
             }
 
-            ToolResult {
-                content: results,
-                is_error: false,
-                    extraction_usage: None,
-            }
+            ToolResult::ok(results)
         }).await;
 
         match result {
             Ok(r) => r,
-            Err(e) => ToolResult {
-                content: format!("Grep task panicked: {}", e),
-                is_error: true,
-                extraction_usage: None,
-            },
+            Err(e) => ToolResult::err(format!("Grep task panicked: {}", e)),
         }
     }
 

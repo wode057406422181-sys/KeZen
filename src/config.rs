@@ -27,26 +27,27 @@ impl fmt::Display for Provider {
 
 /// Configuration for web search and fetch capabilities.
 ///
-/// Both `search_mode` and `fetch_mode` default to `"native"`, meaning
-/// the LLM provider's built-in tooling is used (DashScope `enable_search`,
-/// Anthropic server tools, etc.) and no client-side tool is registered.
+/// Defaults when no `[search]` section is present (or fields are omitted):
+///   - `search_mode = "off"` — no search at all (neither native nor client-side).
+///   - `fetch_mode  = "client"` — WebFetchTool is always registered.
 ///
 /// `search_mode` values:
-///   - `"native"`: Server-side search via provider API.
+///   - `"off"`: No web search (default).
+///   - `"native"`: Server-side search via provider API (DashScope `enable_search`, etc.).
 ///   - `"brave"`, `"searxng"`, `"google_cse"`, `"bing"`: Client-side search.
 ///
 /// `fetch_mode` values:
+///   - `"client"`: Client-side WebFetchTool (HTML→Markdown + optional LLM extraction) (default).
 ///   - `"native"`: Server-side fetch via provider API.
-///   - `"client"`: Client-side WebFetchTool (HTML→Markdown + optional LLM extraction).
 ///
 /// Set via `[search]` section in `~/.kezen/config/config.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchConfig {
-    /// Web search mode. Default: `"native"`.
-    #[serde(default = "default_native")]
+    /// Web search mode. Default: `"off"`.
+    #[serde(default = "default_search_mode")]
     pub search_mode: String,
-    /// Web fetch mode. Default: `"native"`.
-    #[serde(default = "default_native")]
+    /// Web fetch mode. Default: `"client"`.
+    #[serde(default = "default_fetch_mode")]
     pub fetch_mode: String,
     /// API key for the search provider (not needed for `native` mode).
     pub api_key: Option<String>,
@@ -57,15 +58,19 @@ pub struct SearchConfig {
     pub search_strategy: Option<String>,
 }
 
-fn default_native() -> String {
-    "native".to_string()
+fn default_search_mode() -> String {
+    "off".to_string()
+}
+
+fn default_fetch_mode() -> String {
+    "client".to_string()
 }
 
 impl Default for SearchConfig {
     fn default() -> Self {
         Self {
-            search_mode: default_native(),
-            fetch_mode: default_native(),
+            search_mode: default_search_mode(),
+            fetch_mode: default_fetch_mode(),
             api_key: None,
             base_url: None,
             search_strategy: None,
@@ -374,10 +379,10 @@ mod tests {
     }
 
     #[test]
-    fn search_config_default_is_native() {
+    fn search_config_default_is_off_client() {
         let sc = SearchConfig::default();
-        assert_eq!(sc.search_mode, "native");
-        assert_eq!(sc.fetch_mode, "native");
+        assert_eq!(sc.search_mode, "off");
+        assert_eq!(sc.fetch_mode, "client");
         assert!(sc.api_key.is_none());
         assert!(sc.search_strategy.is_none());
     }
@@ -388,8 +393,8 @@ mod tests {
             api_key = "test"
         "#;
         let sc: SearchConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(sc.search_mode, "native"); // default
-        assert_eq!(sc.fetch_mode, "native");  // default
+        assert_eq!(sc.search_mode, "off");     // default
+        assert_eq!(sc.fetch_mode, "client");   // default
     }
 
     #[test]
@@ -400,7 +405,7 @@ mod tests {
         "#;
         let sc: SearchConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(sc.search_mode, "native");
-        assert_eq!(sc.fetch_mode, "native"); // default
+        assert_eq!(sc.fetch_mode, "client"); // default
         assert_eq!(sc.search_strategy.as_deref(), Some("agent_max"));
     }
 
@@ -456,14 +461,14 @@ mod tests {
     }
 
     #[test]
-    fn app_config_empty_search_section_defaults_to_native() {
+    fn app_config_empty_search_section_defaults_to_off_client() {
         let toml_str = r#"
             provider = "openai"
             [search]
         "#;
         let config: AppConfig = toml::from_str(toml_str).unwrap();
         let search = config.search.unwrap();
-        assert_eq!(search.search_mode, "native");
-        assert_eq!(search.fetch_mode, "native");
+        assert_eq!(search.search_mode, "off");
+        assert_eq!(search.fetch_mode, "client");
     }
 }

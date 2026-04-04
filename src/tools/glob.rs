@@ -36,11 +36,7 @@ impl Tool for GlobTool {
         let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p.to_string(),
             None => {
-                return ToolResult {
-                    content: "Error: missing or invalid 'pattern'".to_string(),
-                    is_error: true,
-                    extraction_usage: None,
-                }
+                return ToolResult::err("Error: missing or invalid 'pattern'".to_string())
             }
         };
 
@@ -71,20 +67,12 @@ impl Tool for GlobTool {
                     }
                 }
                 Err(e) => {
-                    return ToolResult {
-                        content: format!("Invalid glob pattern: {}", e),
-                        is_error: true,
-                        extraction_usage: None,
-                    };
+                    return ToolResult::err(format!("Invalid glob pattern: {}", e));
                 }
             }
 
             if results.is_empty() {
-                return ToolResult {
-                    content: "No files found".to_string(),
-                    is_error: false,
-                    extraction_usage: None,
-                };
+                return ToolResult::ok("No files found".to_string());
             }
 
             let count = results.len();
@@ -95,20 +83,12 @@ impl Tool for GlobTool {
                 content.push_str("\n(Results are truncated. Consider using a more specific path or pattern.)");
             }
 
-            ToolResult {
-                content,
-                is_error: false,
-                    extraction_usage: None,
-            }
+            ToolResult::ok(content)
         }).await;
 
         match result {
             Ok(r) => r,
-            Err(e) => ToolResult {
-                content: format!("Glob task panicked: {}", e),
-                is_error: true,
-                extraction_usage: None,
-            },
+            Err(e) => ToolResult::err(format!("Glob task panicked: {}", e)),
         }
     }
 
