@@ -25,7 +25,39 @@ pub fn compact_prompt() -> String {
     format!("{}{}{}", COMPACT_NO_TOOLS_PREAMBLE, COMPACT_PROMPT, COMPACT_NO_TOOLS_TRAILER)
 }
 
-pub fn extract_summary(raw: &str) -> String {
+/// Validate raw LLM output and extract the summary.
+///
+/// Returns `Ok((summary, warnings))` on success, `Err(reason)` on failure.
+/// Warnings are non-fatal issues (e.g. missing tags) that the caller can forward to the user.
+pub fn validate_and_extract(raw: &str, stream_errors: &[String]) -> Result<(String, Vec<String>), String> {
+    let mut warnings = Vec::new();
+
+    // Guard: empty response
+    if raw.trim().is_empty() {
+        let reason = if stream_errors.is_empty() {
+            "LLM returned empty response".to_string()
+        } else {
+            format!("Stream errors: {}", stream_errors.join("; "))
+        };
+        return Err(reason);
+    }
+
+    // Check for proper <summary> tags
+    if !raw.contains("<summary>") || !raw.contains("</summary>") {
+        warnings.push("LLM response missing <summary> tags, using raw output.".to_string());
+    }
+
+    let summary = extract_summary(raw);
+
+    // Final guard: extracted summary must not be empty
+    if summary.trim().is_empty() {
+        return Err("Extracted summary is empty after parsing".to_string());
+    }
+
+    Ok((summary, warnings))
+}
+
+fn extract_summary(raw: &str) -> String {
     // Strip <analysis> block first (drafting scratchpad, not needed in output)
     let without_analysis = if let Some(start) = raw.find("<analysis>") {
         if let Some(end) = raw.find("</analysis>") {

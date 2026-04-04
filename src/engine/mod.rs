@@ -556,85 +556,57 @@ impl KezenEngine {
                             Err(e) => {
                                 stream_errors.push(e.to_string());
                             }
-                            _ => {} // Ignore non-text events (usage, tool calls, etc.)
+                            _ => {}
                         }
                     }
 
-                    // Guard: empty response means the LLM produced nothing useful
-                    if assistant_text.trim().is_empty() {
-                        let reason = if stream_errors.is_empty() {
-                            "LLM returned empty response".to_string()
-                        } else {
-                            format!("Stream errors: {}", stream_errors.join("; "))
-                        };
-                        last_error = Some(reason);
+                    match compact::validate_and_extract(&assistant_text, &stream_errors) {
+                        Ok((summary, warnings)) => {
+                            for w in warnings {
+                                let _ = self.event_tx.send(EngineEvent::CompactProgress {
+                                    message: format!("Warning: {}", w),
+                                }).await;
+                            }
 
-                        if attempt < MAX_COMPACT_RETRIES {
+                            let summary_msg = Message {
+                                role: Role::User,
+                                content: vec![ContentBlock::Text { text: format!("[Previous conversation summary]\n\n{}", summary) }],
+                            };
+
+                            let original_messages = self.session.messages();
+                            let mut keep_count = original_messages.len().min(8);
+                            if keep_count % 2 != 0 {
+                                keep_count -= 1;
+                            }
+
+                            let mut new_messages = vec![summary_msg];
+                            if keep_count > 0 {
+                                let start_idx = original_messages.len() - keep_count;
+                                new_messages.extend(original_messages[start_idx..].iter().cloned());
+                            }
+
+                            self.session.replace_messages(new_messages);
+
                             let _ = self.event_tx.send(EngineEvent::CompactProgress {
-                                message: format!("Compact attempt {} failed, retrying...", attempt),
+                                message: "Context compacted.".into(),
                             }).await;
-                            continue;
+                            let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+                            return;
                         }
-                        break;
-                    }
-
-                    // Check if the response contains proper <summary> tags
-                    let has_summary_tags = assistant_text.contains("<summary>") && assistant_text.contains("</summary>");
-                    if !has_summary_tags {
-                        // Log a warning but still use the raw text as fallback
-                        let _ = self.event_tx.send(EngineEvent::CompactProgress {
-                            message: "Warning: LLM response missing <summary> tags, using raw output.".into(),
-                        }).await;
-                    }
-
-                    let summary = compact::extract_summary(&assistant_text);
-
-                    // Final guard: extracted summary should not be empty
-                    if summary.trim().is_empty() {
-                        last_error = Some("Extracted summary is empty after parsing".to_string());
-                        if attempt < MAX_COMPACT_RETRIES {
-                            let _ = self.event_tx.send(EngineEvent::CompactProgress {
-                                message: format!("Compact attempt {} produced empty summary, retrying...", attempt),
-                            }).await;
-                            continue;
+                        Err(reason) => {
+                            last_error = Some(reason);
                         }
-                        break;
                     }
-
-                    let summary_msg = Message {
-                        role: Role::User,
-                        content: vec![ContentBlock::Text { text: format!("[Previous conversation summary]\n\n{}", summary) }],
-                    };
-
-                    let original_messages = self.session.messages();
-                    let mut keep_count = original_messages.len().min(8); // Keep last 4 turns (8 msgs)
-                    if keep_count % 2 != 0 {
-                        keep_count -= 1; // Don't sever a user->assistant pairing
-                    }
-
-                    let mut new_messages = vec![summary_msg];
-                    if keep_count > 0 {
-                        let start_idx = original_messages.len() - keep_count;
-                        new_messages.extend(original_messages[start_idx..].iter().cloned());
-                    }
-
-                    self.session.replace_messages(new_messages);
-
-                    let _ = self.event_tx.send(EngineEvent::CompactProgress {
-                        message: "Context compacted.".into(),
-                    }).await;
-                    let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
-                    return; // Success — exit early
                 }
                 Err(e) => {
                     last_error = Some(e.to_string());
-                    if attempt < MAX_COMPACT_RETRIES {
-                        let _ = self.event_tx.send(EngineEvent::CompactProgress {
-                            message: format!("Compact attempt {} failed: {}, retrying...", attempt, e),
-                        }).await;
-                        continue;
-                    }
                 }
+            }
+
+            if attempt < MAX_COMPACT_RETRIES {
+                let _ = self.event_tx.send(EngineEvent::CompactProgress {
+                    message: format!("Compact attempt {} failed, retrying...", attempt),
+                }).await;
             }
         }
 
