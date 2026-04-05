@@ -23,6 +23,8 @@ pub async fn run_repl(
 
     let mut session_in_tokens = 0u64;
     let mut session_out_tokens = 0u64;
+    let mut session_cache_creation_tokens = 0u64;
+    let mut session_cache_read_tokens = 0u64;
     let pricing = crate::cost::get_model_pricing(config.model.as_deref().unwrap_or(""));
 
     // Single-prompt (non-interactive) mode
@@ -32,10 +34,10 @@ pub async fn run_repl(
             .send(UserAction::SendMessage { content: prompt })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send message: {}", e))?;
-        handle_engine_events(&action_tx, &mut event_rx, &mut session_in_tokens, &mut session_out_tokens).await;
+        handle_engine_events(&action_tx, &mut event_rx, &mut session_in_tokens, &mut session_out_tokens, &mut session_cache_creation_tokens, &mut session_cache_read_tokens).await;
         
-        let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, &pricing);
-        println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
+        let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, &pricing);
+        println!("\n  {} Session Usage: {} in | {} out | {} cache creation | {} cache read | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, cost);
         return Ok(());
     }
 
@@ -58,8 +60,8 @@ pub async fn run_repl(
                 // via handle_slash_command(), which returns results as
                 // SlashCommandResult events.
                 if trimmed == "/quit" || trimmed == "/exit" {
-                    let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, &pricing);
-                    println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
+                    let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, &pricing);
+                    println!("\n  {} Session Usage: {} in | {} out | {} cache creation | {} cache read | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, cost);
                     println!("\n  👋 {}\n", "Goodbye!".dimmed());
                     break;
                 }
@@ -77,7 +79,7 @@ pub async fn run_repl(
                 }
 
                 // Handle the streaming response
-                handle_engine_events(&action_tx, &mut event_rx, &mut session_in_tokens, &mut session_out_tokens).await;
+                handle_engine_events(&action_tx, &mut event_rx, &mut session_in_tokens, &mut session_out_tokens, &mut session_cache_creation_tokens, &mut session_cache_read_tokens).await;
             }
             Err(rustyline::error::ReadlineError::Interrupted) => {
                 // Ctrl-C at the prompt: just print and continue
@@ -85,8 +87,8 @@ pub async fn run_repl(
             }
             Err(rustyline::error::ReadlineError::Eof) => {
                 // Ctrl-D: exit
-                let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, &pricing);
-                println!("\n  {} Session Usage: {} in | {} out | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, cost);
+                let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, &pricing);
+                println!("\n  {} Session Usage: {} in | {} out | {} cache creation | {} cache read | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, cost);
                 println!("\n  👋 {}\n", "Goodbye!".dimmed());
                 break;
             }
@@ -108,6 +110,8 @@ async fn handle_engine_events(
     event_rx: &mut mpsc::Receiver<EngineEvent>,
     session_in: &mut u64,
     session_out: &mut u64,
+    session_cache_creation: &mut u64,
+    session_cache_read: &mut u64,
 ) {
     let mut in_thinking = false;
     print_ai_prefix();
@@ -143,8 +147,10 @@ async fn handle_engine_events(
                         let _ = std::io::stdout().flush();
                     }
                     Some(EngineEvent::CostUpdate(usage)) => {
-                        *session_in += usage.input_tokens;
-                        *session_out += usage.output_tokens;
+                        *session_in = usage.input_tokens;
+                        *session_out = usage.output_tokens;
+                        *session_cache_creation = usage.cache_creation_input_tokens;
+                        *session_cache_read = usage.cache_read_input_tokens;
                         print_cost(&usage);
                     }
                     Some(EngineEvent::SessionSnapshotUpdate { snapshot }) => {
@@ -223,7 +229,10 @@ async fn handle_engine_events(
                         break;
                     }
                     Some(EngineEvent::CompactProgress { message }) => {
-                        println!("  {} {}", "ℹ".blue(), message.dimmed());
+                        println!("  {} {}", "🗜".magenta(), message.dimmed());
+                    }
+                    Some(EngineEvent::Warning(message)) => {
+                        println!("  {} {}", "⚠".yellow(), message.yellow());
                     }
                     Some(EngineEvent::SkillLoaded { name }) => {
                         if in_thinking {

@@ -318,6 +318,8 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     let cost = crate::cost::calculate_cost(
         app.session_in_tokens,
         app.session_out_tokens,
+        app.session_cache_creation_tokens,
+        app.session_cache_read_tokens,
         &app.pricing,
     );
 

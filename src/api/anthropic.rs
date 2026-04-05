@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
-use crate::api::{BoxStream, LlmClient, StreamOptions};
+use crate::api::{BoxStream, CacheHints, LlmClient, StreamOptions};
 use crate::config::AppConfig;
 use crate::constants::api::{ANTHROPIC_VERSION, CONTENT_TYPE_JSON};
 use crate::constants::defaults::DEFAULT_MAX_TOKENS;
@@ -92,6 +92,7 @@ impl LlmClient for AnthropicClient {
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
         _options: &StreamOptions,
+        cache_hints: Option<&CacheHints>,
         max_tokens_override: Option<u32>,
     ) -> Result<BoxStream<'_, StreamEvent>, KezenError> {
         let url = normalize_anthropic_url(&self.base_url);
@@ -148,15 +149,46 @@ impl LlmClient for AnthropicClient {
         });
 
         if let Some(sys_prompt) = system_prompt {
-            body["system"] = json!(sys_prompt);
+            if let Some(hints) = cache_hints
+                && hints.cache_system
+            {
+                body["system"] = json!([{
+                    "type": "text",
+                    "text": sys_prompt,
+                    "cache_control": {"type": "ephemeral"}
+                }]);
+            } else {
+                body["system"] = json!(sys_prompt);
+            }
         }
 
-        if let Some(t) = tools
-            && !t.is_empty() {
-                body["tools"] = json!(t);
-                // Default to `auto` tool choice unless otherwise constrained
-                body["tool_choice"] = json!({"type": "auto"});
+        let mut transformed_tools = None;
+        if let Some(t) = tools {
+            if !t.is_empty() {
+                let mut tools_vec = t.to_vec();
+                if let Some(hints) = cache_hints
+                    && hints.cache_tools
+                {
+                    if let Some(last) = tools_vec.last_mut() {
+                        if let serde_json::Value::Object(map) = last {
+                            map.insert(
+                                "cache_control".to_string(),
+                                json!({"type": "ephemeral"}),
+                            );
+                        }
+                    }
+                }
+                transformed_tools = Some(tools_vec);
             }
+        }
+
+        if let Some(t_vec) = transformed_tools {
+            body["tools"] = json!(t_vec);
+            // Default to `auto` tool choice unless otherwise constrained
+            body["tool_choice"] = json!({"type": "auto"});
+        }
+
+
 
         // TODO: Anthropic native web search / web fetch support.
         // When `options.enable_server_search` is true, inject server-side tools:
@@ -211,6 +243,12 @@ impl LlmClient for AnthropicClient {
                                     .as_u64()
                                     .unwrap_or(0),
                                 output_tokens: v["message"]["usage"]["output_tokens"]
+                                    .as_u64()
+                                    .unwrap_or(0),
+                                cache_creation_input_tokens: v["message"]["usage"]["cache_creation_input_tokens"]
+                                    .as_u64()
+                                    .unwrap_or(0),
+                                cache_read_input_tokens: v["message"]["usage"]["cache_read_input_tokens"]
                                     .as_u64()
                                     .unwrap_or(0),
                             };
@@ -303,6 +341,12 @@ impl LlmClient for AnthropicClient {
                                 Some(Usage {
                                     input_tokens: v["usage"]["input_tokens"].as_u64().unwrap_or(0),
                                     output_tokens: v["usage"]["output_tokens"].as_u64().unwrap_or(0),
+                                    cache_creation_input_tokens: v["usage"]["cache_creation_input_tokens"]
+                                        .as_u64()
+                                        .unwrap_or(0),
+                                    cache_read_input_tokens: v["usage"]["cache_read_input_tokens"]
+                                        .as_u64()
+                                        .unwrap_or(0),
                                 })
                             } else {
                                 None

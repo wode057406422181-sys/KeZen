@@ -168,7 +168,7 @@ impl WebFetchTool {
         let system = "You are a helpful assistant that extracts and summarizes web page content. Be concise and accurate. Include code examples when relevant.";
 
         let stream_result = client
-            .stream(&messages, Some(system), None, &crate::api::StreamOptions::default(), None)
+            .stream(&messages, Some(system), None, &crate::api::StreamOptions::default(), None, None)
             .await
             .map_err(|e| format!("LLM extraction call failed: {}", e))?;
 

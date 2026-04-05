@@ -124,6 +124,10 @@ pub struct AppConfig {
     #[serde(default = "default_true")]
     pub include_stream_usage: bool,
 
+    /// Enable LLM Prompt Caching (e.g. Anthropic cache_control)
+    #[serde(default = "default_true")]
+    pub enable_cache: bool,
+
     /// Web search configuration (loaded from [search] section).
     pub search: Option<SearchConfig>,
 }
@@ -141,6 +145,7 @@ impl Default for AppConfig {
             user_agent: None,
             no_mcp: false,
             include_stream_usage: true,
+            enable_cache: true,
             search: None,
         }
     }
@@ -282,6 +287,7 @@ impl fmt::Debug for AppConfig {
             .field("thinking", &self.thinking)
             .field("user_agent", &self.user_agent)
             .field("include_stream_usage", &self.include_stream_usage)
+            .field("enable_cache", &self.enable_cache)
             .field("search", &self.search)
             .finish()
     }

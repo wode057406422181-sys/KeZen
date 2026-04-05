@@ -12,7 +12,7 @@ use crate::api::{self, LlmClient, StreamOptions};
 use crate::audit::{AuditEvent, SessionAuditLogger};
 use crate::constants::defaults::SKILL_TOOL_NAME;
 use crate::config::AppConfig;
-use crate::prompts::build_system_prompt;
+use crate::prompts::{build_dynamic_context, build_static_system_prompt};
 use crate::tools::registry::ToolRegistry;
 use crate::skills::registry::SkillRegistry;
 use crate::skills::loader::{discover_all_skills, prepare_skill_content};
@@ -48,6 +48,8 @@ pub struct KezenEngine {
     /// Session audit logger (JSONL)
     audit: SessionAuditLogger,
     skill_registry: Arc<SkillRegistry>,
+    git_watcher: crate::context::git_watcher::GitWatcher,
+    runtime_cache_enabled: bool,
 }
 
 impl KezenEngine {
@@ -69,8 +71,8 @@ impl KezenEngine {
 
         registry.register(Arc::new(SkillTool::new(Arc::clone(&skill_registry))));
 
-        // Build the system prompt asynchronously (git commands + memory file I/O).
-        let system_prompt = build_system_prompt(config.model.as_deref(), Some(&skill_registry)).await;
+        // Build the static system prompt once.
+        let system_prompt = build_static_system_prompt(config.model.as_deref(), Some(&skill_registry)).await;
         let model_name = config.model.clone().unwrap_or_default();
         let pricing = crate::cost::get_model_pricing(&model_name);
         
@@ -129,7 +131,7 @@ impl KezenEngine {
         tracing::info!(model = %model_name, session_id = %session.id, "Engine initialized");
 
         Ok(Self {
-            config,
+            config: config.clone(),
             client,
             session,
             system_prompt,
@@ -140,6 +142,8 @@ impl KezenEngine {
             stream_options,
             audit,
             skill_registry,
+            git_watcher: crate::context::git_watcher::GitWatcher::start().await,
+            runtime_cache_enabled: config.enable_cache,
         })
     }
 
@@ -185,13 +189,24 @@ impl KezenEngine {
         // Agentic loop: keeps calling the LLM until it stops requesting tools
         // or we hit the safety cap.
         loop {
-            // Fix #4: Skip auto-compact for very short conversations (< 4 messages)
-            // to avoid edge cases where keep_count logic produces empty results.
-            if self.session.message_count() >= 4
-                && compact::should_auto_compact(self.session.total_usage().input_tokens, &self.session.model_name, self.config.context_window)
-            {
-                tracing::info!(tokens = self.session.total_usage().input_tokens, "Auto-compact triggered");
-                self.compact_context(None).await;
+            let git_ctx = self.git_watcher.cache.read().await.clone();
+            let dynamic_ctx = build_dynamic_context(git_ctx.as_ref());
+            
+            // Auto-compact: use the real input_tokens from the last API response
+            // to decide if context is too full. Skip for short conversations.
+            if self.session.message_count() >= 4 {
+                let window_size = self.config.context_window.unwrap_or(200_000);
+                if crate::engine::compact::should_auto_compact(
+                    self.session.last_turn_input_tokens,
+                    window_size,
+                ) {
+                    tracing::info!(
+                        last_input = self.session.last_turn_input_tokens,
+                        window = window_size,
+                        "Auto-compact triggered"
+                    );
+                    self.compact_context(None).await;
+                }
             }
 
             if iterations >= max_iterations {
@@ -205,9 +220,32 @@ impl KezenEngine {
             let schemas = self.registry.schemas();
             let tools_arg = if schemas.is_empty() { None } else { Some(schemas.as_slice()) };
 
+            let mut request_messages = self.session.messages().to_vec();
+            if let Some(last_msg) = request_messages.last_mut() {
+                if last_msg.role == crate::api::types::Role::User {
+                    if let Some(crate::api::types::ContentBlock::Text { text }) = last_msg.content.first_mut() {
+                        let reminder = format!("<system-reminder>\n{}\n</system-reminder>\n\n", dynamic_ctx);
+                        *text = format!("{}{}", reminder, text);
+                    }
+                }
+            }
+
+            let cache_hints = if self.runtime_cache_enabled {
+                Some(api::CacheHints { cache_system: true, cache_tools: true })
+            } else {
+                None
+            };
+
             let stream_result = self
                 .client
-                .stream(self.session.messages(), Some(&self.system_prompt), tools_arg, &self.stream_options, None)
+                .stream(
+                    &request_messages,
+                    Some(&self.system_prompt),
+                    tools_arg,
+                    &self.stream_options,
+                    cache_hints.as_ref(),
+                    None,
+                )
                 .await;
 
             let mut assistant_text = String::new();
@@ -336,7 +374,11 @@ impl KezenEngine {
                     let assistant_uuid = SessionAuditLogger::new_uuid();
                     if !assistant_text.is_empty() {
                         let cost = crate::cost::calculate_cost(
-                            turn_usage.input_tokens, turn_usage.output_tokens, &self.session.pricing,
+                            turn_usage.input_tokens, 
+                            turn_usage.output_tokens, 
+                            turn_usage.cache_creation_input_tokens,
+                            turn_usage.cache_read_input_tokens,
+                            &self.session.pricing,
                         );
                         self.audit.log(&AuditEvent::AssistantText {
                             session_id: self.session.id.clone(),
@@ -544,7 +586,15 @@ impl KezenEngine {
                     let mut skill_injections = Vec::new();
                     // Track extraction usage from sub-LLM calls (e.g. WebFetch content extraction)
                     let mut extraction_usage_total = Usage::default();
-                    for (_idx, id, name, extracted_skill_name, result) in indexed_results {
+
+                    let budget_mgr = crate::context::budget::ContextBudgetManager::new(
+                        crate::constants::defaults::MAX_TOOL_RESULT_CONTEXT_TOKENS,
+                    );
+
+                    for (_idx, id, name, extracted_skill_name, mut result) in indexed_results {
+                        // Apply context truncation for tool result
+                        result.content = budget_mgr.enforce_tool_budget(&result.content);
+
                         // Accumulate any extraction usage into the turn total
                         if let Some(eu) = &result.extraction_usage {
                             extraction_usage_total.input_tokens += eu.input_tokens;
@@ -624,6 +674,12 @@ impl KezenEngine {
                     }
                 }
                 Err(e) => {
+                    if self.runtime_cache_enabled && e.to_string().to_lowercase().contains("cache_control") {
+                        tracing::warn!("API does not support cache_control. Auto-disabling cache and retrying...");
+                        let _ = self.event_tx.send(EngineEvent::Warning("Prompt caching disabled automatically (not supported by API).".into())).await;
+                        self.runtime_cache_enabled = false;
+                        continue;
+                    }
                     tracing::error!(error = %e, "LLM stream creation failed");
                     let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
                     let _ = self.event_tx.send(EngineEvent::Done).await;
@@ -653,7 +709,8 @@ impl KezenEngine {
   /compact    - Compact conversation context to save tokens
   /model      - Switch the current model
   /cost       - Show current session cost and token usage
-  /resume     - List and resume available sessions"
+  /resume     - List and resume available sessions
+  /context    - Show context window budget and caching status"
                     .to_string();
 
                 // Dynamically list skills the user can invoke via slash commands.
@@ -721,10 +778,42 @@ impl KezenEngine {
             "cost" => {
                 let usage = self.session.total_usage();
                 let params = crate::cost::get_model_pricing(&self.session.model_name);
-                let cost = crate::cost::calculate_cost(usage.input_tokens, usage.output_tokens, &params);
+                let cost = crate::cost::calculate_cost(usage.input_tokens, usage.output_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens, &params);
                 let output = format!("Tokens: {} in, {} out.\nCost: ${:.4} (Model: {})", usage.input_tokens, usage.output_tokens, cost, self.session.model_name);
                 let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                     command: "/cost".into(),
+                    output,
+                }).await;
+            }
+            "context" => {
+                let git_ctx = self.git_watcher.cache.read().await.clone();
+                let window_size = self.config.context_window.unwrap_or(200_000);
+                let last_input = self.session.last_turn_input_tokens;
+                let percent = if window_size > 0 {
+                    (last_input as f64 / window_size as f64) * 100.0
+                } else {
+                    0.0
+                };
+
+                let output = format!(
+                    "Context Budget & Cache Status\n\
+                    -----------------------------\n\
+                    Prompt Caching : {}\n\
+                    Last Turn Input: {} tokens (from API)\n\
+                    Context Window : {} tokens\n\
+                    Usage          : {:.1}%\n\
+                    Messages       : {}\n\
+                    Git Watcher    : {}",
+                    if self.runtime_cache_enabled { "Enabled" } else { "Disabled" },
+                    last_input,
+                    window_size,
+                    percent,
+                    self.session.message_count(),
+                    if git_ctx.is_some() { "Active (background refresh 30s)" } else { "Inactive/Error" }
+                );
+
+                let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
+                    command: "/context".into(),
                     output,
                 }).await;
             }
@@ -851,7 +940,8 @@ impl KezenEngine {
         let mut last_error: Option<String> = None;
 
         for attempt in 1..=MAX_COMPACT_RETRIES {
-            match self.client.stream(&messages_to_summarize, None, None, &crate::api::StreamOptions::default(), Some(compact::COMPACT_MAX_OUTPUT_TOKENS)).await {
+            // No cache hints for compacting to save cache-write costs and avoid unnecessary explicit boundaries.
+            match self.client.stream(&messages_to_summarize, None, None, &crate::api::StreamOptions::default(), None, Some(compact::COMPACT_MAX_OUTPUT_TOKENS)).await {
                 Ok(mut stream) => {
                     let mut assistant_text = String::new();
                     let mut stream_errors = Vec::new();

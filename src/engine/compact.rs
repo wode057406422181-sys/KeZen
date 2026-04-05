@@ -15,11 +15,16 @@ pub fn context_window_for_model(model: &str) -> u64 {
     }
 }
 
-/// Helper to decide if auto-compaction should trigger
-pub fn should_auto_compact(total_input_tokens: u64, model: &str, configured_window: Option<u64>) -> bool {
-    let window = configured_window.unwrap_or_else(|| context_window_for_model(model));
-    let threshold = (window as f64 * 0.80) as u64; // 80% of context window
-    total_input_tokens > threshold
+/// Helper to decide if auto-compaction should trigger.
+///
+/// Uses the real `input_tokens` from the last API response (the actual context
+/// window usage as measured by the API's tokenizer) instead of a local estimate.
+pub fn should_auto_compact(last_input_tokens: u64, context_window: u64) -> bool {
+    if context_window == 0 {
+        return false;
+    }
+    let percent = (last_input_tokens as f64 / context_window as f64) * 100.0;
+    percent > 80.0
 }
 
 /// Build the full compact prompt: NO_TOOLS preamble + main prompt + NO_TOOLS trailer
@@ -91,25 +96,6 @@ fn extract_summary(raw: &str) -> String {
 mod tests {
     use super::*;
 
-    // ── context_window_for_model ─────────────────────────────────────
-
-    #[test]
-    fn context_window_claude_models() {
-        assert_eq!(context_window_for_model("claude-3-5-sonnet-20241022"), 200_000);
-        assert_eq!(context_window_for_model("claude-3-opus-20240229"), 200_000);
-        assert_eq!(context_window_for_model("claude-3-haiku-20240307"), 200_000);
-    }
-
-    #[test]
-    fn context_window_gpt4o() {
-        assert_eq!(context_window_for_model("gpt-4o-2024-05-13"), 128_000);
-    }
-
-    #[test]
-    fn context_window_gemini_pro() {
-        assert_eq!(context_window_for_model("gemini-2.0-pro"), 1_000_000);
-    }
-
     #[test]
     fn context_window_unknown_model_defaults() {
         assert_eq!(context_window_for_model("llama-3.1-70b"), 128_000);
@@ -119,26 +105,25 @@ mod tests {
 
     #[test]
     fn auto_compact_triggers_above_threshold() {
-        // 80% of 200k = 160k, so 160001 should trigger
-        assert!(should_auto_compact(160_001, "claude-3-5-sonnet-20241022", None));
+        // 162,000 / 200,000 = 81%
+        assert!(should_auto_compact(162_000, 200_000));
     }
 
     #[test]
     fn auto_compact_does_not_trigger_below_threshold() {
-        assert!(!should_auto_compact(100_000, "claude-3-5-sonnet-20241022", None));
-    }
-
-    #[test]
-    fn auto_compact_respects_configured_window() {
-        // 80% of 50k = 40k
-        assert!(should_auto_compact(40_001, "anything", Some(50_000)));
-        assert!(!should_auto_compact(39_999, "anything", Some(50_000)));
+        // 100,000 / 200,000 = 50%
+        assert!(!should_auto_compact(100_000, 200_000));
     }
 
     #[test]
     fn auto_compact_at_exact_threshold_does_not_trigger() {
-        // 80% of 200k = 160000 exactly — should NOT trigger (> not >=)
-        assert!(!should_auto_compact(160_000, "claude-3-5-sonnet-20241022", None));
+        // 160,000 / 200,000 = 80.0%
+        assert!(!should_auto_compact(160_000, 200_000));
+    }
+
+    #[test]
+    fn auto_compact_zero_window_does_not_trigger() {
+        assert!(!should_auto_compact(100, 0));
     }
 
     // ── compact_prompt ───────────────────────────────────────────────

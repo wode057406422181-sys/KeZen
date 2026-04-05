@@ -31,6 +31,15 @@ pub struct StreamOptions {
     pub search_strategy: Option<String>,
 }
 
+/// Hints for prompt caching logic.
+#[derive(Default, Clone, Debug)]
+pub struct CacheHints {
+    /// Mark the system prompt for explicit cache breakpoint
+    pub cache_system: bool,
+    /// Mark tools for explicit cache breakpoint
+    pub cache_tools: bool,
+}
+
 /// Unified LLM client interface.
 ///
 /// Both Anthropic and OpenAI providers implement this trait.
@@ -50,6 +59,7 @@ pub trait LlmClient: Send + Sync {
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
         options: &StreamOptions,
+        cache_hints: Option<&CacheHints>,
         max_tokens_override: Option<u32>,
     ) -> Result<BoxStream<'_, StreamEvent>, KezenError>;
 }
