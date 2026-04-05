@@ -18,7 +18,6 @@ pub struct McpToolInfo {
 }
 
 pub struct McpClient {
-    pub name: String,
     pub(crate) transport: StdioTransport,
     pub tools: Vec<McpToolInfo>,
 }
@@ -78,7 +77,6 @@ impl McpClient {
         }
 
         Ok(Self {
-            name: name.to_string(),
             transport,
             tools,
         })
@@ -116,9 +114,6 @@ impl McpClient {
         }
     }
 
-    pub async fn shutdown(&self) {
-        self.transport.shutdown().await;
-    }
 }
 
 /// Result of connecting to all configured MCP servers.

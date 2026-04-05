@@ -66,8 +66,4 @@ pub enum UserAction {
         allowed: bool,
         always_allow: bool,
     },
-    /// Restore a previous session state
-    RestoreSession {
-        snapshot: crate::session::SessionSnapshot,
-    },
 }

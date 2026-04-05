@@ -215,6 +215,11 @@ impl LlmClient for OpenAiClient {
             }
         }
 
+        // TODO: Native server-side fetch (OpenAI-compatible).
+        // When `options.enable_server_fetch` is true, inject the appropriate
+        // request body fields to enable server-side URL fetching. The exact
+        // API shape depends on the provider (DashScope, OpenAI, etc.).
+
         debug_logger::log_request("openai", &url, &body);
 
         let response = self.client.post(&url).json(&body).send().await?;
