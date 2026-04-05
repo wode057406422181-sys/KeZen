@@ -32,9 +32,33 @@ async fn main() -> Result<()> {
     // All operational logs go to ~/.kezen/logs/kezen.log (daily rolling).
     // No stderr layer: it would corrupt TUI rendering and interleave with REPL output.
     // For startup diagnostics, use eprintln! directly (before TUI/REPL takes over).
-    let log_dir = dirs::home_dir()
-        .map(|h| h.join(".kezen").join("logs"))
-        .expect("Cannot determine home directory");
+    let kezen_home = dirs::home_dir()
+        .expect("Cannot determine home directory")
+        .join(".kezen");
+    let log_dir = kezen_home.join("logs");
+
+    // Validate log directories are writable before anything else.
+    // This catches permission issues, full disks, etc. early — if we can't write
+    // logs, we warn the user while we still have access to stderr (before TUI/REPL).
+    for (label, dir) in [
+        ("logs", kezen_home.join("logs")),
+        ("sessions", kezen_home.join("sessions")),
+        ("api_logs", kezen_home.join("api_logs")),
+    ] {
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("  ⚠ Cannot create {} dir ({}): {}", label, dir.display(), e);
+            continue;
+        }
+        // Probe writability with a temp file
+        let probe = dir.join(".write_probe");
+        match std::fs::write(&probe, b"ok") {
+            Ok(_) => { let _ = std::fs::remove_file(&probe); }
+            Err(e) => {
+                eprintln!("  ⚠ {} dir is not writable ({}): {}", label, dir.display(), e);
+            }
+        }
+    }
+
     let file_appender = tracing_appender::rolling::daily(&log_dir, "kezen.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
