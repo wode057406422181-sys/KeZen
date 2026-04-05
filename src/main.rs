@@ -28,10 +28,10 @@ use crate::config::Provider;
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize dual-layer tracing:
-    // 1. stderr layer — warn+ by default (visible in REPL; hidden by TUI alternate screen)
-    // 2. file layer  — info+ by default, debug+ with --verbose
-    //    writes to ~/.kezen/logs/kezen.log (daily rolling)
+    // Initialize tracing — file-only.
+    // All operational logs go to ~/.kezen/logs/kezen.log (daily rolling).
+    // No stderr layer: it would corrupt TUI rendering and interleave with REPL output.
+    // For startup diagnostics, use eprintln! directly (before TUI/REPL takes over).
     let log_dir = dirs::home_dir()
         .map(|h| h.join(".kezen").join("logs"))
         .expect("Cannot determine home directory");
@@ -41,14 +41,6 @@ async fn main() -> Result<()> {
     let file_filter = if cli.verbose { "debug" } else { "kezen=info" };
 
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stderr)
-                .with_filter(
-                    EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| EnvFilter::new("warn")),
-                ),
-        )
         .with(
             tracing_subscriber::fmt::layer()
                 .with_writer(non_blocking)

@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use lru::LruCache;
 use std::num::NonZeroUsize;
@@ -106,6 +106,7 @@ pub fn global_cache() -> &'static WebCache {
 mod tests {
     use super::*;
     use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn test_insert_and_get() {
