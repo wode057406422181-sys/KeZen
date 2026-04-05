@@ -62,14 +62,18 @@ async fn main() -> Result<()> {
     let file_appender = tracing_appender::rolling::daily(&log_dir, "kezen.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
-    let file_filter = if cli.verbose { "debug" } else { "kezen=info" };
+    let file_filter = if cli.verbose {
+        EnvFilter::new("debug")
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("kezen=info"))
+    };
 
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
                 .with_writer(non_blocking)
                 .with_ansi(false)
-                .with_filter(EnvFilter::new(file_filter)),
+                .with_filter(file_filter),
         )
         .init();
 

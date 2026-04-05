@@ -441,6 +441,7 @@ impl KezenEngine {
 
                                 // Wait for UserAction::PermissionResponse
                                 let mut was_allowed = false;
+                                let mut was_always_allow = false;
                                 while let Some(action) = self.action_rx.recv().await {
                                     match action {
                                         UserAction::PermissionResponse { id: resp_id, allowed, always_allow } => {
@@ -453,6 +454,7 @@ impl KezenEngine {
                                                     );
                                                 }
                                                 was_allowed = allowed;
+                                                was_always_allow = always_allow;
                                                 break;
                                             }
                                         }
@@ -477,7 +479,7 @@ impl KezenEngine {
                                     parent_uuid: perm_uuid.clone(),
                                     timestamp: SessionAuditLogger::now(),
                                     allowed: was_allowed,
-                                    always_allow: false,
+                                    always_allow: was_always_allow,
                                 }).await;
 
                                 if was_allowed {
