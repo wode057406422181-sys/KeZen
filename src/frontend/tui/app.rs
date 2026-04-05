@@ -101,6 +101,8 @@ pub struct App {
     pub model_name: String,
     pub session_in_tokens: u64,
     pub session_out_tokens: u64,
+    pub session_cache_creation_tokens: u64,
+    pub session_cache_read_tokens: u64,
     pub pricing: crate::cost::CostPricing,
     /// Context window size (determined from model or config override).
     pub context_window: u64,
@@ -141,6 +143,8 @@ impl App {
             model_name: model.clone(),
             session_in_tokens: 0,
             session_out_tokens: 0,
+            session_cache_creation_tokens: 0,
+            session_cache_read_tokens: 0,
             pricing,
             context_window: config.context_window.unwrap_or_else(|| {
                 crate::engine::compact::context_window_for_model(&model)
@@ -285,8 +289,10 @@ impl App {
                 });
             }
             EngineEvent::CostUpdate(usage) => {
-                self.session_in_tokens += usage.input_tokens;
-                self.session_out_tokens += usage.output_tokens;
+                self.session_in_tokens = usage.input_tokens;
+                self.session_out_tokens = usage.output_tokens;
+                self.session_cache_creation_tokens = usage.cache_creation_input_tokens;
+                self.session_cache_read_tokens = usage.cache_read_input_tokens;
             }
             EngineEvent::Done => {
                 self.flush_streaming();
@@ -299,6 +305,15 @@ impl App {
                     content: format!("❌ Error: {}", message),
                 });
                 self.is_streaming = false;
+                if self.auto_scroll {
+                    self.scroll_to_bottom();
+                }
+            }
+            EngineEvent::Warning(message) => {
+                self.messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: format!("⚠ {}", message),
+                });
                 if self.auto_scroll {
                     self.scroll_to_bottom();
                 }

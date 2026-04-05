@@ -53,7 +53,7 @@ async fn compute_env_info(model: Option<&str>) -> String {
     )
 }
 
-pub async fn build_system_prompt(
+pub async fn build_static_system_prompt(
     model: Option<&str>,
     skill_registry: Option<&SkillRegistry>,
 ) -> String {
@@ -78,16 +78,7 @@ pub async fn build_system_prompt(
         cwd.display()
     ));
 
-    // Git context (fully async)
-    if let Some(git) = crate::context::git::collect_git_context().await {
-        prompt.push_str("\n\n# Git Context\n");
-        prompt.push_str(&format!("Branch: {}\n", git.branch));
-        prompt.push_str(&format!("Default Branch: {}\n", git.default_branch));
-        prompt.push_str(&format!("Recent Commits:\n{}\n", git.recent_commits));
-        prompt.push_str(&format!("Status:\n{}\n", git.status));
-    }
-
-    // Memory files (fully async)
+    // Memory files are treated as static for cache hit rate (they rarely change block sizes within a single conversation)
     let memory_files = crate::context::memory::load_memory_files().await;
     if let Some(memory_prompt) = crate::context::memory::format_memory_prompt(&memory_files) {
         prompt.push_str("\n\n");
@@ -99,8 +90,6 @@ pub async fn build_system_prompt(
             let listing =
                 registry.format_listing(crate::constants::defaults::DEFAULT_SKILL_BUDGET_CHARS);
 
-            // Pick the first real skill name for examples instead of hardcoding
-            // a name that may not exist (e.g. "commit").
             let first_skill = registry.all().keys().next().unwrap();
 
             prompt.push_str("\n\n<skills>\n");
@@ -130,6 +119,24 @@ pub async fn build_system_prompt(
     prompt
 }
 
+pub fn build_dynamic_context(git_ctx: Option<&crate::context::git::GitContext>) -> String {
+    let mut context = String::new();
+    
+    // ISO 8601 current time
+    let now = chrono::Local::now();
+    context.push_str(&format!("Current Time: {}\n", now.format("%Y-%m-%dT%H:%M:%S%z")));
+
+    if let Some(git) = git_ctx {
+        context.push_str("\n# Git Context\n");
+        context.push_str(&format!("Branch: {}\n", git.branch));
+        context.push_str(&format!("Default Branch: {}\n", git.default_branch));
+        context.push_str(&format!("Recent Commits:\n{}\n", git.recent_commits));
+        context.push_str(&format!("Status:\n{}\n", git.status));
+    }
+
+    context
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_intro_sentinel() {
-        let prompt = build_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(None, None).await;
         assert!(
             prompt.contains("interactive agent"),
             "Prompt must contain intro section"
@@ -147,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_dynamic_boundary_marker() {
-        let prompt = build_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(None, None).await;
         assert!(
             prompt.contains(SYSTEM_PROMPT_DYNAMIC_BOUNDARY),
             "Prompt must contain the dynamic boundary marker used for runtime injection"
@@ -156,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_tone_section() {
-        let prompt = build_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(None, None).await;
         assert!(
             prompt.contains("# Tone and style"),
             "Prompt must include tone and style section"
@@ -165,7 +172,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_output_efficiency_section() {
-        let prompt = build_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(None, None).await;
         assert!(
             prompt.contains("# Output efficiency"),
             "Prompt must include output efficiency section"
@@ -174,7 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_environment_header() {
-        let prompt = build_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(None, None).await;
         assert!(
             prompt.contains("# Environment"),
             "Prompt must include the Environment section"
@@ -183,7 +190,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_platform_info() {
-        let prompt = build_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(None, None).await;
         let expected_os = std::env::consts::OS;
         assert!(
             prompt.contains(expected_os),
@@ -195,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_injects_model_name_when_provided() {
-        let prompt = build_system_prompt(Some("claude-opus-4-5"), None).await;
+        let prompt = build_static_system_prompt(Some("claude-opus-4-5"), None).await;
         assert!(
             prompt.contains("claude-opus-4-5"),
             "Model name should appear in the Environment section"
@@ -204,7 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_without_model_has_no_model_line() {
-        let prompt = build_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(None, None).await;
         assert!(
             !prompt.contains("You are powered by the model"),
             "Without a model arg, model description should not appear"
@@ -215,7 +222,7 @@ mod tests {
 
     #[tokio::test]
     async fn environment_section_comes_after_dynamic_boundary() {
-        let prompt = build_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(None, None).await;
         let boundary_pos = prompt.find(SYSTEM_PROMPT_DYNAMIC_BOUNDARY).unwrap();
         let env_pos = prompt.find("# Environment").unwrap();
         assert!(

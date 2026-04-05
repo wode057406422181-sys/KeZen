@@ -1,0 +1,48 @@
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+use crate::constants::defaults::GIT_WATCHER_INTERVAL_SECS;
+use crate::context::git::{collect_git_context, GitContext};
+
+pub struct GitWatcher {
+    pub cache: Arc<RwLock<Option<GitContext>>>,
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl GitWatcher {
+    /// Start the background watcher and return the watcher instance
+    pub async fn start() -> Self {
+        let cache = Arc::new(RwLock::new(None));
+
+        // Initial collection
+        if let Some(ctx) = collect_git_context().await {
+            *cache.write().await = Some(ctx);
+        }
+
+        let clone_cache = cache.clone();
+        let handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(GIT_WATCHER_INTERVAL_SECS));
+            loop {
+                interval.tick().await;
+                match collect_git_context().await {
+                    Some(ctx) => {
+                        *clone_cache.write().await = Some(ctx);
+                    }
+                    None => {
+                        tracing::debug!("GitWatcher: no git context available (not in repo or git error)");
+                    }
+                }
+            }
+        });
+
+        Self { cache, handle: Some(handle) }
+    }
+}
+
+impl Drop for GitWatcher {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
+    }
+}

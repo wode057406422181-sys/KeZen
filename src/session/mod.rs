@@ -10,6 +10,10 @@ pub struct SessionSnapshot {
     pub messages: Vec<crate::api::types::Message>,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_creation_input_tokens: u64,
+    #[serde(default)]
+    pub cache_read_input_tokens: u64,
     pub cost_usd: f64,
 }
 
@@ -62,6 +66,8 @@ mod tests {
             messages: vec![],
             input_tokens: 100,
             output_tokens: 50,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
             cost_usd: 0.001,
         }
     }
@@ -153,6 +159,8 @@ mod tests {
             ],
             input_tokens: 500,
             output_tokens: 200,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
             cost_usd: 0.0045,
         };
         save_to_dir(dir.path(), &snap);

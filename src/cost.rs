@@ -98,10 +98,28 @@ pub fn get_model_pricing(model: &str) -> CostPricing {
     result
 }
 
-pub fn calculate_cost(input_tokens: u64, output_tokens: u64, pricing: &CostPricing) -> f64 {
-    let in_cost = (input_tokens as f64 / 1_000_000.0) * pricing.input_cost_per_mtoken;
-    let out_cost = (output_tokens as f64 / 1_000_000.0) * pricing.output_cost_per_mtoken;
-    in_cost + out_cost
+// Anthropic cache pricing multipliers (relative to base input cost)
+const CACHE_CREATION_MULTIPLIER: f64 = 1.25;
+const CACHE_READ_MULTIPLIER: f64 = 0.10;
+
+/// Calculate the cost in USD based on token usage and model pricing parameters.
+pub fn calculate_cost(
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation_tokens: u64,
+    cache_read_tokens: u64,
+    pricing: &CostPricing,
+) -> f64 {
+    let input_cost = (input_tokens as f64 / 1_000_000.0) * pricing.input_cost_per_mtoken;
+    let output_cost = (output_tokens as f64 / 1_000_000.0) * pricing.output_cost_per_mtoken;
+    
+    // Cache creation costs are a multiplier of the input price (typically 1.25x for Anthropic)
+    let cache_creation_cost = (cache_creation_tokens as f64 / 1_000_000.0) * (pricing.input_cost_per_mtoken * CACHE_CREATION_MULTIPLIER);
+    
+    // Cache read costs are a fraction of the input price (typically 0.10x for Anthropic)
+    let cache_read_cost = (cache_read_tokens as f64 / 1_000_000.0) * (pricing.input_cost_per_mtoken * CACHE_READ_MULTIPLIER);
+    
+    input_cost + output_cost + cache_creation_cost + cache_read_cost
 }
 
 #[cfg(test)]
@@ -191,13 +209,13 @@ mod tests {
     #[test]
     fn test_calculate_cost_zero_tokens() {
         let pricing = CostPricing { input_cost_per_mtoken: 3.0, output_cost_per_mtoken: 15.0 };
-        assert_eq!(calculate_cost(0, 0, &pricing), 0.0);
+        assert_eq!(calculate_cost(0, 0, 0, 0, &pricing), 0.0);
     }
 
     #[test]
     fn test_calculate_cost_one_million_tokens() {
         let pricing = CostPricing { input_cost_per_mtoken: 3.0, output_cost_per_mtoken: 15.0 };
-        let cost = calculate_cost(1_000_000, 1_000_000, &pricing);
+        let cost = calculate_cost(1_000_000, 1_000_000, 0, 0, &pricing);
         assert!((cost - 18.0).abs() < 1e-10);
     }
 
@@ -205,8 +223,18 @@ mod tests {
     fn test_calculate_cost_realistic() {
         // 10k input, 2k output with Claude Sonnet pricing
         let pricing = CostPricing { input_cost_per_mtoken: 3.0, output_cost_per_mtoken: 15.0 };
-        let cost = calculate_cost(10_000, 2_000, &pricing);
+        let cost = calculate_cost(10_000, 2_000, 0, 0, &pricing);
         // 10k/1M * 3.0 + 2k/1M * 15.0 = 0.03 + 0.03 = 0.06
         assert!((cost - 0.06).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_calculate_cost_with_cache() {
+        let pricing = CostPricing { input_cost_per_mtoken: 3.0, output_cost_per_mtoken: 15.0 };
+        let cost = calculate_cost(0, 0, 10_000, 100_000, &pricing);
+        // creation: 10k * (3 * 1.25) / 1M = 0.0375
+        // read: 100k * (3 * 0.1) / 1M = 0.03
+        // total: 0.0675
+        assert!((cost - 0.0675).abs() < 1e-10);
     }
 }

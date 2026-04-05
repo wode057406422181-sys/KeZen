@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
-use crate::api::{BoxStream, LlmClient, StreamOptions};
+use crate::api::{BoxStream, CacheHints, LlmClient, StreamOptions};
 use crate::config::AppConfig;
 use crate::constants::api::CONTENT_TYPE_JSON;
 use crate::constants::defaults::DEFAULT_MAX_TOKENS;
@@ -94,6 +94,7 @@ impl LlmClient for OpenAiClient {
         system_prompt: Option<&str>,
         tools: Option<&[serde_json::Value]>,
         options: &StreamOptions,
+        _cache_hints: Option<&CacheHints>,
         max_tokens_override: Option<u32>,
     ) -> Result<BoxStream<'_, StreamEvent>, KezenError> {
         let url = normalize_openai_url(&self.base_url);
@@ -263,6 +264,8 @@ impl LlmClient for OpenAiClient {
                         let usage = Usage {
                             input_tokens: v["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
                             output_tokens: v["usage"]["completion_tokens"].as_u64().unwrap_or(0),
+                            cache_creation_input_tokens: 0,
+                            cache_read_input_tokens: 0,
                         };
                         let has_content = v["choices"].as_array().is_some_and(|c| {
                             !c.is_empty() && c[0]["delta"]["content"].as_str().is_some()

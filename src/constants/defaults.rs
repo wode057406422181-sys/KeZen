@@ -63,3 +63,11 @@ pub const DEFAULT_SKILL_BUDGET_CHARS: usize = 8_000;
 /// Verbose `when_to_use` strings waste turn-1 cache tokens without
 /// improving match rate; this keeps each entry concise.
 pub const MAX_LISTING_DESC_CHARS: usize = 250;
+
+// ── Context Budget & Truncation ──────────────────────────────────────────────
+
+/// Maximum tokens for a single tool result stored in context
+pub const MAX_TOOL_RESULT_CONTEXT_TOKENS: u64 = 50_000;
+
+/// Background git context refresh interval (seconds)
+pub const GIT_WATCHER_INTERVAL_SECS: u64 = 30;

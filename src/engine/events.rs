@@ -12,6 +12,8 @@ pub enum EngineEvent {
     CostUpdate(Usage),
     /// Error message from the engine
     Error { message: String },
+    /// Warning message from the engine
+    Warning(String),
     /// Current turn is complete
     Done,
     /// Tool execution started

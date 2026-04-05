@@ -9,8 +9,14 @@ pub struct Session {
     messages: Vec<Message>,
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
+    pub cache_creation_input_tokens: u64,
+    pub cache_read_input_tokens: u64,
     pub pricing: CostPricing,
     pub total_cost_usd: f64,
+    /// The input_tokens from the most recent API response.
+    /// This represents the actual context window usage (system + tools + all messages)
+    /// as measured by the API's tokenizer — used for auto-compact decisions.
+    pub last_turn_input_tokens: u64,
 }
 
 impl Session {
@@ -22,8 +28,11 @@ impl Session {
             messages: Vec::new(),
             total_input_tokens: 0,
             total_output_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
             pricing,
             total_cost_usd: 0.0,
+            last_turn_input_tokens: 0,
         }
     }
 
@@ -34,6 +43,8 @@ impl Session {
         self.messages = snap.messages;
         self.total_input_tokens = snap.input_tokens;
         self.total_output_tokens = snap.output_tokens;
+        self.cache_creation_input_tokens = snap.cache_creation_input_tokens;
+        self.cache_read_input_tokens = snap.cache_read_input_tokens;
         self.total_cost_usd = snap.cost_usd;
     }
 
@@ -46,6 +57,8 @@ impl Session {
             messages: self.messages.clone(),
             input_tokens: self.total_input_tokens,
             output_tokens: self.total_output_tokens,
+            cache_creation_input_tokens: self.cache_creation_input_tokens,
+            cache_read_input_tokens: self.cache_read_input_tokens,
             cost_usd: self.total_cost_usd,
         }
     }
@@ -70,9 +83,14 @@ impl Session {
     pub fn update_usage(&mut self, usage: &Usage) {
         self.total_input_tokens = self.total_input_tokens.saturating_add(usage.input_tokens);
         self.total_output_tokens = self.total_output_tokens.saturating_add(usage.output_tokens);
+        self.cache_creation_input_tokens = self.cache_creation_input_tokens.saturating_add(usage.cache_creation_input_tokens);
+        self.cache_read_input_tokens = self.cache_read_input_tokens.saturating_add(usage.cache_read_input_tokens);
+        self.last_turn_input_tokens = usage.input_tokens;
         self.total_cost_usd = calculate_cost(
             self.total_input_tokens,
             self.total_output_tokens,
+            self.cache_creation_input_tokens,
+            self.cache_read_input_tokens,
             &self.pricing,
         );
     }
@@ -82,6 +100,8 @@ impl Session {
         Usage {
             input_tokens: self.total_input_tokens,
             output_tokens: self.total_output_tokens,
+            cache_creation_input_tokens: self.cache_creation_input_tokens,
+            cache_read_input_tokens: self.cache_read_input_tokens,
         }
     }
 
@@ -93,7 +113,10 @@ impl Session {
         self.messages.clear();
         self.total_input_tokens = 0;
         self.total_output_tokens = 0;
+        self.cache_creation_input_tokens = 0;
+        self.cache_read_input_tokens = 0;
         self.total_cost_usd = 0.0;
+        self.last_turn_input_tokens = 0;
     }
 
     /// Replace the entire message history (for /compact).
@@ -111,7 +134,10 @@ impl Session {
     pub fn reset_usage_counters(&mut self) {
         self.total_input_tokens = 0;
         self.total_output_tokens = 0;
+        self.cache_creation_input_tokens = 0;
+        self.cache_read_input_tokens = 0;
         self.total_cost_usd = 0.0;
+        self.last_turn_input_tokens = 0;
     }
 
     /// Return the number of current messages.
@@ -161,11 +187,11 @@ mod tests {
     #[test]
     fn test_update_usage_accumulates() {
         let mut s = Session::new("test-model".into(), sonnet_pricing());
-        s.update_usage(&Usage { input_tokens: 100, output_tokens: 50 });
+        s.update_usage(&Usage { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
         assert_eq!(s.total_input_tokens, 100);
         assert_eq!(s.total_output_tokens, 50);
 
-        s.update_usage(&Usage { input_tokens: 200, output_tokens: 100 });
+        s.update_usage(&Usage { input_tokens: 200, output_tokens: 100, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
         assert_eq!(s.total_input_tokens, 300);
         assert_eq!(s.total_output_tokens, 150);
         assert!(s.total_cost_usd > 0.0);
@@ -178,7 +204,7 @@ mod tests {
             role: Role::User,
             content: vec![ContentBlock::Text { text: "hello".into() }],
         });
-        s.update_usage(&Usage { input_tokens: 500, output_tokens: 200 });
+        s.update_usage(&Usage { input_tokens: 500, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
         assert_eq!(s.messages().len(), 1);
         assert!(s.total_cost_usd > 0.0);
 
@@ -193,7 +219,7 @@ mod tests {
     #[test]
     fn test_total_usage() {
         let mut s = Session::new("test-model".into(), zero_pricing());
-        s.update_usage(&Usage { input_tokens: 500, output_tokens: 200 });
+        s.update_usage(&Usage { input_tokens: 500, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
         let u = s.total_usage();
         assert_eq!(u.input_tokens, 500);
         assert_eq!(u.output_tokens, 200);
@@ -206,7 +232,7 @@ mod tests {
             role: Role::User,
             content: vec![ContentBlock::Text { text: "test msg".into() }],
         });
-        s.update_usage(&Usage { input_tokens: 1000, output_tokens: 500 });
+        s.update_usage(&Usage { input_tokens: 1000, output_tokens: 500, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
 
         let snap = s.snapshot();
         assert_eq!(snap.id, s.id);
