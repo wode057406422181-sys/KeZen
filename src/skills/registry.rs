@@ -70,19 +70,27 @@ impl SkillRegistry {
     ///
     /// The default budget is [`DEFAULT_SKILL_BUDGET_CHARS`] (1% of 200k context × 4 chars/token).
     pub fn format_listing(&self, budget_chars: usize) -> String {
-        if self.skills.is_empty() {
+        // Only list skills the model can actually invoke. Skills with
+        // disable_model_invocation are user-only (slash commands) and must
+        // not appear in the system prompt to avoid wasted tokens and
+        // confusing failed-invocation errors.
+        let callable: Vec<(&String, &SkillDefinition)> = self.skills.iter()
+            .filter(|(_, skill)| !skill.frontmatter.disable_model_invocation)
+            .collect();
+
+        if callable.is_empty() {
             return String::new();
         }
 
         // First pass: build full entries
-        let full_entries: Vec<(String, String)> = self.skills.iter()
+        let full_entries: Vec<(String, String)> = callable.iter()
             .map(|(name, skill)| {
                 let desc = Self::format_entry_description(skill);
                 let mut entry = format!("- {}: {}", name, desc);
                 if let Some(hint) = &skill.frontmatter.argument_hint {
                     entry.push_str(&format!(" [args: {}]", hint));
                 }
-                (name.clone(), entry)
+                (name.to_string(), entry)
             })
             .collect();
 
@@ -99,7 +107,7 @@ impl SkillRegistry {
             .sum::<usize>()
             + full_entries.len(); // newlines
         let available_for_descs = budget_chars.saturating_sub(name_overhead);
-        let max_desc_len = available_for_descs / full_entries.len();
+        let max_desc_len = available_for_descs / full_entries.len().max(1);
 
         if max_desc_len >= 20 {
             tracing::debug!(
@@ -108,7 +116,7 @@ impl SkillRegistry {
                 max_desc_len,
                 "Skill listing: truncating descriptions to fit budget"
             );
-            let truncated: Vec<String> = self.skills.iter()
+            let truncated: Vec<String> = callable.iter()
                 .map(|(name, skill)| {
                     let desc = Self::format_entry_description(skill);
                     if desc.chars().count() > max_desc_len {
@@ -148,7 +156,7 @@ mod tests {
                 description: desc.map(String::from),
                 ..Default::default()
             },
-            content_length: 100,
+            body_length: 100,
             source: SkillSource::Project,
             base_dir: PathBuf::from("/tmp/test"),
         }
@@ -163,7 +171,7 @@ mod tests {
                 argument_hint: Some(hint.to_string()),
                 ..Default::default()
             },
-            content_length: 100,
+            body_length: 100,
             source: SkillSource::UserGlobal,
             base_dir: PathBuf::from("/tmp/test"),
         }
@@ -315,7 +323,7 @@ mod tests {
                 description: Some("x".repeat(300)),
                 ..Default::default()
             },
-            content_length: 100,
+            body_length: 100,
             source: SkillSource::Project,
             base_dir: PathBuf::from("/tmp"),
         };
@@ -334,12 +342,54 @@ mod tests {
                 when_to_use: Some("When the user asks to do it".to_string()),
                 ..Default::default()
             },
-            content_length: 100,
+            body_length: 100,
             source: SkillSource::Project,
             base_dir: PathBuf::from("/tmp"),
         };
 
         let desc = SkillRegistry::format_entry_description(&skill);
         assert_eq!(desc, "Do something - When the user asks to do it");
+    }
+
+    #[test]
+    fn test_format_listing_excludes_model_disabled_skills() {
+        let mut reg = SkillRegistry::new();
+        // Normal skill — should appear in listing
+        reg.register(make_skill("visible", Some("A visible skill")));
+        // Model-disabled skill — should NOT appear in listing
+        reg.register(SkillDefinition {
+            name: "hidden".to_string(),
+            frontmatter: SkillFrontmatter {
+                description: Some("A hidden skill".to_string()),
+                disable_model_invocation: true,
+                ..Default::default()
+            },
+            body_length: 100,
+            source: SkillSource::Project,
+            base_dir: PathBuf::from("/tmp/test"),
+        });
+
+        let listing = reg.format_listing(8000);
+        assert!(listing.contains("visible"), "Model-callable skill should appear");
+        assert!(!listing.contains("hidden"), "Model-disabled skill should NOT appear");
+    }
+
+    #[test]
+    fn test_format_listing_returns_empty_when_all_disabled() {
+        let mut reg = SkillRegistry::new();
+        reg.register(SkillDefinition {
+            name: "internal".to_string(),
+            frontmatter: SkillFrontmatter {
+                description: Some("Internal".to_string()),
+                disable_model_invocation: true,
+                ..Default::default()
+            },
+            body_length: 100,
+            source: SkillSource::Project,
+            base_dir: PathBuf::from("/tmp/test"),
+        });
+
+        let listing = reg.format_listing(8000);
+        assert!(listing.is_empty(), "Listing should be empty when all skills are model-disabled");
     }
 }

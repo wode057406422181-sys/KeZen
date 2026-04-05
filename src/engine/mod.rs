@@ -656,13 +656,18 @@ impl KezenEngine {
   /resume     - List and resume available sessions"
                     .to_string();
 
-                // M-5: Dynamically list available skill commands.
-                let skills = self.skill_registry.all();
-                if !skills.is_empty() {
+                // Dynamically list skills the user can invoke via slash commands.
+                // Skills with user_invocable: false are model-only and hidden here.
+                let all_skills = self.skill_registry.all();
+                let user_skills: Vec<_> = all_skills.iter()
+                    .filter(|(_, skill)| skill.frontmatter.user_invocable)
+                    .collect();
+                if !user_skills.is_empty() {
+                    let max_name_len = user_skills.iter().map(|(n, _)| n.len()).max().unwrap_or(10);
                     output.push_str("\n\nAvailable skills (use /<name> to invoke):");
-                    for (name, skill) in skills {
+                    for (name, skill) in &user_skills {
                         let desc = skill.frontmatter.description.as_deref().unwrap_or("No description");
-                        output.push_str(&format!("\n  /{:<10} - {}", name, desc));
+                        output.push_str(&format!("\n  /{:<width$} - {}", name, desc, width = max_name_len));
                     }
                 }
 
@@ -765,10 +770,15 @@ impl KezenEngine {
                 let skill_opt = self.skill_registry.get(cmd).cloned();
                 if let Some(skill) = skill_opt {
                     // C-2 fix: Use shared prepare_skill_content() — applies
-                    // validation (user_invocable), all substitutions including
-                    // ${KEZEN_SESSION_ID}, and XML wrapping.
+                    // validation (user_invocable), all substitutions, and XML wrapping.
                     // is_model_invocation = false: slash commands are user-initiated,
                     // so disable_model_invocation does NOT apply.
+                    //
+                    // Design note: slash-command injection sends the wrapped content
+                    // directly as a User message (via handle_send_message). This differs
+                    // from the tool path which uses an Assistant-acknowledgment + User
+                    // message pair. Both are valid — the slash path is simpler because
+                    // no ToolResult message is involved.
                     match prepare_skill_content(&skill, args, false).await {
                         Ok(wrapped) => {
                             let _ = self.event_tx.send(EngineEvent::SkillLoaded {
@@ -782,13 +792,18 @@ impl KezenEngine {
                                 output: "Skill invoked directly.".to_string(),
                             }).await;
 
-                            // Audit log for the injected message
+                            // Audit: log skill invocation metadata, not full content.
+                            // Convention §10.5: "log the path, not the content".
                             let msg_uuid = SessionAuditLogger::new_uuid();
                             self.audit.log(&AuditEvent::UserMessage {
                                 session_id: self.session.id.clone(),
                                 uuid: msg_uuid.clone(),
                                 timestamp: SessionAuditLogger::now(),
-                                content: wrapped.clone(),
+                                content: format!(
+                                    "[Skill /{} invoked, args: {:?}]",
+                                    cmd,
+                                    if args.is_empty() { "none" } else { args }
+                                ),
                             }).await;
 
                             // Recursively trigger the full agentic loop

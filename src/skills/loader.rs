@@ -43,7 +43,7 @@ pub async fn discover_all_skills() -> Vec<SkillDefinition> {
                         skills.push(skill);
                 }
             }
-            // Stop at the first .kezen/skills directory found upwards
+            tracing::debug!(path = %local_skills_path.display(), "Stopping traversal — found project skills directory");
             break;
         }
 
@@ -92,7 +92,7 @@ pub async fn load_skills_from_dir(base_path: &Path, source: SkillSource) -> Vec<
 
         match tokio::fs::read_to_string(&skill_file_path).await {
             Ok(content) => {
-                let (frontmatter, content_length) = parse_skill_frontmatter(&content);
+                let (frontmatter, body_length) = parse_skill_frontmatter(&content);
                 let name = path.file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown")
@@ -101,15 +101,15 @@ pub async fn load_skills_from_dir(base_path: &Path, source: SkillSource) -> Vec<
                 tracing::debug!(
                     skill = %name,
                     source = ?source,
-                    content_bytes = content_length,
+                    content_bytes = body_length,
                     "Loaded skill definition"
                 );
 
                 result.push(SkillDefinition {
                     name,
                     frontmatter,
-                    content_length,
-                    source: source.clone(),
+                    body_length,
+                    source,
                     base_dir: path,
                 });
             }
@@ -158,7 +158,9 @@ pub async fn prepare_skill_content(
             skill.name
         ));
     }
-    if !skill.frontmatter.user_invocable {
+    // user_invocable only gates slash-command (user) invocations.
+    // Model invocations are controlled separately by disable_model_invocation.
+    if !is_model_invocation && !skill.frontmatter.user_invocable {
         return Err(format!("Skill '{}' is not user-invocable", skill.name));
     }
 
@@ -171,10 +173,9 @@ pub async fn prepare_skill_content(
     let base_dir = skill.base_dir.display().to_string();
     content = content.replace("${KEZEN_SKILL_DIR}", &base_dir);
 
-    if content.contains("${KEZEN_SESSION_ID}") {
-        let session_id = std::env::var("KEZEN_SESSION_ID").unwrap_or_default();
-        content = content.replace("${KEZEN_SESSION_ID}", &session_id);
-    }
+    // TODO: Support ${KEZEN_SESSION_ID} substitution once runtime context
+    // (session ID) can be threaded through prepare_skill_content. Currently
+    // the env var is never set, making this substitution dead code.
 
     if !args.is_empty() {
         content = content.replace("${KEZEN_SKILL_ARGS}", args);
@@ -213,7 +214,7 @@ pub fn parse_skill_frontmatter(text: &str) -> (SkillFrontmatter, usize) {
     } else if text[content_start..].starts_with('\n') {
         content_start += 1;
     }
-    let content_len = text.len().saturating_sub(content_start);
+    let body_len = text.len().saturating_sub(content_start);
 
     let mut current_array: Option<&mut Vec<String>> = None;
 
@@ -285,7 +286,7 @@ pub fn parse_skill_frontmatter(text: &str) -> (SkillFrontmatter, usize) {
         }
     }
 
-    (fm, content_len)
+    (fm, body_len)
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -499,7 +500,7 @@ Body.\n";
         let skill = SkillDefinition {
             name: "test-content".to_string(),
             frontmatter: SkillFrontmatter::default(),
-            content_length: 24,
+            body_length: 24,
             source: SkillSource::Project,
             base_dir: skill_dir,
         };
@@ -513,7 +514,7 @@ Body.\n";
         let skill = SkillDefinition {
             name: "ghost".to_string(),
             frontmatter: SkillFrontmatter::default(),
-            content_length: 0,
+            body_length: 0,
             source: SkillSource::Project,
             base_dir: PathBuf::from("/tmp/kezen-test-ghost-skill-99999"),
         };
@@ -533,7 +534,7 @@ Body.\n";
         let skill = SkillDefinition {
             name: "test".to_string(),
             frontmatter: SkillFrontmatter::default(),
-            content_length: 100,
+            body_length: 100,
             source: SkillSource::Project,
             base_dir: dir.path().to_path_buf(),
         };
@@ -553,7 +554,7 @@ Body.\n";
                 disable_model_invocation: true,
                 ..Default::default()
             },
-            content_length: 0,
+            body_length: 0,
             source: SkillSource::Project,
             base_dir: PathBuf::from("/tmp/test"),
         };
@@ -574,7 +575,7 @@ Body.\n";
                 disable_model_invocation: true,
                 ..Default::default()
             },
-            content_length: 10,
+            body_length: 10,
             source: SkillSource::Project,
             base_dir: dir.path().to_path_buf(),
         };
@@ -592,7 +593,7 @@ Body.\n";
                 user_invocable: false,
                 ..Default::default()
             },
-            content_length: 0,
+            body_length: 0,
             source: SkillSource::Project,
             base_dir: PathBuf::from("/tmp/test"),
         };
@@ -633,5 +634,43 @@ allowed_tools: []\n\
 Body.\n";
         let (fm, _) = parse_skill_frontmatter(content);
         assert!(fm.allowed_tools.is_empty());
+    }
+
+    // ── files: alias for paths: ─────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_frontmatter_files_alias() {
+        let content = "---\n\
+files:\n\
+  - src/\n\
+  - tests/\n\
+---\n\
+Scoped skill.\n";
+        let (fm, _) = parse_skill_frontmatter(content);
+        let paths = fm.paths.unwrap();
+        assert_eq!(paths, vec!["src/", "tests/"]);
+    }
+
+    // ── C-1: model invocation bypasses user_invocable ────────────────────────
+
+    #[tokio::test]
+    async fn test_prepare_skill_content_model_can_call_non_user_invocable() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("SKILL.md"), "---\nname: auto\n---\nAuto instructions.\n").unwrap();
+
+        let skill = SkillDefinition {
+            name: "auto".to_string(),
+            frontmatter: SkillFrontmatter {
+                user_invocable: false,
+                ..Default::default()
+            },
+            body_length: 20,
+            source: SkillSource::Project,
+            base_dir: dir.path().to_path_buf(),
+        };
+
+        // Model invocation (is_model_invocation=true) bypasses user_invocable check
+        let result = prepare_skill_content(&skill, "", true).await;
+        assert!(result.is_ok(), "Model should bypass user_invocable: {}", result.unwrap_err());
     }
 }

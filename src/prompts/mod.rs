@@ -23,12 +23,13 @@ async fn compute_env_info(model: Option<&str>) -> String {
         .args(["rev-parse", "--is-inside-work-tree"])
         .output()
         .await
-        && output.status.success() {
-            let res = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if res == "true" {
-                is_git = true;
-            }
+        && output.status.success()
+    {
+        let res = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if res == "true" {
+            is_git = true;
         }
+    }
 
     let mut model_description = String::new();
     if let Some(m) = model {
@@ -52,7 +53,10 @@ async fn compute_env_info(model: Option<&str>) -> String {
     )
 }
 
-pub async fn build_system_prompt(model: Option<&str>, skill_registry: Option<&SkillRegistry>) -> String {
+pub async fn build_system_prompt(
+    model: Option<&str>,
+    skill_registry: Option<&SkillRegistry>,
+) -> String {
     let elements = [
         get_simple_intro_section(),
         SYSTEM_RULES.to_string(),
@@ -69,7 +73,10 @@ pub async fn build_system_prompt(model: Option<&str>, skill_registry: Option<&Sk
     let mut prompt = elements.join("\n\n");
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    prompt.push_str(&format!("\n\n# Current Working Directory\n{}\n", cwd.display()));
+    prompt.push_str(&format!(
+        "\n\n# Current Working Directory\n{}\n",
+        cwd.display()
+    ));
 
     // Git context (fully async)
     if let Some(git) = crate::context::git::collect_git_context().await {
@@ -89,19 +96,33 @@ pub async fn build_system_prompt(model: Option<&str>, skill_registry: Option<&Sk
 
     if let Some(registry) = skill_registry {
         if !registry.all().is_empty() {
-            let listing = registry.format_listing(crate::constants::defaults::DEFAULT_SKILL_BUDGET_CHARS);
+            let listing =
+                registry.format_listing(crate::constants::defaults::DEFAULT_SKILL_BUDGET_CHARS);
+
+            // Pick the first real skill name for examples instead of hardcoding
+            // a name that may not exist (e.g. "commit").
+            let first_skill = registry.all().keys().next().unwrap();
+
             prompt.push_str("\n\n<skills>\n");
             prompt.push_str("# Available Skills\n\n");
-            prompt.push_str("You have access to the following skills via the Skill tool. ");
-            prompt.push_str("Skills provide specialized capabilities and domain knowledge.\n\n");
-            prompt.push_str("When a user references a \"slash command\" or \"/something\" ");
-            prompt.push_str("(e.g. \"/commit\", \"/review-pr\"), they are referring to a skill.\n\n");
-            prompt.push_str("**BLOCKING REQUIREMENT**: When a skill matches the user's request, ");
-            prompt.push_str("invoke it via the Skill tool BEFORE generating any other response.\n\n");
-            prompt.push_str("Invocation examples:\n");
-            prompt.push_str("  - `skill: \"commit\"` — invoke the commit skill\n");
-            prompt.push_str("  - `skill: \"commit\", args: \"-m 'Fix bug'\"` — with arguments\n\n");
+            prompt.push_str("The following skills are available via the Skill tool:\n\n");
             prompt.push_str(&listing);
+            prompt.push_str("\n\n");
+            prompt.push_str("When a user references a \"slash command\" like \"/");
+            prompt.push_str(first_skill);
+            prompt.push_str("\", they are referring to a skill listed above.\n\n");
+            prompt.push_str("**BLOCKING REQUIREMENT**: When a skill matches the user's request, ");
+            prompt
+                .push_str("invoke it via the Skill tool BEFORE generating any other response.\n\n");
+            prompt.push_str("Invocation examples:\n");
+            prompt.push_str(&format!(
+                "  - `skill: \"{}\"` — invoke the {} skill\n",
+                first_skill, first_skill
+            ));
+            prompt.push_str(&format!(
+                "  - `skill: \"{}\", args: \"<arguments>\"` — with arguments\n",
+                first_skill
+            ));
             prompt.push_str("\n</skills>");
         }
     }

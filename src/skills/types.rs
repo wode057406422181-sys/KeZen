@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 /// Source of the skill definition
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkillSource {
     UserGlobal,
     Project,
@@ -45,7 +45,8 @@ impl Default for SkillFrontmatter {
 pub struct SkillDefinition {
     pub name: String,
     pub frontmatter: SkillFrontmatter,
-    pub content_length: usize,
+    /// Byte length of the skill body (content after the frontmatter delimiter).
+    pub body_length: usize,
     pub source: SkillSource,
     pub base_dir: PathBuf,
 }

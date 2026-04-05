@@ -42,7 +42,7 @@ impl Tool for SkillTool {
             "When users ask you to perform tasks, check if any of the available skills match. ",
             "Skills provide specialized capabilities and domain knowledge.\n",
             "\n",
-            "When users reference a \"slash command\" or \"/<something>\" ",
+            "When users reference a \"slash command\" or \"/something\" ",
             "(e.g. \"/commit\", \"/review-pr\"), they are referring to a skill. ",
             "Use this tool to invoke it.\n",
             "\n",
@@ -187,7 +187,7 @@ mod tests {
                 description: Some("A test skill".to_string()),
                 ..Default::default()
             },
-            content_length: 100,
+            body_length: 100,
             source: SkillSource::Project,
             base_dir: dir.to_path_buf(),
         });
@@ -203,7 +203,7 @@ mod tests {
                 allowed_tools: vec!["bash".to_string(), "file_write".to_string()],
                 ..Default::default()
             },
-            content_length: 100,
+            body_length: 100,
             source: SkillSource::Project,
             base_dir: dir.to_path_buf(),
         });
@@ -219,7 +219,7 @@ mod tests {
                 disable_model_invocation: true,
                 ..Default::default()
             },
-            content_length: 100,
+            body_length: 100,
             source: SkillSource::Project,
             base_dir: PathBuf::from("/tmp/test-disabled"),
         });
@@ -235,7 +235,7 @@ mod tests {
                 user_invocable: false,
                 ..Default::default()
             },
-            content_length: 100,
+            body_length: 100,
             source: SkillSource::Project,
             base_dir: PathBuf::from("/tmp/test-internal"),
         });
@@ -387,11 +387,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_call_non_invocable() {
-        let tool = SkillTool::new(make_registry_with_non_invocable_skill());
+    async fn test_call_non_invocable_model_can_call() {
+        // Model invocations (via SkillTool) bypass user_invocable: false
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("SKILL.md"), "---\nname: internal\n---\nInternal only.\n").unwrap();
+
+        let mut reg = SkillRegistry::new();
+        reg.register(SkillDefinition {
+            name: "internal".to_string(),
+            frontmatter: SkillFrontmatter {
+                description: Some("Internal only".to_string()),
+                user_invocable: false,
+                ..Default::default()
+            },
+            body_length: 15,
+            source: SkillSource::Project,
+            base_dir: dir.path().to_path_buf(),
+        });
+        let tool = SkillTool::new(Arc::new(reg));
         let result = tool.call(json!({"skill": "internal"})).await;
-        assert!(result.is_error);
-        assert!(result.content.contains("not user-invocable"));
+        assert!(!result.is_error, "Model should call non-user-invocable skill: {}", result.content);
+        assert!(result.content.contains("<skill name=\"internal\""));
     }
 
     #[tokio::test]
@@ -401,7 +417,7 @@ mod tests {
             reg.register(SkillDefinition {
                 name: "ghost".to_string(),
                 frontmatter: SkillFrontmatter::default(),
-                content_length: 0,
+                body_length: 0,
                 source: SkillSource::Project,
                 base_dir: PathBuf::from("/tmp/kezen-test-ghost-999"),
             });
