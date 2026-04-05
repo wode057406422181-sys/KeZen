@@ -4,10 +4,9 @@ use std::time::{Duration, Instant};
 use lru::LruCache;
 use std::num::NonZeroUsize;
 
-/// TTL for cached entries: 15 minutes.
-const CACHE_TTL: Duration = Duration::from_secs(15 * 60);
-/// Maximum number of cached entries.
-const MAX_ENTRIES: usize = 100;
+use crate::constants::defaults::{WEB_CACHE_TTL, WEB_CACHE_MAX_ENTRIES};
+
+
 
 /// A single cached web page result.
 #[derive(Clone)]
@@ -24,7 +23,7 @@ pub struct CacheEntry {
 
 impl CacheEntry {
     fn is_expired(&self) -> bool {
-        self.fetched_at.elapsed() > CACHE_TTL
+        self.fetched_at.elapsed() > WEB_CACHE_TTL
     }
 }
 
@@ -51,7 +50,7 @@ impl WebCache {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(LruCache::new(
-                NonZeroUsize::new(MAX_ENTRIES).unwrap(),
+                NonZeroUsize::new(WEB_CACHE_MAX_ENTRIES).unwrap(),
             )),
         }
     }

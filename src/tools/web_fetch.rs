@@ -11,14 +11,9 @@ use crate::api;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::config::AppConfig;
 
-/// Maximum markdown content length before truncation (100K chars).
-const MAX_MARKDOWN_LENGTH: usize = 100_000;
-/// HTTP request timeout (60 seconds).
-const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
-/// Maximum response body size (10MB).
-const MAX_CONTENT_LENGTH: u64 = 10 * 1024 * 1024;
-/// Maximum URL length.
-const MAX_URL_LENGTH: usize = 2000;
+use crate::constants::defaults::{
+    FETCH_MAX_MARKDOWN_LENGTH, FETCH_TIMEOUT, FETCH_MAX_CONTENT_LENGTH, FETCH_MAX_URL_LENGTH,
+};
 
 /// Web page fetch tool with HTML→Markdown conversion and optional
 /// LLM-based content extraction.
@@ -85,11 +80,11 @@ impl WebFetchTool {
 
         // Check content length
         if let Some(cl) = resp.content_length()
-            && cl > MAX_CONTENT_LENGTH
+            && cl > FETCH_MAX_CONTENT_LENGTH
         {
             return Err(format!(
                 "Content too large: {} bytes (max {})",
-                cl, MAX_CONTENT_LENGTH
+                cl, FETCH_MAX_CONTENT_LENGTH
             ));
         }
 
@@ -114,8 +109,8 @@ impl WebFetchTool {
         };
 
         // 5. Truncate if needed
-        let markdown = if markdown.len() > MAX_MARKDOWN_LENGTH {
-            let mut truncated = markdown[..MAX_MARKDOWN_LENGTH].to_string();
+        let markdown = if markdown.len() > FETCH_MAX_MARKDOWN_LENGTH {
+            let mut truncated = markdown[..FETCH_MAX_MARKDOWN_LENGTH].to_string();
             truncated.push_str("\n\n[Content truncated due to length...]");
             truncated
         } else {
@@ -221,8 +216,8 @@ impl WebFetchTool {
 /// - Single-part hostnames (e.g. `localhost`)
 /// - Private / loopback / link-local IP addresses (SSRF prevention)
 fn validate_url(url: &str) -> Result<(), String> {
-    if url.len() > MAX_URL_LENGTH {
-        return Err(format!("URL too long: {} chars (max {})", url.len(), MAX_URL_LENGTH));
+    if url.len() > FETCH_MAX_URL_LENGTH {
+        return Err(format!("URL too long: {} chars (max {})", url.len(), FETCH_MAX_URL_LENGTH));
     }
 
     let parsed = url::Url::parse(url)

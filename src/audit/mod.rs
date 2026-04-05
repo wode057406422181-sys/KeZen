@@ -18,12 +18,9 @@ use serde::Serialize;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 
-/// Maximum length for `tool_result.output` in audit events.
-/// Longer outputs are truncated and `truncated: true` is set.
-const MAX_OUTPUT_LENGTH: usize = 4096;
+use crate::constants::defaults::{AUDIT_MAX_OUTPUT_LENGTH, AUDIT_RETENTION_DAYS};
 
-/// Number of days to retain audit log files before auto-cleanup.
-const RETENTION_DAYS: u64 = 30;
+
 
 // ─── Event Types ─────────────────────────────────────────────────────────────
 
@@ -155,11 +152,11 @@ impl SessionAuditLogger {
 
     /// Truncate tool output to [`MAX_OUTPUT_LENGTH`] if needed.
     pub fn truncate_output(output: &str) -> (String, bool) {
-        if output.len() <= MAX_OUTPUT_LENGTH {
+        if output.len() <= AUDIT_MAX_OUTPUT_LENGTH {
             (output.to_string(), false)
         } else {
             // Find a safe UTF-8 boundary
-            let mut end = MAX_OUTPUT_LENGTH;
+            let mut end = AUDIT_MAX_OUTPUT_LENGTH;
             while end > 0 && !output.is_char_boundary(end) {
                 end -= 1;
             }
@@ -197,7 +194,7 @@ pub async fn cleanup_old_audit_logs() {
         return;
     }
     let cutoff = std::time::SystemTime::now()
-        - std::time::Duration::from_secs(RETENTION_DAYS * 24 * 3600);
+        - std::time::Duration::from_secs(AUDIT_RETENTION_DAYS * 24 * 3600);
 
     let mut entries = match tokio::fs::read_dir(&dir).await {
         Ok(e) => e,
@@ -245,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_truncate_output_exact_limit() {
-        let input = "a".repeat(MAX_OUTPUT_LENGTH);
+        let input = "a".repeat(AUDIT_MAX_OUTPUT_LENGTH);
         let (output, truncated) = SessionAuditLogger::truncate_output(&input);
         assert_eq!(output, input);
         assert!(!truncated);
@@ -253,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_truncate_output_over_limit() {
-        let input = "a".repeat(MAX_OUTPUT_LENGTH + 100);
+        let input = "a".repeat(AUDIT_MAX_OUTPUT_LENGTH + 100);
         let (output, truncated) = SessionAuditLogger::truncate_output(&input);
         assert!(truncated);
         assert!(output.ends_with("...[truncated]"));
@@ -263,7 +260,7 @@ mod tests {
     #[test]
     fn test_truncate_output_utf8_boundary() {
         // 'é' is 2 bytes in UTF-8
-        let mut input = "é".repeat(MAX_OUTPUT_LENGTH);
+        let mut input = "é".repeat(AUDIT_MAX_OUTPUT_LENGTH);
         input.push_str("extra");
         let (output, truncated) = SessionAuditLogger::truncate_output(&input);
         assert!(truncated);
