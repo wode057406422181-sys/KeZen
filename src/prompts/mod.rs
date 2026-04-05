@@ -1,6 +1,7 @@
 use std::env;
 
 use crate::constants::prompts::*;
+use crate::skills::registry::SkillRegistry;
 
 fn get_simple_intro_section() -> String {
     format!(
@@ -51,7 +52,7 @@ async fn compute_env_info(model: Option<&str>) -> String {
     )
 }
 
-pub async fn build_system_prompt(model: Option<&str>) -> String {
+pub async fn build_system_prompt(model: Option<&str>, skill_registry: Option<&SkillRegistry>) -> String {
     let elements = [
         get_simple_intro_section(),
         SYSTEM_RULES.to_string(),
@@ -86,6 +87,25 @@ pub async fn build_system_prompt(model: Option<&str>) -> String {
         prompt.push_str(&memory_prompt);
     }
 
+    if let Some(registry) = skill_registry {
+        if !registry.all().is_empty() {
+            let listing = registry.format_listing(crate::constants::defaults::DEFAULT_SKILL_BUDGET_CHARS);
+            prompt.push_str("\n\n<skills>\n");
+            prompt.push_str("# Available Skills\n\n");
+            prompt.push_str("You have access to the following skills via the Skill tool. ");
+            prompt.push_str("Skills provide specialized capabilities and domain knowledge.\n\n");
+            prompt.push_str("When a user references a \"slash command\" or \"/something\" ");
+            prompt.push_str("(e.g. \"/commit\", \"/review-pr\"), they are referring to a skill.\n\n");
+            prompt.push_str("**BLOCKING REQUIREMENT**: When a skill matches the user's request, ");
+            prompt.push_str("invoke it via the Skill tool BEFORE generating any other response.\n\n");
+            prompt.push_str("Invocation examples:\n");
+            prompt.push_str("  - `skill: \"commit\"` — invoke the commit skill\n");
+            prompt.push_str("  - `skill: \"commit\", args: \"-m 'Fix bug'\"` — with arguments\n\n");
+            prompt.push_str(&listing);
+            prompt.push_str("\n</skills>");
+        }
+    }
+
     prompt
 }
 
@@ -97,7 +117,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_intro_sentinel() {
-        let prompt = build_system_prompt(None).await;
+        let prompt = build_system_prompt(None, None).await;
         assert!(
             prompt.contains("interactive agent"),
             "Prompt must contain intro section"
@@ -106,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_dynamic_boundary_marker() {
-        let prompt = build_system_prompt(None).await;
+        let prompt = build_system_prompt(None, None).await;
         assert!(
             prompt.contains(SYSTEM_PROMPT_DYNAMIC_BOUNDARY),
             "Prompt must contain the dynamic boundary marker used for runtime injection"
@@ -115,7 +135,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_tone_section() {
-        let prompt = build_system_prompt(None).await;
+        let prompt = build_system_prompt(None, None).await;
         assert!(
             prompt.contains("# Tone and style"),
             "Prompt must include tone and style section"
@@ -124,7 +144,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_output_efficiency_section() {
-        let prompt = build_system_prompt(None).await;
+        let prompt = build_system_prompt(None, None).await;
         assert!(
             prompt.contains("# Output efficiency"),
             "Prompt must include output efficiency section"
@@ -133,7 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_environment_header() {
-        let prompt = build_system_prompt(None).await;
+        let prompt = build_system_prompt(None, None).await;
         assert!(
             prompt.contains("# Environment"),
             "Prompt must include the Environment section"
@@ -142,7 +162,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_platform_info() {
-        let prompt = build_system_prompt(None).await;
+        let prompt = build_system_prompt(None, None).await;
         let expected_os = std::env::consts::OS;
         assert!(
             prompt.contains(expected_os),
@@ -154,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_injects_model_name_when_provided() {
-        let prompt = build_system_prompt(Some("claude-opus-4-5")).await;
+        let prompt = build_system_prompt(Some("claude-opus-4-5"), None).await;
         assert!(
             prompt.contains("claude-opus-4-5"),
             "Model name should appear in the Environment section"
@@ -163,7 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_without_model_has_no_model_line() {
-        let prompt = build_system_prompt(None).await;
+        let prompt = build_system_prompt(None, None).await;
         assert!(
             !prompt.contains("You are powered by the model"),
             "Without a model arg, model description should not appear"
@@ -174,7 +194,7 @@ mod tests {
 
     #[tokio::test]
     async fn environment_section_comes_after_dynamic_boundary() {
-        let prompt = build_system_prompt(None).await;
+        let prompt = build_system_prompt(None, None).await;
         let boundary_pos = prompt.find(SYSTEM_PROMPT_DYNAMIC_BOUNDARY).unwrap();
         let env_pos = prompt.find("# Environment").unwrap();
         assert!(
