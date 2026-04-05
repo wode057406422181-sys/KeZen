@@ -10,7 +10,7 @@ pub async fn run_server(config: AppConfig, host: String, port: u16) -> anyhow::R
     let addr_str = format!("{}:{}", host, port);
     let addr: SocketAddr = addr_str.parse()?;
 
-    println!("Starting server on http://{}", addr);
+    tracing::info!(addr = %addr, "HTTP server started");
 
     let app = Router::new()
         .nest("/health", routes::health_router())

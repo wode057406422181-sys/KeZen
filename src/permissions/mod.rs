@@ -86,6 +86,7 @@ impl PermissionState {
             rule_content: content.map(|s| s.to_string()),
         };
         if !self.allow_rules.contains(&rule) {
+            tracing::info!(tool = tool_name, content = ?content, "Added allow rule");
             self.allow_rules.push(rule);
         }
     }

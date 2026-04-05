@@ -53,7 +53,10 @@ impl Tool for McpTool {
         // transport handles concurrency internally via channels.
         match self.client.call_tool(&self.tool_name, input).await {
             Ok(output) => ToolResult::ok(output),
-            Err(e) => ToolResult::err(e.to_string()),
+            Err(e) => {
+                tracing::warn!(tool = %self.tool_name, server = %self.server_name, error = %e, "MCP tool call failed");
+                ToolResult::err(e.to_string())
+            }
         }
     }
 

@@ -64,7 +64,10 @@ impl Tool for FileWriteTool {
             } else {
                 format!("The file {} has been updated successfully.", file_path)
             }),
-            Err(e) => ToolResult::err(format!("Failed to write file: {}", e)),
+            Err(e) => {
+                tracing::warn!(error = %e, "FileWrite: failed");
+                ToolResult::err(format!("Failed to write file: {}", e))
+            }
         }
     }
 

@@ -67,6 +67,7 @@ impl Tool for GlobTool {
                     }
                 }
                 Err(e) => {
+                    tracing::warn!(error = %e, "Glob: pattern error");
                     return ToolResult::err(format!("Invalid glob pattern: {}", e));
                 }
             }
@@ -88,7 +89,10 @@ impl Tool for GlobTool {
 
         match result {
             Ok(r) => r,
-            Err(e) => ToolResult::err(format!("Glob task panicked: {}", e)),
+            Err(e) => {
+                tracing::warn!(error = %e, "Glob: task panicked");
+                ToolResult::err(format!("Glob task panicked: {}", e))
+            }
         }
     }
 

@@ -55,6 +55,7 @@ impl Tool for BashTool {
         let child_proc = match child {
             Ok(c) => c,
             Err(e) => {
+                tracing::warn!(error = %e, "Bash: failed to spawn shell");
                 return ToolResult::err(format!("Failed to spawn shell: {}", e))
             }
         };
@@ -78,7 +79,10 @@ impl Tool for BashTool {
 
                 ToolResult { content, is_error, extraction_usage: None }
             }
-            Ok(Err(e)) => ToolResult::err(format!("Failed to execute command: {}", e)),
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "Bash: command execution failed");
+                ToolResult::err(format!("Failed to execute command: {}", e))
+            }
             Err(_) => {
                 ToolResult::err(format!("Command killed due to timeout of {}ms", timeout_ms))
             }

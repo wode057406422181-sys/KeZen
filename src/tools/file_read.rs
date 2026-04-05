@@ -65,6 +65,7 @@ impl Tool for FileReadTool {
                         return ToolResult::err(format!("Cannot read binary file: {}", file_path_str));
                     }
                 }
+                tracing::warn!(path = %file_path_str, error = %e, "FileRead: failed");
                 return ToolResult::err(format!("Failed to read file: {}", e));
             }
         };

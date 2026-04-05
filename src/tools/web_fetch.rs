@@ -197,6 +197,7 @@ impl WebFetchTool {
                 Ok(StreamEvent::MessageStop) => break,
                 Ok(_) => {} // Skip other events
                 Err(e) => {
+                    tracing::warn!(error = %e, "WebFetch: extraction stream error");
                     return Err(format!("Stream error during extraction: {}", e));
                 }
             }
@@ -402,7 +403,10 @@ impl Tool for WebFetchTool {
                 is_error: false,
                 extraction_usage,
             },
-            Err(e) => ToolResult::err(format!("WebFetch failed: {}", e)),
+            Err(e) => {
+                tracing::warn!(error = %e, "WebFetch: fetch failed");
+                ToolResult::err(format!("WebFetch failed: {}", e))
+            }
         }
     }
 

@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{self, LlmClient, StreamOptions};
+use crate::audit::{AuditEvent, SessionAuditLogger};
 use crate::config::AppConfig;
 use crate::prompts::build_system_prompt;
 use crate::tools::registry::ToolRegistry;
@@ -39,6 +40,8 @@ pub struct KezenEngine {
     permission_state: PermissionState,
     /// Pre-computed stream options (native search settings etc.)
     stream_options: StreamOptions,
+    /// Session audit logger (JSONL)
+    audit: SessionAuditLogger,
 }
 
 impl KezenEngine {
@@ -70,11 +73,13 @@ impl KezenEngine {
         if !config.no_mcp {
             match crate::mcp::client::connect_all_servers().await {
                 Ok(result) => {
+                    tracing::info!(tools = result.tools.len(), warnings = result.warnings.len(), "MCP servers connected");
                     // Surface connection diagnostics through the event channel
                     // (not eprintln!) to preserve Engine/Frontend separation.
-                    for warning in result.warnings {
+                    for warning in &result.warnings {
+                        tracing::warn!(warning = %warning, "MCP connection warning");
                         let _ = event_tx.send(EngineEvent::Error {
-                            message: warning,
+                            message: warning.clone(),
                         }).await;
                     }
                     for tool in result.tools {
@@ -82,6 +87,7 @@ impl KezenEngine {
                     }
                 }
                 Err(e) => {
+                    tracing::error!(error = %e, "MCP init failed");
                     let _ = event_tx.send(EngineEvent::Error {
                         message: format!("MCP init error: {}", e),
                     }).await;
@@ -89,16 +95,34 @@ impl KezenEngine {
             }
         }
 
+        let session = Session::new(model_name.clone(), pricing);
+        let cwd = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        // Initialize audit logger
+        let mut audit = SessionAuditLogger::new(&session.id).await
+            .map_err(|e| crate::error::KezenError::Config(format!("Failed to create audit logger: {}", e)))?;
+        audit.log(&AuditEvent::SessionStart {
+            session_id: session.id.clone(),
+            timestamp: SessionAuditLogger::now(),
+            model: model_name.clone(),
+            cwd,
+        }).await;
+
+        tracing::info!(model = %model_name, session_id = %session.id, "Engine initialized");
+
         Ok(Self {
             config,
             client,
-            session: Session::new(model_name, pricing),
+            session,
             system_prompt,
             action_rx,
             event_tx,
             registry,
             permission_state: PermissionState::new(permission_mode),
             stream_options,
+            audit,
         })
     }
 
@@ -110,6 +134,14 @@ impl KezenEngine {
                     if let Some((cmd, args)) = slash_commands::parse(&content) {
                         self.handle_slash_command(cmd, args).await;
                     } else {
+                        // Audit: user message
+                        let msg_uuid = SessionAuditLogger::new_uuid();
+                        self.audit.log(&AuditEvent::UserMessage {
+                            session_id: self.session.id.clone(),
+                            uuid: msg_uuid.clone(),
+                            timestamp: SessionAuditLogger::now(),
+                            content: content.clone(),
+                        }).await;
                         self.handle_send_message(content).await;
                     }
                 }
@@ -141,14 +173,17 @@ impl KezenEngine {
             if self.session.message_count() >= 4
                 && compact::should_auto_compact(self.session.total_usage().input_tokens, &self.session.model_name, self.config.context_window)
             {
+                tracing::info!(tokens = self.session.total_usage().input_tokens, "Auto-compact triggered");
                 self.compact_context(None).await;
             }
 
             if iterations >= max_iterations {
+                tracing::warn!("Max tool loop iterations reached");
                 let _ = self.event_tx.send(EngineEvent::Error { message: "Max tool loop iterations reached".into() }).await;
                 break;
             }
             iterations += 1;
+            tracing::debug!(iteration = iterations, "Agentic loop iteration");
 
             let schemas = self.registry.schemas();
             let tools_arg = if schemas.is_empty() { None } else { Some(schemas.as_slice()) };
@@ -237,6 +272,7 @@ impl KezenEngine {
                                         }
                                     }
                                     Some(Err(e)) => {
+                                        tracing::error!(error = %e, "Stream error");
                                         let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
                                         stream_interrupted = true;
                                         break;
@@ -269,7 +305,7 @@ impl KezenEngine {
                         blocks.push(ContentBlock::Thinking { thinking: thinking_text });
                     }
                     if !assistant_text.is_empty() {
-                        blocks.push(ContentBlock::Text { text: assistant_text });
+                        blocks.push(ContentBlock::Text { text: assistant_text.clone() });
                     }
                     for (id, name, input) in &pending_tools {
                         blocks.push(ContentBlock::ToolUse { id: id.clone(), name: name.clone(), input: input.clone() });
@@ -279,11 +315,43 @@ impl KezenEngine {
                         self.session.add_message(Message { role: Role::Assistant, content: blocks });
                     }
 
+                    // Audit: assistant text
+                    let assistant_uuid = SessionAuditLogger::new_uuid();
+                    if !assistant_text.is_empty() {
+                        let cost = crate::cost::calculate_cost(
+                            turn_usage.input_tokens, turn_usage.output_tokens, &self.session.pricing,
+                        );
+                        self.audit.log(&AuditEvent::AssistantText {
+                            session_id: self.session.id.clone(),
+                            uuid: assistant_uuid.clone(),
+                            parent_uuid: String::new(), // linked by session order
+                            timestamp: SessionAuditLogger::now(),
+                            content: assistant_text,
+                            input_tokens: turn_usage.input_tokens,
+                            output_tokens: turn_usage.output_tokens,
+                            cost_usd: cost,
+                        }).await;
+                    }
+
                     // No tools requested: the LLM is done, exit the loop.
                     if pending_tools.is_empty() {
                         let _ = self.event_tx.send(EngineEvent::Done).await;
                         let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
                         break;
+                    }
+
+                    // Audit: tool calls
+                    for (id, name, input) in &pending_tools {
+                        tracing::info!(tool = %name, id = %id, "Tool call started");
+                        self.audit.log(&AuditEvent::ToolCall {
+                            session_id: self.session.id.clone(),
+                            uuid: SessionAuditLogger::new_uuid(),
+                            parent_uuid: assistant_uuid.clone(),
+                            timestamp: SessionAuditLogger::now(),
+                            tool_name: name.clone(),
+                            tool_id: id.clone(),
+                            input: input.clone(),
+                        }).await;
                     }
 
                     // Phase 1: Filter and prompt for permissions
@@ -326,6 +394,27 @@ impl KezenEngine {
                                 suggestion,
                             )
                         };
+
+                        // Audit: permission decision
+                        let perm_uuid = SessionAuditLogger::new_uuid();
+                        let decision_str = match &decision {
+                            PermissionDecision::Allow => "allow",
+                            PermissionDecision::Deny { .. } => "deny",
+                            PermissionDecision::NeedsApproval { .. } => "needs_approval",
+                        };
+                        let risk_str = match &decision {
+                            PermissionDecision::NeedsApproval { risk_level, .. } => format!("{:?}", risk_level),
+                            _ => String::new(),
+                        };
+                        tracing::debug!(tool = %name, decision = decision_str, "Permission decision");
+                        self.audit.log(&AuditEvent::PermissionDecision {
+                            session_id: self.session.id.clone(),
+                            uuid: perm_uuid.clone(),
+                            timestamp: SessionAuditLogger::now(),
+                            tool_name: name.clone(),
+                            decision: decision_str.to_string(),
+                            risk_level: risk_str,
+                        }).await;
 
                         match decision {
                             PermissionDecision::Allow => {
@@ -381,6 +470,16 @@ impl KezenEngine {
                                     }
                                 }
 
+                                // Audit: permission response
+                                self.audit.log(&AuditEvent::PermissionResponse {
+                                    session_id: self.session.id.clone(),
+                                    uuid: SessionAuditLogger::new_uuid(),
+                                    parent_uuid: perm_uuid.clone(),
+                                    timestamp: SessionAuditLogger::now(),
+                                    allowed: was_allowed,
+                                    always_allow: false,
+                                }).await;
+
                                 if was_allowed {
                                     approved_tools.push((idx, id, name, input, tool));
                                 } else {
@@ -422,6 +521,21 @@ impl KezenEngine {
                             extraction_usage_total.output_tokens += eu.output_tokens;
                         }
 
+                        tracing::info!(tool_id = %id, is_error = result.is_error, "Tool call completed");
+
+                        // Audit: tool result
+                        let (truncated_output, was_truncated) = SessionAuditLogger::truncate_output(&result.content);
+                        self.audit.log(&AuditEvent::ToolResult {
+                            session_id: self.session.id.clone(),
+                            uuid: SessionAuditLogger::new_uuid(),
+                            parent_uuid: id.clone(),
+                            timestamp: SessionAuditLogger::now(),
+                            tool_id: id.clone(),
+                            is_error: result.is_error,
+                            output: truncated_output,
+                            truncated: was_truncated,
+                        }).await;
+
                         let _ = self.event_tx.send(EngineEvent::ToolResult {
                             id: id.clone(),
                             output: result.content.clone(),
@@ -446,6 +560,7 @@ impl KezenEngine {
                     self.session.add_message(Message { role: Role::User, content: tool_results });
                 }
                 Err(e) => {
+                    tracing::error!(error = %e, "LLM stream creation failed");
                     let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
                     let _ = self.event_tx.send(EngineEvent::Done).await;
                     let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
@@ -453,6 +568,16 @@ impl KezenEngine {
                 }
             }
         }
+
+        // Audit: session end summary
+        self.audit.log(&AuditEvent::SessionEnd {
+            session_id: self.session.id.clone(),
+            timestamp: SessionAuditLogger::now(),
+            total_cost_usd: self.session.total_cost_usd,
+            total_input_tokens: self.session.total_input_tokens,
+            total_output_tokens: self.session.total_output_tokens,
+        }).await;
+        tracing::info!(session_id = %self.session.id, cost = self.session.total_cost_usd, "Message handling complete");
     }
 
     async fn handle_slash_command(&mut self, cmd: &str, args: &str) {
@@ -503,6 +628,7 @@ impl KezenEngine {
                             }).await;
                         }
                         Err(e) => {
+                            tracing::warn!(model = %args, error = %e, "Model switch failed");
                             let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                 command: "/model".into(),
                                 output: format!("Failed to switch model: {}", e),
@@ -551,6 +677,7 @@ impl KezenEngine {
                         }
                     }
                     Err(e) => {
+                        tracing::warn!(error = %e, "Session list failed");
                         let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                             command: "/resume".into(),
                             output: format!("Failed to list sessions: {}", e),
@@ -602,6 +729,7 @@ impl KezenEngine {
                                 assistant_text.push_str(&text);
                             }
                             Err(e) => {
+                                tracing::warn!(error = %e, "Compact: stream error");
                                 stream_errors.push(e.to_string());
                             }
                             _ => {}
@@ -664,6 +792,7 @@ impl KezenEngine {
                     }
                 }
                 Err(e) => {
+                    tracing::warn!(error = %e, "Compact: stream creation failed");
                     last_error = Some(e.to_string());
                 }
             }
@@ -676,8 +805,10 @@ impl KezenEngine {
         }
 
         // All retries exhausted — report failure but DON'T touch the message history
+        let error_msg = last_error.unwrap_or_default();
+        tracing::error!(error = %error_msg, "Compact failed after all retries");
         let _ = self.event_tx.send(EngineEvent::CompactProgress {
-            message: format!("Failed to compact after {} attempts: {}", MAX_COMPACT_RETRIES, last_error.unwrap_or_default()),
+            message: format!("Failed to compact after {} attempts: {}", MAX_COMPACT_RETRIES, error_msg),
         }).await;
     }
 }
