@@ -12,6 +12,7 @@ pub mod glob;
 pub mod web_cache;
 pub mod web_search;
 pub mod web_fetch;
+pub mod skill_tool;
 
 use crate::permissions::PermissionResult;
 

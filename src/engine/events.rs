@@ -51,6 +51,10 @@ pub enum EngineEvent {
     CompactProgress {
         message: String,
     },
+    /// A skill has been loaded (notifies frontend to display skill execution)
+    SkillLoaded {
+        name: String,
+    },
 }
 
 /// Actions sent from Frontend to Engine

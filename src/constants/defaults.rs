@@ -40,3 +40,26 @@ pub const WEB_CACHE_MAX_ENTRIES: usize = 100;
 
 /// Maximum character count for a single memory file before truncation.
 pub const MAX_MEMORY_CHARACTER_COUNT: usize = 40_000;
+
+// ── Skills ───────────────────────────────────────────────────────────────────
+
+/// Canonical tool name for the Skill meta-tool.
+pub const SKILL_TOOL_NAME: &str = "Skill";
+
+/// Skill listing gets 1% of the context window (in characters).
+/// Listing is for discovery only — full content is loaded on invocation.
+#[allow(dead_code)] // TODO: Use for dynamic budget: context_window × CHARS_PER_TOKEN × PERCENT
+pub const SKILL_BUDGET_CONTEXT_PERCENT: f64 = 0.01;
+
+/// Assumed characters-per-token ratio for budget calculation.
+#[allow(dead_code)] // TODO: Use for dynamic budget: context_window × CHARS_PER_TOKEN × PERCENT
+pub const SKILL_CHARS_PER_TOKEN: usize = 4;
+
+/// Fallback character budget when context window size is unknown.
+/// Equivalent to 1% of 200k tokens × 4 chars/token = 8000.
+pub const DEFAULT_SKILL_BUDGET_CHARS: usize = 8_000;
+
+/// Per-entry hard cap for skill description in the listing.
+/// Verbose `when_to_use` strings waste turn-1 cache tokens without
+/// improving match rate; this keeps each entry concise.
+pub const MAX_LISTING_DESC_CHARS: usize = 250;

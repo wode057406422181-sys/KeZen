@@ -20,8 +20,6 @@ use tokio::io::AsyncWriteExt;
 
 use crate::constants::defaults::{AUDIT_MAX_OUTPUT_LENGTH, AUDIT_RETENTION_DAYS};
 
-
-
 // ─── Event Types ─────────────────────────────────────────────────────────────
 
 /// A single audit event, serialized as one JSONL line.
