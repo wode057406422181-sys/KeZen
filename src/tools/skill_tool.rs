@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::constants::defaults::SKILL_TOOL_NAME;
 use crate::permissions::PermissionResult;
 use crate::skills::registry::SkillRegistry;
-use crate::skills::loader::load_skill_content;
+use crate::skills::loader::prepare_skill_content;
 use crate::tools::{Tool, ToolResult};
 
 pub struct SkillTool {
@@ -108,75 +108,30 @@ impl Tool for SkillTool {
             }
         };
 
-        // Pre-call validation: respect frontmatter directives before loading content.
-        if skill.frontmatter.disable_model_invocation {
-            tracing::warn!(
-                tool = SKILL_TOOL_NAME,
-                skill = %skill_name,
-                "Skill has disable_model_invocation set"
-            );
-            return ToolResult::err(format!(
-                "Skill '{}' cannot be invoked by the model (disable_model_invocation is set)",
-                skill_name
-            ));
-        }
-        if !skill.frontmatter.user_invocable {
-            tracing::warn!(
-                tool = SKILL_TOOL_NAME,
-                skill = %skill_name,
-                "Skill is not user-invocable"
-            );
-            return ToolResult::err(format!(
-                "Skill '{}' is not user-invocable",
-                skill_name
-            ));
-        }
-
-        // Load the full content lazily.
-        let mut content = match load_skill_content(skill).await {
-            Ok(c) => c,
-            Err(e) => {
+        // Delegate to the shared prepare_skill_content() for validation,
+        // loading, substitution, and wrapping. is_model_invocation = true
+        // because the model is calling this tool.
+        match prepare_skill_content(skill, args, true).await {
+            Ok(wrapped) => {
+                tracing::debug!(
+                    tool = SKILL_TOOL_NAME,
+                    skill = %skill_name,
+                    content_bytes = wrapped.len(),
+                    "Skill content loaded and wrapped"
+                );
+                ToolResult::ok(wrapped)
+            }
+            Err(msg) => {
                 tracing::warn!(
                     tool = SKILL_TOOL_NAME,
                     skill = %skill_name,
                     path = %skill.base_dir.display(),
-                    error = %e,
-                    "Failed to load skill content"
+                    error = %msg,
+                    "Skill preparation failed"
                 );
-                return ToolResult::err(format!("Failed to load skill content: {}", e));
+                ToolResult::err(msg)
             }
-        };
-
-        // Variable substitution.
-        let base_dir = skill.base_dir.display().to_string();
-        content = content.replace("${KEZEN_SKILL_DIR}", &base_dir);
-
-        // Session ID substitution.
-        // Use a deterministic placeholder so test snapshots remain stable.
-        if content.contains("${KEZEN_SESSION_ID}") {
-            let session_id = std::env::var("KEZEN_SESSION_ID").unwrap_or_default();
-            content = content.replace("${KEZEN_SESSION_ID}", &session_id);
         }
-
-        // Optional args forwarding.
-        if !args.is_empty() {
-            content = content.replace("${KEZEN_SKILL_ARGS}", args);
-        }
-
-        tracing::debug!(
-            tool = SKILL_TOOL_NAME,
-            skill = %skill_name,
-            content_bytes = content.len(),
-            "Skill content loaded and wrapped"
-        );
-
-        // Wrap the content in XML tags so the Engine can extract it and forge a User message.
-        let wrapped = format!(
-            "<skill name=\"{}\" base_dir=\"{}\">\n{}\n</skill>",
-            skill_name, base_dir, content
-        );
-
-        ToolResult::ok(wrapped)
     }
 
     fn is_read_only(&self, _input: &serde_json::Value) -> bool {

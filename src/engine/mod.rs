@@ -15,7 +15,7 @@ use crate::config::AppConfig;
 use crate::prompts::build_system_prompt;
 use crate::tools::registry::ToolRegistry;
 use crate::skills::registry::SkillRegistry;
-use crate::skills::loader::discover_all_skills;
+use crate::skills::loader::{discover_all_skills, prepare_skill_content};
 use crate::tools::skill_tool::SkillTool;
 use std::sync::Arc;
 
@@ -59,7 +59,6 @@ impl KezenEngine {
         permission_mode: PermissionMode,
     ) -> Result<Self, crate::error::KezenError> {
         let client = api::create_client(&config)?;
-        
         let mut skill_registry = SkillRegistry::new();
         let discovered_skills = discover_all_skills().await;
         for skill in discovered_skills {
@@ -514,28 +513,38 @@ impl KezenEngine {
                     }
 
                     // Phase 2: Execute approved tools concurrently.
+                    // For Skill tools, extract the skill name from the input
+                    // before spawning so we can identify it without parsing XML.
                     let mut join_set = tokio::task::JoinSet::new();
                     for (idx, id, name, input, tool) in approved_tools {
+                        let extracted_skill_name = if name == SKILL_TOOL_NAME {
+                            input.get("skill").and_then(|v| v.as_str()).map(|s| s.trim().strip_prefix('/').unwrap_or(s.trim()).to_string())
+                        } else {
+                            None
+                        };
                         join_set.spawn(async move {
                             let result = tool.call(input).await;
-                            (idx, id, name, result)
+                            (idx, id, name, extracted_skill_name, result)
                         });
                     }
 
                     // Collect results and sort by original index to preserve order.
-                    let mut indexed_results = denied_results;
+                    // Merge denied results with completed tool results.
+                    // Denied results have no extracted_skill_name.
+                    let mut indexed_results: Vec<(usize, String, String, Option<String>, crate::tools::ToolResult)> =
+                        denied_results.into_iter().map(|(idx, id, name, result)| (idx, id, name, None, result)).collect();
                     while let Some(join_result) = join_set.join_next().await {
                         if let Ok(r) = join_result {
                             indexed_results.push(r);
                         }
                     }
-                    indexed_results.sort_by_key(|(idx, _, _, _)| *idx);
+                    indexed_results.sort_by_key(|(idx, _, _, _, _)| *idx);
 
                     let mut tool_results = Vec::new();
                     let mut skill_injections = Vec::new();
                     // Track extraction usage from sub-LLM calls (e.g. WebFetch content extraction)
                     let mut extraction_usage_total = Usage::default();
-                    for (_idx, id, name, result) in indexed_results {
+                    for (_idx, id, name, extracted_skill_name, result) in indexed_results {
                         // Accumulate any extraction usage into the turn total
                         if let Some(eu) = &result.extraction_usage {
                             extraction_usage_total.input_tokens += eu.input_tokens;
@@ -558,13 +567,9 @@ impl KezenEngine {
                         }).await;
 
                         if name == SKILL_TOOL_NAME && !result.is_error {
-                            let mut loaded_name = "unknown".to_string();
-                            if let Some(pos) = result.content.find("name=\"") {
-                                let start = pos + 6;
-                                if let Some(end) = result.content[start..].find('"') {
-                                    loaded_name = result.content[start..start+end].to_string();
-                                }
-                            }
+                            // C-1 fix: Use the skill name extracted from the tool input
+                            // (before spawning) instead of parsing XML from the result body.
+                            let loaded_name = extracted_skill_name.unwrap_or_else(|| "unknown".to_string());
 
                             let _ = self.event_tx.send(EngineEvent::SkillLoaded {
                                 name: loaded_name.clone(),
@@ -572,6 +577,8 @@ impl KezenEngine {
 
                             tracing::info!(skill = %loaded_name, "Skill loaded, injecting pseudo-instruction");
 
+                            // Clone `id` here because it is also used in the else branch's
+                            // ToolResult — we need it in both paths.
                             tool_results.push(ContentBlock::ToolResult {
                                 tool_use_id: id.clone(),
                                 content: "✅ Skill loaded successfully".to_string(),
@@ -640,16 +647,28 @@ impl KezenEngine {
     async fn handle_slash_command(&mut self, cmd: &str, args: &str) {
         match cmd {
             "help" => {
-                let output = "Available commands:
+                let mut output = "Available commands:
   /help       - Provide help on available commands
   /clear      - Clear your chat history
   /compact    - Compact conversation context to save tokens
   /model      - Switch the current model
   /cost       - Show current session cost and token usage
-  /resume     - List and resume available sessions";
+  /resume     - List and resume available sessions"
+                    .to_string();
+
+                // M-5: Dynamically list available skill commands.
+                let skills = self.skill_registry.all();
+                if !skills.is_empty() {
+                    output.push_str("\n\nAvailable skills (use /<name> to invoke):");
+                    for (name, skill) in skills {
+                        let desc = skill.frontmatter.description.as_deref().unwrap_or("No description");
+                        output.push_str(&format!("\n  /{:<10} - {}", name, desc));
+                    }
+                }
+
                 let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                     command: "/help".into(),
-                    output: output.to_string(),
+                    output,
                 }).await;
             }
             "clear" => {
@@ -745,34 +764,25 @@ impl KezenEngine {
             _ => {
                 let skill_opt = self.skill_registry.get(cmd).cloned();
                 if let Some(skill) = skill_opt {
-                    use crate::skills::loader::load_skill_content;
-                    match load_skill_content(&skill).await {
-                        Ok(mut content) => {
-                            let base_dir = skill.base_dir.display().to_string();
-                            content = content.replace("${KEZEN_SKILL_DIR}", &base_dir);
-                            if !args.is_empty() {
-                                content = content.replace("${KEZEN_SKILL_ARGS}", args);
-                            }
-                            let wrapped = format!(
-                                "<skill name=\"{}\" base_dir=\"{}\">\n{}\n</skill>",
-                                cmd, base_dir, content
-                            );
-
+                    // C-2 fix: Use shared prepare_skill_content() — applies
+                    // validation (user_invocable), all substitutions including
+                    // ${KEZEN_SESSION_ID}, and XML wrapping.
+                    // is_model_invocation = false: slash commands are user-initiated,
+                    // so disable_model_invocation does NOT apply.
+                    match prepare_skill_content(&skill, args, false).await {
+                        Ok(wrapped) => {
                             let _ = self.event_tx.send(EngineEvent::SkillLoaded {
                                 name: cmd.to_string(),
                             }).await;
 
                             tracing::info!(skill = %cmd, "Skill invoked via slash command");
 
-                            // To avoid blocking the terminal history from showing the slash command,
-                            // we send a short acknowledgment, then forge the real input in handle_send_message.
                             let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                 command: format!("/{}", cmd),
                                 output: "Skill invoked directly.".to_string(),
                             }).await;
 
-                            // Recursively trigger the full agentic loop
-                            // Audit log for this injected message
+                            // Audit log for the injected message
                             let msg_uuid = SessionAuditLogger::new_uuid();
                             self.audit.log(&AuditEvent::UserMessage {
                                 session_id: self.session.id.clone(),
@@ -780,7 +790,8 @@ impl KezenEngine {
                                 timestamp: SessionAuditLogger::now(),
                                 content: wrapped.clone(),
                             }).await;
-                            
+
+                            // Recursively trigger the full agentic loop
                             self.handle_send_message(wrapped).await;
                         }
                         Err(e) => {

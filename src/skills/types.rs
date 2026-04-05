@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub enum SkillSource {
     UserGlobal,
     Project,
+    #[allow(dead_code)] // TODO: Bundled skills for built-in skill packs
     Bundled,
 }
 

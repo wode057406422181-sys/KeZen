@@ -48,11 +48,11 @@ pub const SKILL_TOOL_NAME: &str = "Skill";
 
 /// Skill listing gets 1% of the context window (in characters).
 /// Listing is for discovery only — full content is loaded on invocation.
-#[allow(dead_code)] // Used by future dynamic budget calculation
+#[allow(dead_code)] // TODO: Use for dynamic budget: context_window × CHARS_PER_TOKEN × PERCENT
 pub const SKILL_BUDGET_CONTEXT_PERCENT: f64 = 0.01;
 
 /// Assumed characters-per-token ratio for budget calculation.
-#[allow(dead_code)] // Used by future dynamic budget calculation
+#[allow(dead_code)] // TODO: Use for dynamic budget: context_window × CHARS_PER_TOKEN × PERCENT
 pub const SKILL_CHARS_PER_TOKEN: usize = 4;
 
 /// Fallback character budget when context window size is unknown.

@@ -29,10 +29,6 @@ impl SkillRegistry {
         self.skills.get(name)
     }
 
-    pub fn find(&self, name: &str) -> Option<&SkillDefinition> {
-        self.skills.get(name)
-    }
-
     pub fn all(&self) -> &IndexMap<String, SkillDefinition> {
         &self.skills
     }
@@ -210,12 +206,12 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_find_delegates_to_get() {
+    fn test_registry_get_returns_none_for_missing() {
         let mut reg = SkillRegistry::new();
         reg.register(make_skill("test", Some("Test skill")));
 
-        assert!(reg.find("test").is_some());
-        assert!(reg.find("missing").is_none());
+        assert!(reg.get("test").is_some());
+        assert!(reg.get("missing").is_none());
     }
 
     #[test]

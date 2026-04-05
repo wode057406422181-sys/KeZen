@@ -28,7 +28,10 @@ pub async fn discover_all_skills() -> Vec<SkillDefinition> {
     }
 
     // 2. Project Local Skills: Traverse up to find .kezen/skills/
-    let mut current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let mut current_dir = std::env::current_dir().unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "current_dir() failed, falling back to \".\" — project skills may not be discovered");
+        PathBuf::from(".")
+    });
     loop {
         let local_skills_path = current_dir.join(".kezen").join("skills");
         if tokio::fs::metadata(&local_skills_path).await.map(|m| m.is_dir()).unwrap_or(false) {
@@ -129,6 +132,61 @@ pub async fn load_skill_content(skill: &SkillDefinition) -> Result<String, std::
     tokio::fs::read_to_string(skill_file_path).await
 }
 
+/// Load, validate, substitute, and wrap a skill for injection.
+///
+/// This is the single authoritative code path for preparing skill content.
+/// Both `SkillTool::call()` and the slash command handler MUST use this
+/// function to avoid divergent logic.
+///
+/// # Validation
+/// - `disable_model_invocation`: blocked when `is_model_invocation` is true
+/// - `user_invocable`: always enforced
+///
+/// # Substitutions
+/// - `${KEZEN_SKILL_DIR}` → skill base directory
+/// - `${KEZEN_SESSION_ID}` → env var `KEZEN_SESSION_ID` (if present)
+/// - `${KEZEN_SKILL_ARGS}` → provided `args` (if non-empty)
+pub async fn prepare_skill_content(
+    skill: &SkillDefinition,
+    args: &str,
+    is_model_invocation: bool,
+) -> Result<String, String> {
+    // Validation: respect frontmatter directives.
+    if is_model_invocation && skill.frontmatter.disable_model_invocation {
+        return Err(format!(
+            "Skill '{}' cannot be invoked by the model (disable_model_invocation is set)",
+            skill.name
+        ));
+    }
+    if !skill.frontmatter.user_invocable {
+        return Err(format!("Skill '{}' is not user-invocable", skill.name));
+    }
+
+    // Load the full content lazily.
+    let mut content = load_skill_content(skill).await.map_err(|e| {
+        format!("Failed to load skill content: {}", e)
+    })?;
+
+    // Variable substitution.
+    let base_dir = skill.base_dir.display().to_string();
+    content = content.replace("${KEZEN_SKILL_DIR}", &base_dir);
+
+    if content.contains("${KEZEN_SESSION_ID}") {
+        let session_id = std::env::var("KEZEN_SESSION_ID").unwrap_or_default();
+        content = content.replace("${KEZEN_SESSION_ID}", &session_id);
+    }
+
+    if !args.is_empty() {
+        content = content.replace("${KEZEN_SKILL_ARGS}", args);
+    }
+
+    // Wrap in XML tags for the Engine to extract and inject.
+    Ok(format!(
+        "<skill name=\"{}\" base_dir=\"{}\">\n{}\n</skill>",
+        skill.name, base_dir, content
+    ))
+}
+
 /// Parse YAML-like frontmatter from a SKILL.md file.
 ///
 /// Returns the parsed frontmatter struct and the byte length of the body content
@@ -194,13 +252,33 @@ pub fn parse_skill_frontmatter(text: &str) -> (SkillFrontmatter, usize) {
                     fm.user_invocable = !value.eq_ignore_ascii_case("false"); // default true
                 }
                 "allowed_tools" => {
-                    current_array = Some(&mut fm.allowed_tools);
+                    // Support inline YAML arrays: allowed_tools: [bash, file_write]
+                    if let Some(inner) = value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
+                        fm.allowed_tools = inner
+                            .split(',')
+                            .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                    } else {
+                        current_array = Some(&mut fm.allowed_tools);
+                    }
                 }
                 "paths" | "files" => {
                     if fm.paths.is_none() {
                         fm.paths = Some(Vec::new());
                     }
-                    current_array = fm.paths.as_mut();
+                    // Support inline YAML arrays: paths: [src/, tests/]
+                    if let Some(inner) = value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) {
+                        let paths = fm.paths.get_or_insert_with(Vec::new);
+                        paths.extend(
+                            inner
+                                .split(',')
+                                .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
+                                .filter(|s| !s.is_empty())
+                        );
+                    } else {
+                        current_array = fm.paths.as_mut();
+                    }
                 }
                 _ => {}
             }
@@ -442,5 +520,118 @@ Body.\n";
 
         let result = load_skill_content(&skill).await;
         assert!(result.is_err());
+    }
+
+    // ── prepare_skill_content ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_prepare_skill_content_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = "---\nname: test\n---\nDo with ${KEZEN_SKILL_DIR} and ${KEZEN_SKILL_ARGS}.\n";
+        std::fs::write(dir.path().join("SKILL.md"), body).unwrap();
+
+        let skill = SkillDefinition {
+            name: "test".to_string(),
+            frontmatter: SkillFrontmatter::default(),
+            content_length: 100,
+            source: SkillSource::Project,
+            base_dir: dir.path().to_path_buf(),
+        };
+
+        let result = prepare_skill_content(&skill, "hello", false).await.unwrap();
+        assert!(result.contains("<skill name=\"test\""));
+        assert!(result.contains("</skill>"));
+        assert!(!result.contains("${KEZEN_SKILL_DIR}"));
+        assert!(result.contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn test_prepare_skill_content_blocks_model_invocation() {
+        let skill = SkillDefinition {
+            name: "locked".to_string(),
+            frontmatter: SkillFrontmatter {
+                disable_model_invocation: true,
+                ..Default::default()
+            },
+            content_length: 0,
+            source: SkillSource::Project,
+            base_dir: PathBuf::from("/tmp/test"),
+        };
+
+        let result = prepare_skill_content(&skill, "", true).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("disable_model_invocation"));
+    }
+
+    #[tokio::test]
+    async fn test_prepare_skill_content_allows_slash_when_model_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("SKILL.md"), "---\nname: x\n---\nBody.\n").unwrap();
+
+        let skill = SkillDefinition {
+            name: "x".to_string(),
+            frontmatter: SkillFrontmatter {
+                disable_model_invocation: true,
+                ..Default::default()
+            },
+            content_length: 10,
+            source: SkillSource::Project,
+            base_dir: dir.path().to_path_buf(),
+        };
+
+        // Slash command invocation (is_model_invocation = false) should NOT be blocked
+        let result = prepare_skill_content(&skill, "", false).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_prepare_skill_content_blocks_non_invocable() {
+        let skill = SkillDefinition {
+            name: "internal".to_string(),
+            frontmatter: SkillFrontmatter {
+                user_invocable: false,
+                ..Default::default()
+            },
+            content_length: 0,
+            source: SkillSource::Project,
+            base_dir: PathBuf::from("/tmp/test"),
+        };
+
+        let result = prepare_skill_content(&skill, "", false).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not user-invocable"));
+    }
+
+    // ── Inline YAML arrays ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_frontmatter_inline_array_allowed_tools() {
+        let content = "---\n\
+allowed_tools: [bash, file_write]\n\
+---\n\
+Body.\n";
+        let (fm, _) = parse_skill_frontmatter(content);
+        assert_eq!(fm.allowed_tools, vec!["bash", "file_write"]);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_inline_array_paths() {
+        let content = "---\n\
+paths: [\"src/\", \"tests/\"]\n\
+---\n\
+Body.\n";
+        let (fm, _) = parse_skill_frontmatter(content);
+        let paths = fm.paths.unwrap();
+        assert_eq!(paths, vec!["src/", "tests/"]);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_inline_array_empty_brackets() {
+        let content = "---\n\
+allowed_tools: []\n\
+---\n\
+Body.\n";
+        let (fm, _) = parse_skill_frontmatter(content);
+        assert!(fm.allowed_tools.is_empty());
     }
 }
