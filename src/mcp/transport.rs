@@ -83,12 +83,7 @@ impl StdioTransport {
         Ok(())
     }
 
-    pub async fn shutdown(&self) {
-        let mut guard = self.child.lock().await;
-        if let Some(mut child) = guard.take() {
-            let _ = child.kill().await;
-        }
-    }
+
 
     async fn io_loop(
         mut stdin: ChildStdin,

@@ -24,6 +24,7 @@ pub struct StreamOptions {
     /// Enable server-side web search (DashScope `enable_search`, etc.).
     pub enable_server_search: bool,
     /// Enable server-side web fetch (Anthropic `web_fetch_20250910`, etc.).
+    #[allow(dead_code)] // TODO: Implement server-side fetch in both Anthropic and OpenAI providers
     pub enable_server_fetch: bool,
     /// Search strategy hint for providers that support it.
     /// DashScope values: "turbo", "max", "agent", "agent_max".

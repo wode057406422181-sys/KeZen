@@ -47,27 +47,7 @@ pub async fn list_sessions() -> anyhow::Result<Vec<SessionSnapshot>> {
     Ok(snaps)
 }
 
-pub async fn load_latest_snapshot() -> anyhow::Result<SessionSnapshot> {
-    let snaps = list_sessions().await?;
-    snaps
-        .into_iter()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("No previous session found"))
-}
 
-pub async fn load_snapshot_by_id(id: &str) -> anyhow::Result<SessionSnapshot> {
-    let p = get_sessions_dir().join(format!("{}.json", id));
-    let c = tokio::fs::read_to_string(p).await?;
-    Ok(serde_json::from_str(&c)?)
-}
-
-pub async fn load_snapshot(id: Option<&str>) -> anyhow::Result<SessionSnapshot> {
-    if let Some(target) = id {
-        load_snapshot_by_id(target).await
-    } else {
-        load_latest_snapshot().await
-    }
-}
 
 #[cfg(test)]
 mod tests {

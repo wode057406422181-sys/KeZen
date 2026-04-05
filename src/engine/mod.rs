@@ -119,9 +119,6 @@ impl KezenEngine {
                 UserAction::PermissionResponse { .. } => {
                     // Handled synchronously during the tool execution loop
                 }
-                UserAction::RestoreSession { snapshot } => {
-                    self.session.restore(snapshot);
-                }
             }
         }
     }
@@ -374,9 +371,7 @@ impl KezenEngine {
                                             // Handle cancel as deny
                                             break;
                                         }
-                                        UserAction::RestoreSession { .. } => {
-                                            // Ignore
-                                        }
+
                                         UserAction::SendMessage { .. } => {
                                             // Interleave message not allowed while asking permission
                                             let _ = self.event_tx.send(EngineEvent::Error { 
