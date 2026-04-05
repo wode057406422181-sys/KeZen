@@ -20,7 +20,7 @@ use crate::constants::defaults::{
 ///
 /// When a `prompt` parameter is provided, the tool spawns a secondary
 /// LLM call using the currently configured provider to extract/summarize
-/// the fetched content.
+/// the fetched content. This is analogous to Claude Code's Haiku sub-call
 /// but uses whatever LLM the user has configured — making it fully
 /// provider-agnostic.
 pub struct WebFetchTool {

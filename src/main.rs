@@ -13,7 +13,6 @@ mod permissions;
 mod prompts;
 mod server;
 mod session;
-mod skills;
 pub mod tools;
 
 use anyhow::Result;

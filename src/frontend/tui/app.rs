@@ -14,7 +14,7 @@ use super::ui;
 
 // ─── Spinner ────────────────────────────────────────────────────────────────
 
-/// Braille spinner characters (modern, terminal-inspired)
+/// Braille spinner characters (modern, Claude-Code-inspired)
 const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 // ─── Data types ─────────────────────────────────────────────────────────────
@@ -319,15 +319,6 @@ impl App {
                 self.messages.push(ChatMessage {
                     role: MessageRole::System,
                     content: format!("🗜 {}", message),
-                });
-                if self.auto_scroll {
-                    self.scroll_to_bottom();
-                }
-            }
-            EngineEvent::SkillLoaded { name } => {
-                self.messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: format!("⚡ Skill invoked: [{}]", name),
                 });
                 if self.auto_scroll {
                     self.scroll_to_bottom();

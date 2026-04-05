@@ -225,14 +225,6 @@ async fn handle_engine_events(
                     Some(EngineEvent::CompactProgress { message }) => {
                         println!("  {} {}", "ℹ".blue(), message.dimmed());
                     }
-                    Some(EngineEvent::SkillLoaded { name }) => {
-                        if in_thinking {
-                            in_thinking = false;
-                            println!();
-                        }
-                        println!("  {} {} {}", "⚡".yellow(), "Skill invoked".bold(), format!("[{}]", name).dimmed());
-                        let _ = std::io::stdout().flush();
-                    }
                     None => {
                         // Channel closed, engine died
                         print_error("Engine disconnected unexpectedly.");
