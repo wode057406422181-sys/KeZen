@@ -76,6 +76,8 @@ impl McpClient {
             }
         }
 
+        tracing::debug!(server = name, tools = tools.len(), "MCP handshake complete");
+
         Ok(Self {
             transport,
             tools,
@@ -129,6 +131,7 @@ pub struct McpConnectResult {
 /// Returns tools + warnings instead of printing to stderr, so the frontend
 /// can display connection status through the proper event channel.
 pub async fn connect_all_servers() -> Result<McpConnectResult> {
+    tracing::info!("Starting MCP server connections");
     let mut mcp_tools: Vec<Arc<dyn Tool>> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
     
@@ -162,6 +165,7 @@ pub async fn connect_all_servers() -> Result<McpConnectResult> {
                         }
                     }
                     Err(e) => {
+                        tracing::warn!(server = %server_name, error = %e, "MCP server connection failed");
                         warnings.push(format!("Failed to connect to MCP server '{}': {}", server_name, e));
                     }
                 }

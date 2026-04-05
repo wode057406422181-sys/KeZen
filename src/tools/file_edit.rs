@@ -75,6 +75,7 @@ impl Tool for FileEditTool {
                 if !file_exists && old_string.is_empty() {
                     String::new()
                 } else {
+                    tracing::warn!(path = %file_path, "FileEdit: failed to read file");
                     return ToolResult::err(format!("Failed to read file: {}", file_path));
                 }
             }
@@ -89,6 +90,7 @@ impl Tool for FileEditTool {
                 let _ = fs::create_dir_all(parent).await;
             }
             if let Err(e) = fs::write(&path, new_string).await {
+                tracing::warn!(path = %file_path, error = %e, "FileEdit: failed to write new file");
                 return ToolResult::err(format!("Failed to write new file: {}", e));
             }
             return ToolResult::ok(format!("The file {} has been created successfully.", file_path));
@@ -110,6 +112,7 @@ impl Tool for FileEditTool {
         };
 
         if let Err(e) = fs::write(&path, updated_content).await {
+            tracing::warn!(path = %file_path, error = %e, "FileEdit: failed to write updated file");
             return ToolResult::err(format!("Failed to write updated file: {}", e));
         }
 

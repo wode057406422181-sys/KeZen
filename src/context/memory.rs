@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-const MAX_MEMORY_CHARACTER_COUNT: usize = 40_000;
+use crate::constants::defaults::MAX_MEMORY_CHARACTER_COUNT;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemoryType {

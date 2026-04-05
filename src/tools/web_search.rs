@@ -394,7 +394,10 @@ impl Tool for WebSearchTool {
 
         match self.search(query, max_results).await {
             Ok(results) => ToolResult::ok(format_results(query, &results)),
-            Err(e) => ToolResult::err(format!("Search failed: {}", e)),
+            Err(e) => {
+                tracing::warn!(error = %e, "WebSearch: search failed");
+                ToolResult::err(format!("Search failed: {}", e))
+            }
         }
     }
 

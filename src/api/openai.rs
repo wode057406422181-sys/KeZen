@@ -228,6 +228,7 @@ impl LlmClient for OpenAiClient {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             debug_logger::log_error_response("openai", status.as_u16(), &text);
+            tracing::error!(status = status.as_u16(), "OpenAI API error");
             return Err(KezenError::Api(format!(
                 "OpenAI API error {}: {}",
                 status, text
@@ -250,7 +251,9 @@ impl LlmClient for OpenAiClient {
 
                     let v: serde_json::Value = match serde_json::from_str(&event.data) {
                         Ok(v) => v,
-                        Err(e) => return futures::stream::iter(vec![Err(KezenError::Json(e))]),
+                        Err(e) => {
+                            return futures::stream::iter(vec![Err(KezenError::Json(e))]);
+                        }
                     };
 
                     let mut out: Vec<Result<StreamEvent, KezenError>> = Vec::new();
@@ -314,7 +317,9 @@ impl LlmClient for OpenAiClient {
 
                     out
                 }
-                Err(e) => vec![Err(KezenError::Stream(e.to_string()))],
+                Err(e) => {
+                    vec![Err(KezenError::Stream(e.to_string()))]
+                }
             };
 
             futures::stream::iter(events)

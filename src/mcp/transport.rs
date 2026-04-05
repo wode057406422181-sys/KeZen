@@ -33,6 +33,7 @@ impl StdioTransport {
         command.stderr(Stdio::inherit());
 
         let mut child = command.spawn().context("Failed to spawn MCP server")?;
+        tracing::info!(command = %cfg.command, args = ?cfg.args, "MCP server spawned");
 
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
@@ -69,7 +70,9 @@ impl StdioTransport {
         let (resp_tx, resp_rx) = oneshot::channel();
         self.request_tx.send((req, resp_tx)).await?;
 
-        resp_rx.await?
+        let result = resp_rx.await?;
+        tracing::debug!(method, id, success = result.is_ok(), "MCP request completed");
+        result
     }
 
     pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
@@ -82,6 +85,7 @@ impl StdioTransport {
         self.notify_tx.send(req).await?;
         Ok(())
     }
+
 
 
 
@@ -114,7 +118,10 @@ impl StdioTransport {
                                 // Ignore notifications and requests from server for now
                             }
                         }
-                        Ok(None) | Err(_) => break, // EOF or error
+                        Ok(None) | Err(_) => {
+                            tracing::warn!("MCP IO loop: connection closed");
+                            break; // EOF or error
+                        }
                     }
                 }
                 

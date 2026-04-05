@@ -177,6 +177,7 @@ impl LlmClient for AnthropicClient {
             let status = response.status();
             let text = response.text().await.unwrap_or_default();
             debug_logger::log_error_response("anthropic", status.as_u16(), &text);
+            tracing::error!(status = status.as_u16(), "Anthropic API error");
             return Err(KezenError::Api(format!(
                 "Anthropic API error {}: {}",
                 status, text
@@ -197,7 +198,9 @@ impl LlmClient for AnthropicClient {
                         "message_start" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => {
+                                    return Some(Err(KezenError::Json(e)));
+                                }
                             };
                             let role = match v["message"]["role"].as_str() {
                                 Some("user") => Role::User,
@@ -219,7 +222,10 @@ impl LlmClient for AnthropicClient {
                         "content_block_start" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Anthropic: failed to parse SSE JSON");
+                                    return Some(Err(KezenError::Json(e)));
+                                }
                             };
                             let index = v["index"].as_u64().unwrap_or(0) as usize;
                             let block_type = v["content_block"]["type"]
@@ -238,7 +244,10 @@ impl LlmClient for AnthropicClient {
                         "content_block_delta" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Anthropic: failed to parse SSE JSON");
+                                    return Some(Err(KezenError::Json(e)));
+                                }
                             };
                             let delta_type = v["delta"]["type"].as_str().unwrap_or("");
                             match delta_type {
@@ -268,7 +277,10 @@ impl LlmClient for AnthropicClient {
                         "content_block_stop" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Anthropic: failed to parse SSE JSON");
+                                    return Some(Err(KezenError::Json(e)));
+                                }
                             };
                             let index = v["index"].as_u64().unwrap_or(0) as usize;
                             // Instead of ContentBlockStop for everything, emit ContentBlockStop so the engine
@@ -280,7 +292,10 @@ impl LlmClient for AnthropicClient {
                         "message_delta" => {
                             let v: serde_json::Value = match serde_json::from_str(&event.data) {
                                 Ok(v) => v,
-                                Err(e) => return Some(Err(KezenError::Json(e))),
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "Anthropic: failed to parse SSE JSON");
+                                    return Some(Err(KezenError::Json(e)));
+                                }
                             };
                             let stop_reason =
                                 v["delta"]["stop_reason"].as_str().map(|s| s.to_string());
@@ -306,7 +321,9 @@ impl LlmClient for AnthropicClient {
                     };
                     Some(parsed)
                 }
-                Err(e) => Some(Err(KezenError::Stream(e.to_string()))),
+                Err(e) => {
+                    Some(Err(KezenError::Stream(e.to_string())))
+                }
             }
         });
 

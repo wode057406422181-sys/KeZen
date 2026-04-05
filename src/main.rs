@@ -1,4 +1,5 @@
 mod api;
+mod audit;
 mod cli;
 mod config;
 mod constants;
@@ -16,21 +17,67 @@ pub mod tools;
 
 use anyhow::Result;
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, Layer};
 
 use crate::cli::{Cli, Command};
 use crate::config::Provider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing/logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+    let cli = Cli::parse();
+
+    // Initialize tracing — file-only.
+    // All operational logs go to ~/.kezen/logs/kezen.log (daily rolling).
+    // No stderr layer: it would corrupt TUI rendering and interleave with REPL output.
+    // For startup diagnostics, use eprintln! directly (before TUI/REPL takes over).
+    let kezen_home = dirs::home_dir()
+        .expect("Cannot determine home directory")
+        .join(".kezen");
+    let log_dir = kezen_home.join("logs");
+
+    // Validate log directories are writable before anything else.
+    // This catches permission issues, full disks, etc. early — if we can't write
+    // logs, we warn the user while we still have access to stderr (before TUI/REPL).
+    for (label, dir) in [
+        ("logs", kezen_home.join("logs")),
+        ("sessions", kezen_home.join("sessions")),
+        ("api_logs", kezen_home.join("api_logs")),
+    ] {
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("  ⚠ Cannot create {} dir ({}): {}", label, dir.display(), e);
+            continue;
+        }
+        // Probe writability with a temp file
+        let probe = dir.join(".write_probe");
+        match std::fs::write(&probe, b"ok") {
+            Ok(_) => { let _ = std::fs::remove_file(&probe); }
+            Err(e) => {
+                eprintln!("  ⚠ {} dir is not writable ({}): {}", label, dir.display(), e);
+            }
+        }
+    }
+
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "kezen.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let file_filter = if cli.verbose {
+        EnvFilter::new("debug")
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("kezen=info"))
+    };
+
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(non_blocking)
+                .with_ansi(false)
+                .with_filter(file_filter),
         )
         .init();
 
-    let cli = Cli::parse();
+    // _guard must live until main() returns; dropping it flushes buffered logs.
 
     // Load config (file + env vars)
     let mut config = config::AppConfig::load()?;
@@ -58,8 +105,11 @@ async fn main() -> Result<()> {
     // Enable API debug logging if --verbose
     if cli.verbose {
         api::debug_logger::enable_debug_logging();
-        eprintln!("  🔍 API debug logging enabled → ~/.kezen/logs/");
+        eprintln!("  🔍 API debug logging enabled → ~/.kezen/api_logs/");
     }
+
+    // Clean up audit logs older than 30 days
+    audit::cleanup_old_audit_logs().await;
 
     let permission_mode = if cli.yes {
         crate::permissions::PermissionMode::DontAsk

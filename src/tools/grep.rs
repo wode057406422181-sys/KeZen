@@ -60,6 +60,7 @@ impl Tool for GrepTool {
             let re = match RegexBuilder::new(&pattern_str).build() {
                 Ok(r) => r,
                 Err(e) => {
+                    tracing::warn!(error = %e, "Grep: invalid regex pattern");
                     return ToolResult::err(format!("Invalid Regex pattern: {}", e));
                 }
             };
@@ -109,7 +110,10 @@ impl Tool for GrepTool {
 
         match result {
             Ok(r) => r,
-            Err(e) => ToolResult::err(format!("Grep task panicked: {}", e)),
+            Err(e) => {
+                tracing::warn!(error = %e, "Grep: task panicked");
+                ToolResult::err(format!("Grep task panicked: {}", e))
+            }
         }
     }
 
