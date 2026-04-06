@@ -172,7 +172,7 @@ pub async fn connect_all_servers() -> Result<McpConnectResult> {
             }
         }
         Ok(None) => {
-            // No mcp.json config file found, nothing to do
+            // No mcp.toml config file found, nothing to do
         }
         Err(e) => {
             warnings.push(format!("[MCP] Failed to load config: {}", e));
