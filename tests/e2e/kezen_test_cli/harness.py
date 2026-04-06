@@ -51,18 +51,11 @@ class KezenTestHarness:
         self._run_compose("build")
     
     async def start(self, build: bool = True):
-        import time
-        t0 = time.time()
-        print(f"[{self.provider}] Starting harness...")
         """Build (if needed), start services, discover gRPC port."""
         if build:
             self.build()
-        t1 = time.time()
-        print(f"[{self.provider}] Build took {t1-t0:.2f}s")
         
         self._run_compose("up", "-d", "--wait")
-        t2 = time.time()
-        print(f"[{self.provider}] Up wait took {t2-t1:.2f}s")
         
         result = self._run_compose("port", "kezen", "50051")
         match = re.search(r":(\d+)", result.stdout.strip())

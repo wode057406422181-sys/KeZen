@@ -9,14 +9,13 @@ target/
 .kezen/
 .env
 
-# Python / Testing
+# Python E2E Testing
 **/__pycache__/
 **/.pytest_cache/
 **/*.pyc
 **/.venv/
 tests/e2e/kezen_test_cli/generated/
-tests/e2e/.venv/
 
-# Docker
+# Project root orchestration files (required for local runs, ignore in containers)
 docker-compose.yml
 Dockerfile

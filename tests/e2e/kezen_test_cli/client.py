@@ -43,6 +43,9 @@ class KezenTestCli:
             yield msg
     
     async def send_message(self, content: str, timeout: float = 30.0) -> TurnResult:
+        # TODO: This blocks and clears stream until "Done". It is not re-entrant.
+        # For multi-turn chats, we may need a global collector task and turn identifiers
+        # from the Engine to correctly route events.
         msg = kezen_pb2.ClientMessage(
             send_message=kezen_pb2.SendMessage(content=content)
         )

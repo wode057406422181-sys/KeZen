@@ -9,6 +9,9 @@ from kezen_test_cli.client import KezenTestCli
 async def harness(request):
     """Session-scoped harness: one per provider (anthropic, openai)."""
     provider = request.param
+    # TODO: This hardcodes smoke.yaml. For provider-specific tests (e.g. Anthropic cache),
+    # we will need separate fixture generators (anthropic_harness, openai_harness) instead
+    # of a session-scoped generic one.
     h = KezenTestHarness(fixture_file="smoke.yaml", provider=provider)
     await h.start()
     yield h

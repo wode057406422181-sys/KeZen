@@ -11,7 +11,7 @@ COPY --from=kezen-src Cargo.toml Cargo.lock build.rs ./
 COPY --from=kezen-src proto/ proto/
 # Dependency layer cache
 RUN mkdir src && echo 'fn main() {}' > src/main.rs \
-    && cargo build --release 2>/dev/null || true
+    && cargo build --release || true
 # Final build
 COPY --from=kezen-src src/ src/
 RUN touch src/main.rs && cargo build --release
@@ -23,7 +23,7 @@ WORKDIR /build
 # Named context "mock-src" -> mock-llm-server directory
 COPY --from=mock-src Cargo.toml Cargo.lock ./
 RUN mkdir src && echo 'fn main() {}' > src/main.rs \
-    && cargo build --release 2>/dev/null || true
+    && cargo build --release || true
 COPY --from=mock-src src/ src/
 RUN touch src/main.rs && cargo build --release
 
