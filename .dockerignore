@@ -1,0 +1,22 @@
+# Rust build artifacts
+target/
+**/target/
+
+# Version control
+.git/
+
+# KeZen specific
+.kezen/
+.env
+
+# Python / Testing
+**/__pycache__/
+**/.pytest_cache/
+**/*.pyc
+**/.venv/
+tests/e2e/kezen_test_cli/generated/
+tests/e2e/.venv/
+
+# Docker
+docker-compose.yml
+Dockerfile

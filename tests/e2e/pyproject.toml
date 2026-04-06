@@ -1,0 +1,24 @@
+[project]
+name = "kezen-e2e"
+version = "0.1.0"
+description = "KeZen E2E test suite via gRPC"
+requires-python = ">=3.10"
+dependencies = [
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "protobuf>=4.25.0",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-timeout>=2.2",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+timeout = 60
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["kezen_test_cli*"]

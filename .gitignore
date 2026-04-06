@@ -24,3 +24,20 @@ target
 # Added by cargo
 
 /target
+
+# Python E2E Testing
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Python gRPC generated stubs
+tests/e2e/kezen_test_cli/generated/*_pb2.py
+tests/e2e/kezen_test_cli/generated/*_pb2_grpc.py
+tests/e2e/kezen_test_cli/generated/__pycache__/
+
+# OS generated files
+.DS_Store

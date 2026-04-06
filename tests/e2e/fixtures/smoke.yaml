@@ -1,0 +1,8 @@
+- kind: Response
+  description: "Smoke test: simple text greeting"
+  blocks:
+    - type: Text
+      text: "Hello from mock! The E2E pipeline is working."
+  usage:
+    input_tokens: 100
+    output_tokens: 20

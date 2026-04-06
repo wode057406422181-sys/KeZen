@@ -1,0 +1,51 @@
+name: kezen-e2e
+
+services:
+  mock-llm-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      additional_contexts:
+        kezen-src: ../..
+        mock-src: ../../mock-llm-server
+    command:
+      - mock-llm-server
+      - serve
+      - --port
+      - "3000"
+      - --script
+      - /fixtures/${FIXTURE_FILE:-smoke.yaml}
+    volumes:
+      - ./fixtures:/fixtures:ro
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/3000' 2>/dev/null"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+    stop_grace_period: 0s
+
+  kezen:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      additional_contexts:
+        kezen-src: ../..
+        mock-src: ../../mock-llm-server
+    command:
+      - kezen
+      - --no-mcp
+      - --yes
+      - serve-grpc
+      - --addr
+      - "0.0.0.0:50051"
+    environment:
+      KEZEN_BASE_URL: "http://mock-llm-server:3000"
+      KEZEN_API_KEY: "mock-test-key"
+      KEZEN_MODEL: "mock-model"
+      KEZEN_PROVIDER: "${KEZEN_PROVIDER:-anthropic}"
+    ports:
+      - "${GRPC_HOST_PORT:-0}:50051"
+    depends_on:
+      mock-llm-server:
+        condition: service_healthy
+    stop_grace_period: 0s
