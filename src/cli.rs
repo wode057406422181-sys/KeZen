@@ -58,15 +58,11 @@ pub enum Command {
         prompt: Option<String>,
     },
 
-    /// Start HTTP server
-    Serve {
-        /// Server port
-        #[arg(long, default_value = "3000")]
-        port: u16,
-
-        /// Server host
-        #[arg(long, default_value = "127.0.0.1")]
-        host: String,
+    /// Start gRPC server
+    ServeGrpc {
+        /// Server bind address string (e.g. 127.0.0.1:50051)
+        #[arg(long, default_value = "127.0.0.1:50051")]
+        addr: String,
     },
 
     /// Initialize project config

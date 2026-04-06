@@ -1,0 +1,119 @@
+syntax = "proto3";
+package kezen;
+
+service KezenAgent {
+  // Bidirectional stream: client sends ClientMessage, server streams ServerMessage
+  rpc StreamSession(stream ClientMessage) returns (stream ServerMessage);
+}
+
+// ═══════ Common Types ═══════
+
+enum RiskLevel {
+  RISK_LEVEL_UNSPECIFIED = 0;
+  RISK_LEVEL_LOW = 1;
+  RISK_LEVEL_MEDIUM = 2;
+  RISK_LEVEL_HIGH = 3;
+}
+
+message TokenUsage {
+  uint64 input_tokens = 1;
+  uint64 output_tokens = 2;
+  uint64 cache_creation_input_tokens = 3;
+  uint64 cache_read_input_tokens = 4;
+}
+
+// ═══════ Client → Server ═══════
+
+message ClientMessage {
+  oneof action {
+    Hello hello = 1;
+    SendMessage send_message = 2;
+    PermissionResponse permission_response = 3;
+    Cancel cancel = 4;
+  }
+}
+
+message Hello {
+  uint32 protocol_version = 1;
+  string client_name = 2;
+}
+
+message SendMessage {
+  string content = 1;
+}
+
+message PermissionResponse {
+  string request_id = 1;
+  oneof decision {
+    Deny deny = 2;
+    AllowOnce allow_once = 3;
+    AlwaysAllow always_allow = 4;
+  }
+}
+
+message Deny {
+  optional string reason = 1;
+}
+message AllowOnce {}
+message AlwaysAllow {
+  uint32 suggestion_index = 1;
+}
+
+message Cancel {}
+
+// ═══════ Server → Client ═══════
+
+message ServerMessage {
+  oneof event {
+    ServerHello server_hello = 1;
+    TextDelta text_delta = 2;
+    ThinkingDelta thinking_delta = 3;
+    CostUpdate cost_update = 4;
+    ToolUseStart tool_use_start = 5;
+    ToolResult tool_result = 6;
+    PermissionRequest permission_request = 7;
+    SlashCommandResult slash_command_result = 8;
+    CompactProgress compact_progress = 9;
+    SkillLoaded skill_loaded = 10;
+    Done done = 11;
+    Error error = 12;
+    Warning warning = 13;
+  }
+}
+
+message ServerHello {
+  uint32 protocol_version = 1;
+  string server_version = 2;
+}
+
+message TextDelta { string text = 1; }
+message ThinkingDelta { string text = 1; }
+message CostUpdate { TokenUsage usage = 1; }
+
+message ToolUseStart {
+  string tool_use_id = 1;
+  string name = 2;
+  string input_json = 3;
+}
+
+message ToolResult {
+  string tool_use_id = 1;
+  string output = 2;
+  bool is_error = 3;
+}
+
+message PermissionRequest {
+  string request_id = 1;
+  optional string tool_use_id = 2;
+  string tool = 3;
+  string description = 4;
+  RiskLevel risk_level = 5;
+  repeated string suggestions = 6;
+}
+
+message SlashCommandResult { string command = 1; string output = 2; }
+message CompactProgress { string message = 1; }
+message SkillLoaded { string name = 1; }
+message Done {}
+message Error { string message = 1; }
+message Warning { string message = 1; }
