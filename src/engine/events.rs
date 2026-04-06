@@ -40,10 +40,6 @@ pub enum EngineEvent {
         /// Suggested always-allow rule content (e.g. "git commit:*")
         suggestion: Option<String>,
     },
-    /// Provide current session snapshot to frontend
-    SessionSnapshotUpdate {
-        snapshot: crate::session::SessionSnapshot,
-    },
     /// Result of a slash command execution
     SlashCommandResult {
         command: String,

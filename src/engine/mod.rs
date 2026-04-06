@@ -4,7 +4,7 @@ pub mod session;
 pub mod slash_commands;
 
 use futures::StreamExt;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
@@ -40,7 +40,7 @@ pub struct KezenEngine {
     /// blocking I/O (e.g. `git rev-parse`) on the async runtime.
     system_prompt: String,
     action_rx: mpsc::Receiver<UserAction>,
-    event_tx: mpsc::Sender<EngineEvent>,
+    event_tx: broadcast::Sender<EngineEvent>,
     registry: ToolRegistry,
     permission_state: PermissionState,
     /// Pre-computed stream options (native search settings etc.)
@@ -56,7 +56,7 @@ impl KezenEngine {
     pub async fn new(
         config: AppConfig,
         action_rx: mpsc::Receiver<UserAction>,
-        event_tx: mpsc::Sender<EngineEvent>,
+        event_tx: broadcast::Sender<EngineEvent>,
         mut registry: ToolRegistry,
         permission_mode: PermissionMode,
     ) -> Result<Self, crate::error::KezenError> {
@@ -98,7 +98,7 @@ impl KezenEngine {
                         tracing::warn!(warning = %warning, "MCP connection warning");
                         let _ = event_tx.send(EngineEvent::Error {
                             message: warning.clone(),
-                        }).await;
+                        });
                     }
                     for tool in result.tools {
                         registry.register(tool);
@@ -108,7 +108,7 @@ impl KezenEngine {
                     tracing::error!(error = %e, "MCP init failed");
                     let _ = event_tx.send(EngineEvent::Error {
                         message: format!("MCP init error: {}", e),
-                    }).await;
+                    });
                 }
             }
         }
@@ -211,7 +211,7 @@ impl KezenEngine {
 
             if iterations >= max_iterations {
                 tracing::warn!("Max tool loop iterations reached");
-                let _ = self.event_tx.send(EngineEvent::Error { message: "Max tool loop iterations reached".into() }).await;
+                let _ = self.event_tx.send(EngineEvent::Error { message: "Max tool loop iterations reached".into() });
                 break;
             }
             iterations += 1;
@@ -280,11 +280,11 @@ impl KezenEngine {
                                         match evt {
                                             StreamEvent::TextDelta { text } => {
                                                 assistant_text.push_str(&text);
-                                                let _ = self.event_tx.send(EngineEvent::TextDelta { text }).await;
+                                                let _ = self.event_tx.send(EngineEvent::TextDelta { text });
                                             }
                                             StreamEvent::ThinkingDelta { text } => {
                                                 thinking_text.push_str(&text);
-                                                let _ = self.event_tx.send(EngineEvent::ThinkingDelta { text }).await;
+                                                let _ = self.event_tx.send(EngineEvent::ThinkingDelta { text });
                                             }
                                             StreamEvent::ToolUseStart { id, name } => {
                                                 current_tool = Some((id, name, String::new()));
@@ -297,7 +297,7 @@ impl KezenEngine {
                                             StreamEvent::ToolUseInputDone | StreamEvent::ContentBlockStop { .. } => {
                                                 if let Some((id, name, input_str)) = current_tool.take() {
                                                     let input = serde_json::from_str(&if input_str.is_empty() { "{}".to_string() } else { input_str.clone() }).unwrap_or(serde_json::json!({}));
-                                                    let _ = self.event_tx.send(EngineEvent::ToolUseStart { id: id.clone(), name: name.clone(), input: input.clone() }).await;
+                                                    let _ = self.event_tx.send(EngineEvent::ToolUseStart { id: id.clone(), name: name.clone(), input: input.clone() });
                                                     pending_tools.push((id, name, input));
                                                 }
                                             }
@@ -314,7 +314,7 @@ impl KezenEngine {
                                             StreamEvent::MessageStop => {
                                                 if let Some((id, name, input_str)) = current_tool.take() {
                                                     let input = serde_json::from_str(&if input_str.is_empty() { "{}".to_string() } else { input_str.clone() }).unwrap_or(serde_json::json!({}));
-                                                    let _ = self.event_tx.send(EngineEvent::ToolUseStart { id: id.clone(), name: name.clone(), input: input.clone() }).await;
+                                                    let _ = self.event_tx.send(EngineEvent::ToolUseStart { id: id.clone(), name: name.clone(), input: input.clone() });
                                                     pending_tools.push((id, name, input));
                                                 }
                                                 break;
@@ -328,7 +328,7 @@ impl KezenEngine {
                                     }
                                     Some(Err(e)) => {
                                         tracing::error!(error = %e, "Stream error");
-                                        let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
+                                        let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() });
                                         stream_interrupted = true;
                                         break;
                                     }
@@ -346,11 +346,11 @@ impl KezenEngine {
                         turn_usage.input_tokens,
                         turn_usage.output_tokens,
                     );
-                    let _ = self.event_tx.send(EngineEvent::CostUpdate(turn_usage)).await;
+                    let _ = self.event_tx.send(EngineEvent::CostUpdate(turn_usage));
 
                     if stream_interrupted {
-                        let _ = self.event_tx.send(EngineEvent::Done).await;
-                        let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+                        let _ = self.event_tx.send(EngineEvent::Done);
+                        self.persist_session_snapshot().await;
                         break;
                     }
 
@@ -394,8 +394,8 @@ impl KezenEngine {
 
                     // No tools requested: the LLM is done, exit the loop.
                     if pending_tools.is_empty() {
-                        let _ = self.event_tx.send(EngineEvent::Done).await;
-                        let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+                        let _ = self.event_tx.send(EngineEvent::Done);
+                        self.persist_session_snapshot().await;
                         break;
                     }
 
@@ -496,7 +496,7 @@ impl KezenEngine {
                                     description,
                                     risk_level,
                                     suggestion: suggestion.clone(),
-                                }).await;
+                                });
 
                                 // Wait for UserAction::PermissionResponse
                                 let mut was_allowed = false;
@@ -526,7 +526,7 @@ impl KezenEngine {
                                             // Interleave message not allowed while asking permission
                                             let _ = self.event_tx.send(EngineEvent::Error { 
                                                 message: "Cannot send message while waiting for permission approval".into() 
-                                            }).await;
+                                            });
                                         }
                                     }
                                 }
@@ -623,7 +623,7 @@ impl KezenEngine {
 
                             let _ = self.event_tx.send(EngineEvent::SkillLoaded {
                                 name: loaded_name.clone(),
-                            }).await;
+                            });
 
                             tracing::info!(skill = %loaded_name, "Skill loaded, injecting pseudo-instruction");
 
@@ -640,7 +640,7 @@ impl KezenEngine {
                                 id: id.clone(),
                                 output: result.content.clone(),
                                 is_error: result.is_error,
-                            }).await;
+                            });
 
                             tool_results.push(ContentBlock::ToolResult {
                                 tool_use_id: id,
@@ -653,7 +653,7 @@ impl KezenEngine {
                     // Report extraction usage to session and frontend
                     if extraction_usage_total.input_tokens > 0 || extraction_usage_total.output_tokens > 0 {
                         self.session.update_usage(&extraction_usage_total);
-                        let _ = self.event_tx.send(EngineEvent::CostUpdate(extraction_usage_total)).await;
+                        let _ = self.event_tx.send(EngineEvent::CostUpdate(extraction_usage_total));
                     }
 
                     // Feed tool results back as a "user" message so the LLM
@@ -676,14 +676,14 @@ impl KezenEngine {
                 Err(e) => {
                     if self.runtime_cache_enabled && e.to_string().to_lowercase().contains("cache_control") {
                         tracing::warn!("API does not support cache_control. Auto-disabling cache and retrying...");
-                        let _ = self.event_tx.send(EngineEvent::Warning("Prompt caching disabled automatically (not supported by API).".into())).await;
+                        let _ = self.event_tx.send(EngineEvent::Warning("Prompt caching disabled automatically (not supported by API).".into()));
                         self.runtime_cache_enabled = false;
                         continue;
                     }
                     tracing::error!(error = %e, "LLM stream creation failed");
-                    let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() }).await;
-                    let _ = self.event_tx.send(EngineEvent::Done).await;
-                    let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+                    let _ = self.event_tx.send(EngineEvent::Error { message: e.to_string() });
+                    let _ = self.event_tx.send(EngineEvent::Done);
+                    self.persist_session_snapshot().await;
                     break;
                 }
             }
@@ -731,15 +731,15 @@ impl KezenEngine {
                 let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                     command: "/help".into(),
                     output,
-                }).await;
+                });
             }
             "clear" => {
                 self.session.clear();
                 let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                     command: "/clear".into(),
                     output: "Chat history cleared.".into(),
-                }).await;
-                let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+                });
+                self.persist_session_snapshot().await;
             }
             "compact" => {
                 // Fix #7: Pass the user-supplied topic to compact_context
@@ -751,7 +751,7 @@ impl KezenEngine {
                     let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                         command: "/model".into(),
                         output: format!("Current model: {}. Usage: /model <name>", self.config.model.as_deref().unwrap_or("none")),
-                    }).await;
+                    });
                 } else {
                     self.config.model = Some(args.to_string());
                     match api::create_client(&self.config) {
@@ -763,14 +763,14 @@ impl KezenEngine {
                             let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                 command: "/model".into(),
                                 output: format!("Model switched to {}", args),
-                            }).await;
+                            });
                         }
                         Err(e) => {
                             tracing::warn!(model = %args, error = %e, "Model switch failed");
                             let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                 command: "/model".into(),
                                 output: format!("Failed to switch model: {}", e),
-                            }).await;
+                            });
                         }
                     }
                 }
@@ -783,7 +783,7 @@ impl KezenEngine {
                 let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                     command: "/cost".into(),
                     output,
-                }).await;
+                });
             }
             "context" => {
                 let git_ctx = self.git_watcher.cache.read().await.clone();
@@ -815,7 +815,7 @@ impl KezenEngine {
                 let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                     command: "/context".into(),
                     output,
-                }).await;
+                });
             }
             "resume" => {
                 match crate::session::list_sessions().await {
@@ -829,20 +829,20 @@ impl KezenEngine {
                             let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                 command: "/resume".into(),
                                 output: out,
-                            }).await;
+                            });
                         } else {
                             if let Some(s) = sessions.into_iter().find(|s| s.id == args) {
                                 self.session.restore(s);
                                 let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                     command: "/resume".into(),
                                     output: format!("Resumed session {}", args),
-                                }).await;
-                                let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+                                });
+                                self.persist_session_snapshot().await;
                             } else {
                                 let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                     command: "/resume".into(),
                                     output: format!("Session {} not found.", args),
-                                }).await;
+                                });
                             }
                         }
                     }
@@ -851,7 +851,7 @@ impl KezenEngine {
                         let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                             command: "/resume".into(),
                             output: format!("Failed to list sessions: {}", e),
-                        }).await;
+                        });
                     }
                 }
             }
@@ -872,14 +872,14 @@ impl KezenEngine {
                         Ok(wrapped) => {
                             let _ = self.event_tx.send(EngineEvent::SkillLoaded {
                                 name: cmd.to_string(),
-                            }).await;
+                            });
 
                             tracing::info!(skill = %cmd, "Skill invoked via slash command");
 
                             let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                 command: format!("/{}", cmd),
                                 output: "Skill invoked directly.".to_string(),
-                            }).await;
+                            });
 
                             // Audit: log skill invocation metadata, not full content.
                             // Convention §10.5: "log the path, not the content".
@@ -903,16 +903,27 @@ impl KezenEngine {
                             let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                 command: format!("/{}", cmd),
                                 output: format!("Failed to load skill: {}", e),
-                            }).await;
+                            });
                         }
                     }
                 } else {
                     let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                         command: format!("/{}", cmd),
                         output: format!("Unknown command: /{}", cmd),
-                    }).await;
+                    });
                 }
             }
+        }
+    }
+
+    /// Persist the current session snapshot to disk.
+    ///
+    /// Snapshot persistence is the Engine's responsibility (not the frontends'),
+    /// ensuring a single writer regardless of how many frontends are subscribed.
+    async fn persist_session_snapshot(&self) {
+        let snapshot = self.session.snapshot();
+        if let Err(e) = crate::session::save_snapshot(&snapshot).await {
+            tracing::warn!(error = %e, "Failed to persist session snapshot");
         }
     }
 
@@ -924,7 +935,7 @@ impl KezenEngine {
 
         let _ = self.event_tx.send(EngineEvent::CompactProgress {
             message: "Compacting context...".into(),
-        }).await;
+        });
 
         let mut messages_to_summarize = self.session.messages().to_vec();
         let mut prompt = compact::compact_prompt();
@@ -964,7 +975,7 @@ impl KezenEngine {
                             for w in warnings {
                                 let _ = self.event_tx.send(EngineEvent::CompactProgress {
                                     message: format!("Warning: {}", w),
-                                }).await;
+                                });
                             }
 
                             let summary_msg = Message {
@@ -1005,8 +1016,8 @@ impl KezenEngine {
 
                             let _ = self.event_tx.send(EngineEvent::CompactProgress {
                                 message: "Context compacted.".into(),
-                            }).await;
-                            let _ = self.event_tx.send(EngineEvent::SessionSnapshotUpdate { snapshot: self.session.snapshot() }).await;
+                            });
+                            self.persist_session_snapshot().await;
                             return;
                         }
                         Err(reason) => {
@@ -1023,7 +1034,7 @@ impl KezenEngine {
             if attempt < MAX_COMPACT_RETRIES {
                 let _ = self.event_tx.send(EngineEvent::CompactProgress {
                     message: format!("Compact attempt {} failed, retrying...", attempt),
-                }).await;
+                });
             }
         }
 
@@ -1032,6 +1043,6 @@ impl KezenEngine {
         tracing::error!(error = %error_msg, "Compact failed after all retries");
         let _ = self.event_tx.send(EngineEvent::CompactProgress {
             message: format!("Failed to compact after {} attempts: {}", MAX_COMPACT_RETRIES, error_msg),
-        }).await;
+        });
     }
 }

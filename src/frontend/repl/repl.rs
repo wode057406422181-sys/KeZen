@@ -2,7 +2,7 @@ use std::io::Write;
 
 use colored::Colorize;
 use rustyline::DefaultEditor;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::config::AppConfig;
 use crate::engine::events::{EngineEvent, UserAction};
@@ -16,7 +16,7 @@ use super::render::{print_ai_prefix, print_cost, print_error, print_thinking, pr
 pub async fn run_repl(
     config: AppConfig,
     action_tx: mpsc::Sender<UserAction>,
-    mut event_rx: mpsc::Receiver<EngineEvent>,
+    mut event_rx: broadcast::Receiver<EngineEvent>,
     initial_prompt: Option<String>,
 ) -> anyhow::Result<()> {
     print_welcome(&config);
@@ -107,7 +107,7 @@ pub async fn run_repl(
 /// During streaming, Ctrl+C sends a Cancel action to the engine.
 async fn handle_engine_events(
     action_tx: &mpsc::Sender<UserAction>,
-    event_rx: &mut mpsc::Receiver<EngineEvent>,
+    event_rx: &mut broadcast::Receiver<EngineEvent>,
     session_in: &mut u64,
     session_out: &mut u64,
     session_cache_creation: &mut u64,
@@ -127,16 +127,16 @@ async fn handle_engine_events(
                 // Continue waiting for the Done event from engine
             }
 
-            evt_opt = event_rx.recv() => {
-                match evt_opt {
-                    Some(EngineEvent::ThinkingDelta { text }) => {
+            result = event_rx.recv() => {
+                match result {
+                    Ok(EngineEvent::ThinkingDelta { text }) => {
                         if !in_thinking {
                             in_thinking = true;
                         }
                         print_thinking(&text);
                         let _ = std::io::stdout().flush();
                     }
-                    Some(EngineEvent::TextDelta { text }) => {
+                    Ok(EngineEvent::TextDelta { text }) => {
                         if in_thinking {
                             in_thinking = false;
                             // Newline to separate thinking from response
@@ -146,31 +146,29 @@ async fn handle_engine_events(
                         print!("{}", text);
                         let _ = std::io::stdout().flush();
                     }
-                    Some(EngineEvent::CostUpdate(usage)) => {
+                    Ok(EngineEvent::CostUpdate(usage)) => {
                         *session_in = usage.input_tokens;
                         *session_out = usage.output_tokens;
                         *session_cache_creation = usage.cache_creation_input_tokens;
                         *session_cache_read = usage.cache_read_input_tokens;
                         print_cost(&usage);
                     }
-                    Some(EngineEvent::SessionSnapshotUpdate { snapshot }) => {
-                        let _ = crate::session::save_snapshot(&snapshot).await;
-                    }
-                    Some(EngineEvent::Error { message }) => {
+
+                    Ok(EngineEvent::Error { message }) => {
                         print_error(&message);
                         break;
                     }
-                    Some(EngineEvent::ToolUseStart { id: _, name, input }) => {
+                    Ok(EngineEvent::ToolUseStart { id: _, name, input }) => {
                         if in_thinking {
                             in_thinking = false;
                             println!();
                         }
                         print_tool_use(&name, &input);
                     }
-                    Some(EngineEvent::ToolResult { id: _, output, is_error }) => {
+                    Ok(EngineEvent::ToolResult { id: _, output, is_error }) => {
                         print_tool_result(&output, is_error);
                     }
-                    Some(EngineEvent::PermissionRequest { id, tool, description, risk_level, suggestion }) => {
+                    Ok(EngineEvent::PermissionRequest { id, tool, description, risk_level, suggestion }) => {
                         if in_thinking {
                             in_thinking = false;
                             println!();
@@ -220,21 +218,21 @@ async fn handle_engine_events(
                             always_allow,
                         }).await;
                     }
-                    Some(EngineEvent::Done) => {
+                    Ok(EngineEvent::Done) => {
                         println!(); // Final newline
                         break;
                     }
-                    Some(EngineEvent::SlashCommandResult { command, output }) => {
+                    Ok(EngineEvent::SlashCommandResult { command, output }) => {
                         println!("  {} {}\n{}", "ℹ".blue(), command.dimmed(), output);
                         break;
                     }
-                    Some(EngineEvent::CompactProgress { message }) => {
+                    Ok(EngineEvent::CompactProgress { message }) => {
                         println!("  {} {}", "🗜".magenta(), message.dimmed());
                     }
-                    Some(EngineEvent::Warning(message)) => {
+                    Ok(EngineEvent::Warning(message)) => {
                         println!("  {} {}", "⚠".yellow(), message.yellow());
                     }
-                    Some(EngineEvent::SkillLoaded { name }) => {
+                    Ok(EngineEvent::SkillLoaded { name }) => {
                         if in_thinking {
                             in_thinking = false;
                             println!();
@@ -242,7 +240,11 @@ async fn handle_engine_events(
                         println!("  {} {} {}", "⚡".yellow(), "Skill invoked".bold(), format!("[{}]", name).dimmed());
                         let _ = std::io::stdout().flush();
                     }
-                    None => {
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("REPL event receiver lagged, skipped {} events", n);
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
                         // Channel closed, engine died
                         print_error("Engine disconnected unexpectedly.");
                         break;

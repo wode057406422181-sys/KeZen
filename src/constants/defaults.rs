@@ -71,3 +71,15 @@ pub const MAX_TOOL_RESULT_CONTEXT_TOKENS: u64 = 50_000;
 
 /// Background git context refresh interval (seconds)
 pub const GIT_WATCHER_INTERVAL_SECS: u64 = 30;
+
+// ── Channel Buffer Sizes ────────────────────────────────────────────────────
+
+/// Buffer size for the `UserAction` mpsc channel (Frontend → Engine).
+/// Uses backpressure: sender awaits if full.
+pub const ACTION_CHANNEL_BUFFER: usize = 32;
+
+/// Buffer size for the `EngineEvent` broadcast channel (Engine → Frontends).
+/// No backpressure: oldest messages are overwritten when full (receivers get `Lagged`).
+/// gRPC adapters should implement their own per-client buffering rather than
+/// relying on this value.
+pub const EVENT_CHANNEL_BUFFER: usize = 64;

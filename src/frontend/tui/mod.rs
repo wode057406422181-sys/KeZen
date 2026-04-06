@@ -8,9 +8,10 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::config::AppConfig;
+use crate::constants::defaults::{ACTION_CHANNEL_BUFFER, EVENT_CHANNEL_BUFFER};
 use crate::engine::KezenEngine;
 use crate::engine::events::{EngineEvent, UserAction};
 use crate::tools::registry::create_default_registry;
@@ -26,8 +27,8 @@ pub async fn run_tui(
     permission_mode: crate::permissions::PermissionMode,
 ) -> anyhow::Result<()> {
     // ── 1. Engine channels ──────────────────────────────────────────────
-    let (action_tx, action_rx) = mpsc::channel::<UserAction>(32);
-    let (event_tx, event_rx) = mpsc::channel::<EngineEvent>(32);
+    let (action_tx, action_rx) = mpsc::channel::<UserAction>(ACTION_CHANNEL_BUFFER);
+    let (event_tx, event_rx) = broadcast::channel::<EngineEvent>(EVENT_CHANNEL_BUFFER);
 
     // ── 2. Start Engine in background ──────────────────────────────────
     let registry = create_default_registry(&config);
