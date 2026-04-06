@@ -1,9 +1,10 @@
 pub mod render;
 pub mod repl;
 
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::config::AppConfig;
+use crate::constants::defaults::{ACTION_CHANNEL_BUFFER, EVENT_CHANNEL_BUFFER};
 use crate::engine::KezenEngine;
 use crate::engine::events::{EngineEvent, UserAction};
 
@@ -15,8 +16,8 @@ pub async fn run_cli(
     prompt: Option<String>,
     permission_mode: crate::permissions::PermissionMode,
 ) -> anyhow::Result<()> {
-    let (action_tx, action_rx) = mpsc::channel::<UserAction>(32);
-    let (event_tx, event_rx) = mpsc::channel::<EngineEvent>(32);
+    let (action_tx, action_rx) = mpsc::channel::<UserAction>(ACTION_CHANNEL_BUFFER);
+    let (event_tx, event_rx) = broadcast::channel::<EngineEvent>(EVENT_CHANNEL_BUFFER);
 
     let registry = create_default_registry(&config);
     let engine = KezenEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode).await?;
