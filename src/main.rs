@@ -11,7 +11,6 @@ mod frontend;
 mod mcp;
 mod permissions;
 mod prompts;
-mod server;
 mod session;
 mod skills;
 pub mod tools;
@@ -119,7 +118,23 @@ async fn main() -> Result<()> {
     };
 
     match cli.command {
-        Some(Command::Serve { port, host }) => server::run_server(config, host, port).await,
+        Some(Command::ServeGrpc { addr }) => {
+            let socket_addr = addr.parse().unwrap_or_else(|e| {
+                tracing::error!("Invalid address {}: {}", addr, e);
+                std::process::exit(1);
+            });
+            let (action_tx, action_rx) = tokio::sync::mpsc::channel(crate::constants::defaults::ACTION_CHANNEL_BUFFER);
+            let (event_tx, _) = tokio::sync::broadcast::channel(crate::constants::defaults::EVENT_CHANNEL_BUFFER);
+
+            let registry = crate::tools::registry::create_default_registry(&config);
+            let engine = engine::KezenEngine::new(config.clone(), action_rx, event_tx.clone(), registry, permission_mode).await?;
+
+            tokio::spawn(async move {
+                engine.run().await;
+            });
+
+            frontend::grpc::start_grpc_server(socket_addr, action_tx, event_tx).await
+        }
         Some(Command::Chat { prompt }) => {
             // Chat subcommand: use its --prompt or fall back to top-level --prompt
             let effective_prompt = prompt.or(cli.prompt);

@@ -56,7 +56,7 @@ pub enum EngineEvent {
 }
 
 /// Actions sent from Frontend to Engine
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum UserAction {
     /// User sends a chat message
     SendMessage { content: String },
