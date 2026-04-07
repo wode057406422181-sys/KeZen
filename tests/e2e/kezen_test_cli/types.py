@@ -32,6 +32,22 @@ class SlashCommandResult:
     output: str = ""
 
 @dataclass
+class HistoryBlock:
+    """A single content block from a restored session message."""
+    block_type: str = ""   # "text", "thinking", "tool_use", "tool_result"
+    text: str = ""
+    tool_name: str = ""
+    tool_input_json: str = ""
+    tool_use_id: str = ""
+    is_error: bool = False
+
+@dataclass
+class RestoredMessage:
+    """A single message from a restored session."""
+    role: str = ""
+    blocks: list[HistoryBlock] = field(default_factory=list)
+
+@dataclass
 class TurnResult:
     """Structured result of one message turn (send_message -> Done)."""
     text: str = ""
@@ -47,3 +63,5 @@ class TurnResult:
     slash_command_results: list[SlashCommandResult] = field(default_factory=list)
     compact_progress: list[str] = field(default_factory=list)
     skills_loaded: list[str] = field(default_factory=list)
+    # P-2: Session restore
+    restored_messages: list[RestoredMessage] = field(default_factory=list)

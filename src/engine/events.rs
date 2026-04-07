@@ -53,6 +53,11 @@ pub enum EngineEvent {
     SkillLoaded {
         name: String,
     },
+    /// Session has been restored from a snapshot — contains full conversation history.
+    /// Frontends should replay these messages to show the user what happened before.
+    SessionRestored {
+        messages: Vec<crate::api::types::Message>,
+    },
 }
 
 /// Actions sent from Frontend to Engine

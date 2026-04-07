@@ -177,6 +177,10 @@ fn engine_event_to_server_message(event: EngineEvent) -> ServerMessage {
         }),
         EngineEvent::CompactProgress { message } => Event::CompactProgress(kezen_proto::CompactProgress { message }),
         EngineEvent::SkillLoaded { name } => Event::SkillLoaded(kezen_proto::SkillLoaded { name }),
+        EngineEvent::SessionRestored { messages } => {
+            let json = serde_json::to_string(&messages).unwrap_or_else(|_| "[]".to_string());
+            Event::SessionRestored(kezen_proto::SessionRestored { messages_json: json })
+        }
         EngineEvent::Done => Event::Done(kezen_proto::Done {}),
         EngineEvent::Error { message } => Event::Error(kezen_proto::Error { message }),
         EngineEvent::Warning(message) => Event::Warning(kezen_proto::Warning { message }),
@@ -427,6 +431,30 @@ mod tests {
         match msg.event {
             Some(kezen_proto::server_message::Event::Warning(w)) => assert_eq!(w.message, "rate limit"),
             _ => panic!("Expected Warning variant"),
+        }
+
+        // SessionRestored
+        let event = EngineEvent::SessionRestored {
+            messages: vec![
+                crate::api::types::Message {
+                    role: crate::api::types::Role::User,
+                    content: vec![crate::api::types::ContentBlock::Text { text: "hello".into() }],
+                },
+                crate::api::types::Message {
+                    role: crate::api::types::Role::Assistant,
+                    content: vec![crate::api::types::ContentBlock::Text { text: "world".into() }],
+                },
+            ],
+        };
+        let msg = engine_event_to_server_message(event);
+        match msg.event {
+            Some(kezen_proto::server_message::Event::SessionRestored(sr)) => {
+                assert!(!sr.messages_json.is_empty());
+                // Verify it's valid JSON containing our messages
+                let parsed: Vec<serde_json::Value> = serde_json::from_str(&sr.messages_json).unwrap();
+                assert_eq!(parsed.len(), 2);
+            }
+            _ => panic!("Expected SessionRestored variant"),
         }
     }
 }

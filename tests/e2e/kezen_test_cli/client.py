@@ -1,7 +1,7 @@
 import asyncio
 import grpc
 from .generated import kezen_pb2, kezen_pb2_grpc
-from .types import TurnResult, ToolCall, ToolResult, PermissionRequestInfo, TokenUsage, SlashCommandResult
+from .types import TurnResult, ToolCall, ToolResult, PermissionRequestInfo, TokenUsage, SlashCommandResult, RestoredMessage, HistoryBlock
 
 class KezenTestCli:
     """gRPC bidirectional stream client for testing KeZen Engine."""
@@ -128,6 +128,28 @@ class KezenTestCli:
                         result.warnings.append(server_msg.warning.message)
                     case "done":
                         return
+                    case "session_restored":
+                        import json
+                        sr = server_msg.session_restored
+                        try:
+                            msgs = json.loads(sr.messages_json)
+                            for m in msgs:
+                                blocks = []
+                                for cb in m.get("content", []):
+                                    cb_type = cb.get("type", "")
+                                    blocks.append(HistoryBlock(
+                                        block_type=cb_type,
+                                        text=cb.get("text", cb.get("thinking", cb.get("content", ""))),
+                                        tool_name=cb.get("name", ""),
+                                        tool_input_json=json.dumps(cb.get("input", {})) if "input" in cb else "",
+                                        tool_use_id=cb.get("id", cb.get("tool_use_id", "")),
+                                        is_error=cb.get("is_error", False),
+                                    ))
+                                result.restored_messages.append(
+                                    RestoredMessage(role=m.get("role", ""), blocks=blocks)
+                                )
+                        except (json.JSONDecodeError, KeyError):
+                            pass
                     case _:
                         pass
         

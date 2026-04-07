@@ -78,6 +78,7 @@ message ServerMessage {
     Done done = 11;
     Error error = 12;
     Warning warning = 13;
+    SessionRestored session_restored = 14;
   }
 }
 
@@ -117,3 +118,13 @@ message SkillLoaded { string name = 1; }
 message Done {}
 message Error { string message = 1; }
 message Warning { string message = 1; }
+
+// ═══════ Session Restore ═══════
+
+// Carries the full conversation history as a JSON-serialized array of Messages.
+// Reuses the Rust-side serde types (api::types::Message) rather than
+// duplicating ContentBlock variants in proto.
+message SessionRestored {
+  string messages_json = 1;
+}
+

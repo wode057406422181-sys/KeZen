@@ -10,12 +10,16 @@ use crate::config::AppConfig;
 /// generate the combined JSON schema array sent with each API call.
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
+    /// Alias → canonical name mapping (e.g. "Read" → "FileRead").
+    /// When `get()` misses on the primary map it falls back here.
+    aliases: HashMap<String, String>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
+            aliases: HashMap::new(),
         }
     }
 
@@ -24,9 +28,18 @@ impl ToolRegistry {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
-    /// Look up a tool by name. Returns `None` if not registered.
+    /// Register an alias that maps to a canonical tool name.
+    /// When `get(alias)` is called, it transparently returns the canonical tool.
+    pub fn register_alias(&mut self, alias: impl Into<String>, canonical: impl Into<String>) {
+        self.aliases.insert(alias.into(), canonical.into());
+    }
+
+    /// Look up a tool by name. Falls back to alias mapping if the exact name
+    /// is not found. Returns `None` only if neither matches.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools.get(name).cloned()
+        self.tools.get(name).cloned().or_else(|| {
+            self.aliases.get(name).and_then(|canonical| self.tools.get(canonical).cloned())
+        })
     }
 
     /// Generate the JSON tool schemas array for the LLM API request.
@@ -88,6 +101,11 @@ pub fn create_default_registry(config: &AppConfig) -> ToolRegistry {
             super::web_fetch::WebFetchTool::new(Some(config.clone())),
         ));
     }
+
+    // Register common aliases so that models emitting "Read" / "Write"
+    // instead of "FileRead" / "FileWrite" still resolve correctly.
+    registry.register_alias("Read", "FileRead");
+    registry.register_alias("Write", "FileWrite");
 
     registry
 }
@@ -241,6 +259,47 @@ mod tests {
         registry.register(Arc::new(crate::tools::bash::BashTool));
         registry.register(Arc::new(crate::tools::bash::BashTool));
         assert_eq!(registry.schemas().len(), 1);
+    }
+
+    // ── Alias tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_alias_resolves_to_canonical() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(crate::tools::file_read::FileReadTool));
+        registry.register_alias("Read", "FileRead");
+        assert!(registry.get("Read").is_some());
+        // The underlying tool should be the same
+        assert_eq!(registry.get("Read").unwrap().name(), "FileRead");
+    }
+
+    #[test]
+    fn test_alias_returns_none_for_missing_canonical() {
+        let mut registry = ToolRegistry::new();
+        registry.register_alias("Read", "FileRead");
+        // No tool "FileRead" registered, alias should return None
+        assert!(registry.get("Read").is_none());
+    }
+
+    #[test]
+    fn test_exact_name_takes_precedence_over_alias() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(crate::tools::bash::BashTool));
+        // Even if there's an alias named "Bash", exact match wins
+        registry.register_alias("Bash", "FileRead");
+        assert_eq!(registry.get("Bash").unwrap().name(), "Bash");
+    }
+
+    #[test]
+    fn test_default_registry_aliases() {
+        let config = AppConfig::default();
+        let registry = create_default_registry(&config);
+        // Read → FileRead
+        assert!(registry.get("Read").is_some());
+        assert_eq!(registry.get("Read").unwrap().name(), "FileRead");
+        // Write → FileWrite
+        assert!(registry.get("Write").is_some());
+        assert_eq!(registry.get("Write").unwrap().name(), "FileWrite");
     }
 
     #[test]
