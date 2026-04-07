@@ -346,6 +346,73 @@ impl App {
                     self.scroll_to_bottom();
                 }
             }
+            EngineEvent::SessionRestored { messages } => {
+                // Push a separator header
+                self.messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "📜 ── Restored session history ──".to_string(),
+                });
+                // Convert each restored message to a ChatMessage
+                for msg in &messages {
+                    let role = match msg.role {
+                        crate::api::types::Role::User => MessageRole::User,
+                        crate::api::types::Role::Assistant => MessageRole::Assistant,
+                        crate::api::types::Role::System => MessageRole::System,
+                    };
+                    let mut text_parts = Vec::new();
+                    for block in &msg.content {
+                        match block {
+                            crate::api::types::ContentBlock::Text { text } => {
+                                let display = if text.len() > 500 {
+                                    format!("{}...", &text[..500])
+                                } else {
+                                    text.clone()
+                                };
+                                text_parts.push(display);
+                            }
+                            crate::api::types::ContentBlock::Thinking { thinking } => {
+                                let preview = if thinking.len() > 100 {
+                                    format!("💭 {}...", &thinking[..100])
+                                } else {
+                                    format!("💭 {}", thinking)
+                                };
+                                text_parts.push(preview);
+                            }
+                            crate::api::types::ContentBlock::ToolUse { name, input, .. } => {
+                                let input_str = serde_json::to_string(input).unwrap_or_default();
+                                let preview = if input_str.len() > 80 {
+                                    format!("🔧 {} {}...", name, &input_str[..80])
+                                } else {
+                                    format!("🔧 {} {}", name, input_str)
+                                };
+                                text_parts.push(preview);
+                            }
+                            crate::api::types::ContentBlock::ToolResult { content, is_error, .. } => {
+                                let symbol = if *is_error { "✖" } else { "✓" };
+                                let preview = if content.len() > 100 {
+                                    format!("{} {}...", symbol, &content[..100])
+                                } else {
+                                    format!("{} {}", symbol, content)
+                                };
+                                text_parts.push(preview);
+                            }
+                        }
+                    }
+                    if !text_parts.is_empty() {
+                        self.messages.push(ChatMessage {
+                            role,
+                            content: text_parts.join("\n"),
+                        });
+                    }
+                }
+                self.messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "── End of restored history ──".to_string(),
+                });
+                if self.auto_scroll {
+                    self.scroll_to_bottom();
+                }
+            }
         }
     }
 

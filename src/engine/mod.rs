@@ -184,7 +184,7 @@ impl KezenEngine {
         });
 
         let mut iterations = 0;
-        let max_iterations = 25;
+        let max_iterations = crate::constants::defaults::MAX_AGENTIC_LOOP_ITERATIONS;
 
         // Agentic loop: keeps calling the LLM until it stops requesting tools
         // or we hit the safety cap.
@@ -838,6 +838,10 @@ impl KezenEngine {
                         } else {
                             if let Some(s) = sessions.into_iter().find(|s| s.id == args) {
                                 self.session.restore(s);
+                                // Send full conversation history so frontends can display it
+                                let _ = self.event_tx.send(EngineEvent::SessionRestored {
+                                    messages: self.session.messages().to_vec(),
+                                });
                                 let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                                     command: "/resume".into(),
                                     output: format!("Resumed session {}", args),

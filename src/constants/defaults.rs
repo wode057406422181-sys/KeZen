@@ -83,3 +83,10 @@ pub const ACTION_CHANNEL_BUFFER: usize = 32;
 /// gRPC adapters should implement their own per-client buffering rather than
 /// relying on this value.
 pub const EVENT_CHANNEL_BUFFER: usize = 64;
+
+// ── Agentic Loop ────────────────────────────────────────────────────────────
+
+/// Maximum iterations of the agentic loop per user message.
+/// Each iteration is one LLM call; tool-use responses loop back automatically.
+/// Raised from 25 to 200 to support complex multi-step tasks.
+pub const MAX_AGENTIC_LOOP_ITERATIONS: usize = 200;

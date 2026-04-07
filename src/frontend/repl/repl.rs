@@ -7,7 +7,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::config::AppConfig;
 use crate::engine::events::{EngineEvent, UserAction};
 
-use super::render::{print_ai_prefix, print_cost, print_error, print_thinking, print_welcome, print_tool_use, print_tool_result};
+use super::render::{print_ai_prefix, print_cost, print_error, print_thinking, print_welcome, print_tool_use, print_tool_result, render_markdown, render_restored_messages};
 
 /// Run the interactive REPL loop.
 ///
@@ -114,6 +114,11 @@ async fn handle_engine_events(
     session_cache_read: &mut u64,
 ) {
     let mut in_thinking = false;
+    // Accumulate the last round's assistant text for markdown rendering.
+    // We track it per-round: each time a new ToolUse starts (meaning a new
+    // agentic loop iteration), we clear the buffer. Only the final round's
+    // text (the one that ends with Done, not tool calls) gets rendered.
+    let mut last_round_text = String::new();
     print_ai_prefix();
 
     loop {
@@ -143,6 +148,7 @@ async fn handle_engine_events(
                             println!();
                             print_ai_prefix();
                         }
+                        last_round_text.push_str(&text);
                         print!("{}", text);
                         let _ = std::io::stdout().flush();
                     }
@@ -163,6 +169,9 @@ async fn handle_engine_events(
                             in_thinking = false;
                             println!();
                         }
+                        // New agentic loop iteration starting — clear last round text.
+                        // The text from tool-call iterations is not the final answer.
+                        last_round_text.clear();
                         print_tool_use(&name, &input);
                     }
                     Ok(EngineEvent::ToolResult { id: _, output, is_error }) => {
@@ -219,11 +228,19 @@ async fn handle_engine_events(
                         }).await;
                     }
                     Ok(EngineEvent::Done) => {
-                        println!(); // Final newline
+                        // Markdown rendering: if the last round produced text,
+                        // render it below a separator line for rich formatting.
+                        if !last_round_text.trim().is_empty() {
+                            println!();
+                            println!("  {}", "─".repeat(60).dimmed());
+                            render_markdown(last_round_text.trim());
+                        } else {
+                            println!(); // Final newline
+                        }
                         break;
                     }
                     Ok(EngineEvent::SlashCommandResult { command, output }) => {
-                        println!("  {} {}\n{}", "ℹ".blue(), command.dimmed(), output);
+                        println!("  {} {}\\n{}", "ℹ".blue(), command.dimmed(), output);
                         break;
                     }
                     Ok(EngineEvent::CompactProgress { message }) => {
@@ -240,6 +257,9 @@ async fn handle_engine_events(
                         println!("  {} {} {}", "⚡".yellow(), "Skill invoked".bold(), format!("[{}]", name).dimmed());
                         let _ = std::io::stdout().flush();
                     }
+                    Ok(EngineEvent::SessionRestored { messages }) => {
+                        render_restored_messages(&messages);
+                    }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("REPL event receiver lagged, skipped {} events", n);
                         continue;
@@ -254,4 +274,3 @@ async fn handle_engine_events(
         }
     }
 }
-
