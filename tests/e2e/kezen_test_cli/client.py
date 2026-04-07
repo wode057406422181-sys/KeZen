@@ -1,7 +1,7 @@
 import asyncio
 import grpc
 from .generated import kezen_pb2, kezen_pb2_grpc
-from .types import TurnResult, ToolCall, ToolResult, PermissionRequestInfo
+from .types import TurnResult, ToolCall, ToolResult, PermissionRequestInfo, TokenUsage, SlashCommandResult
 
 class KezenTestCli:
     """gRPC bidirectional stream client for testing KeZen Engine."""
@@ -42,10 +42,20 @@ class KezenTestCli:
                 return
             yield msg
     
-    async def send_message(self, content: str, timeout: float = 30.0) -> TurnResult:
-        # TODO: This blocks and clears stream until "Done". It is not re-entrant.
-        # For multi-turn chats, we may need a global collector task and turn identifiers
-        # from the Engine to correctly route events.
+    async def send_message(
+        self,
+        content: str,
+        timeout: float = 30.0,
+        auto_approve_permissions: bool = False,
+    ) -> TurnResult:
+        """Send a user message and collect all events until Done.
+
+        Args:
+            content: The user message text.
+            timeout: Maximum seconds to wait for the turn to complete.
+            auto_approve_permissions: If True, automatically send AllowOnce
+                for every PermissionRequest received during this turn.
+        """
         msg = kezen_pb2.ClientMessage(
             send_message=kezen_pb2.SendMessage(content=content)
         )
@@ -56,6 +66,7 @@ class KezenTestCli:
         async def collect():
             async for server_msg in self._stream:
                 event = server_msg.WhichOneof("event")
+                print(f"[DEBUG] CLI received event: {event}")
                 match event:
                     case "text_delta":
                         result.text += server_msg.text_delta.text
@@ -63,6 +74,7 @@ class KezenTestCli:
                         result.thinking += server_msg.thinking_delta.text
                     case "tool_use_start":
                         t = server_msg.tool_use_start
+                        print(f"[DEBUG] CLI received tool_use_start: {t.name}")
                         result.tool_calls.append(ToolCall(
                             tool_use_id=t.tool_use_id,
                             name=t.name,
@@ -83,6 +95,32 @@ class KezenTestCli:
                             description=p.description,
                             risk_level=p.risk_level,
                         ))
+                        if auto_approve_permissions:
+                            await self.respond_permission(p.request_id, allow=True)
+                    case "cost_update":
+                        u = server_msg.cost_update.usage
+                        result.cost_updates.append(TokenUsage(
+                            input_tokens=u.input_tokens,
+                            output_tokens=u.output_tokens,
+                            cache_creation_input_tokens=u.cache_creation_input_tokens,
+                            cache_read_input_tokens=u.cache_read_input_tokens,
+                        ))
+                    case "slash_command_result":
+                        s = server_msg.slash_command_result
+                        result.slash_command_results.append(SlashCommandResult(
+                            command=s.command,
+                            output=s.output,
+                        ))
+                        return
+                    case "compact_progress":
+                        msg = server_msg.compact_progress.message
+                        result.compact_progress.append(msg)
+                        if "compacted" in msg.lower() or "failed" in msg.lower():
+                            return
+                    case "skill_loaded":
+                        result.skills_loaded.append(
+                            server_msg.skill_loaded.name
+                        )
                     case "error":
                         result.is_error = True
                         result.error_message = server_msg.error.message
@@ -95,6 +133,23 @@ class KezenTestCli:
         
         await asyncio.wait_for(collect(), timeout=timeout)
         return result
+    
+    async def send_slash_command(
+        self,
+        command: str,
+        timeout: float = 30.0,
+        auto_approve_permissions: bool = False,
+    ) -> TurnResult:
+        """Convenience wrapper: send a slash command (e.g. '/cost', '/compact').
+
+        Slash commands are sent as regular messages — the Engine parses
+        the leading '/' and dispatches internally.
+        """
+        return await self.send_message(
+            content=command,
+            timeout=timeout,
+            auto_approve_permissions=auto_approve_permissions,
+        )
     
     async def respond_permission(self, request_id: str, allow: bool):
         if allow:

@@ -85,7 +85,7 @@ impl Session {
         self.total_output_tokens = self.total_output_tokens.saturating_add(usage.output_tokens);
         self.cache_creation_input_tokens = self.cache_creation_input_tokens.saturating_add(usage.cache_creation_input_tokens);
         self.cache_read_input_tokens = self.cache_read_input_tokens.saturating_add(usage.cache_read_input_tokens);
-        self.last_turn_input_tokens = usage.input_tokens;
+        self.last_turn_input_tokens = usage.input_tokens + usage.cache_read_input_tokens;
         self.total_cost_usd = calculate_cost(
             self.total_input_tokens,
             self.total_output_tokens,

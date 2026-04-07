@@ -178,11 +178,16 @@ impl AppConfig {
         let path = Self::config_path()?;
         if path.exists() {
             let content = std::fs::read_to_string(&path)?;
-            if let Ok(file_config) = toml::from_str::<AppConfig>(&content) {
-                config = file_config;
-                // Ensure defaults for missing optional fields
-                if config.max_tokens.is_none() {
-                    config.max_tokens = Some(DEFAULT_MAX_TOKENS);
+            match toml::from_str::<AppConfig>(&content) {
+                Ok(file_config) => {
+                    config = file_config;
+                    // Ensure defaults for missing optional fields
+                    if config.max_tokens.is_none() {
+                        config.max_tokens = Some(DEFAULT_MAX_TOKENS);
+                    }
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Failed to parse config file at {}: {}", path.display(), e));
                 }
             }
         }
@@ -215,6 +220,11 @@ impl AppConfig {
         }
         if let Ok(val) = std::env::var("KEZEN_MODEL") {
             config.model = Some(val);
+        }
+        if let Ok(val) = std::env::var("KEZEN_MAX_TOKENS") {
+            if let Ok(parsed) = val.parse::<u32>() {
+                config.max_tokens = Some(parsed);
+            }
         }
 
         // Search-specific env overrides

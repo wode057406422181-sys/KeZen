@@ -75,6 +75,7 @@ pub fn create_default_registry(config: &AppConfig) -> ToolRegistry {
         .unwrap_or("client");
 
     // WebSearchTool: only for explicit client-side backends (not "off" or "native").
+    // In native mode, Dashscope handles search internally, so we MUST hide the tool schema.
     if search_mode != "off" && search_mode != "native" {
         registry.register(Arc::new(
             super::web_search::WebSearchTool::new(config.search.clone()),

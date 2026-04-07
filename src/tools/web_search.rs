@@ -48,6 +48,11 @@ impl WebSearchTool {
             "searxng" => self.search_searxng(config, query, max_results).await,
             "google_cse" => self.search_google_cse(config, query, max_results).await,
             "bing" => self.search_bing(config, query, max_results).await,
+            "native" => Ok(vec![SearchResult {
+                title: "Native Search Enabled".to_string(),
+                url: "internal://native-search".to_string(),
+                snippet: "The provider has automatically handled the web search internally. Please respond directly with the information already retrieved, or politely explain if the search did not return what the user asked for.".to_string(),
+            }]),
             other => Err(format!(
                 "Unknown search mode: '{}'. Supported: brave, searxng, google_cse, bing (or use 'native' for provider-side search)",
                 other
@@ -504,6 +509,19 @@ mod tests {
         let result = tool.call(json!({"query": "test"})).await;
         assert!(result.is_error);
         assert!(result.content.contains("Unknown search mode"));
+    }
+
+    #[tokio::test]
+    async fn test_native_mode_returns_mock_result() {
+        let config = SearchConfig {
+            search_mode: "native".into(),
+            ..SearchConfig::default()
+        };
+        let tool = WebSearchTool::new(Some(config));
+        let result = tool.call(json!({"query": "test"})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("Native Search Enabled"));
+        assert!(result.content.contains("internal://native-search"));
     }
 
     #[tokio::test]

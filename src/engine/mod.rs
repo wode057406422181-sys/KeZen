@@ -303,10 +303,14 @@ impl KezenEngine {
                                             }
                                             StreamEvent::MessageStart { usage: Some(u), .. } => {
                                                 turn_usage.input_tokens = u.input_tokens;
+                                                turn_usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
+                                                turn_usage.cache_read_input_tokens = u.cache_read_input_tokens;
                                             }
                                             StreamEvent::MessageDelta { usage: Some(u), .. } => {
                                                 if u.output_tokens > 0 { turn_usage.output_tokens = u.output_tokens; }
                                                 if u.input_tokens > 0 { turn_usage.input_tokens = u.input_tokens; }
+                                                if u.cache_creation_input_tokens > 0 { turn_usage.cache_creation_input_tokens = u.cache_creation_input_tokens; }
+                                                if u.cache_read_input_tokens > 0 { turn_usage.cache_read_input_tokens = u.cache_read_input_tokens; }
                                             }
                                             StreamEvent::MessageDelta { usage: None, .. } => {}
                                             // Flush pending tool on MessageStop in case
@@ -745,6 +749,7 @@ impl KezenEngine {
                 // Fix #7: Pass the user-supplied topic to compact_context
                 let topic = if args.is_empty() { None } else { Some(args.to_string()) };
                 self.compact_context(topic).await;
+                let _ = self.event_tx.send(EngineEvent::Done);
             }
             "model" => {
                 if args.is_empty() {
