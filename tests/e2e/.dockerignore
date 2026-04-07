@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+kezen_test_cli/generated/
+logs/
+skills/
