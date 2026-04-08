@@ -240,7 +240,7 @@ async fn handle_engine_events(
                         break;
                     }
                     Ok(EngineEvent::SlashCommandResult { command, output }) => {
-                        println!("  {} {}\\n{}", "ℹ".blue(), command.dimmed(), output);
+                        println!("  {} {}\n{}", "ℹ".blue(), command.dimmed(), output);
                         break;
                     }
                     Ok(EngineEvent::CompactProgress { message }) => {
