@@ -4,6 +4,7 @@ mod cli;
 mod config;
 mod constants;
 mod context;
+mod control;
 mod cost;
 mod engine;
 mod error;

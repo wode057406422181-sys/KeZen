@@ -13,6 +13,7 @@ pub enum RiskLevel {
 
 /// The global permission mode for the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PermissionMode {
     /// Default: read-only tools auto-allow, write tools prompt.
     Default,
