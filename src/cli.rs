@@ -37,9 +37,9 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub max_tokens: Option<u32>,
 
-    /// Use classic text REPL instead of TUI
+    /// Use TUI mode instead of REPL (experimental)
     #[arg(long, global = true)]
-    pub classic: bool,
+    pub tui: bool,
 
     /// Disable MCP server connections
     #[arg(long, global = true)]

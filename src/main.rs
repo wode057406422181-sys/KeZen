@@ -138,10 +138,10 @@ async fn main() -> Result<()> {
         Some(Command::Chat { prompt }) => {
             // Chat subcommand: use its --prompt or fall back to top-level --prompt
             let effective_prompt = prompt.or(cli.prompt);
-            if cli.classic {
-                frontend::repl::run_cli(config, effective_prompt, permission_mode).await
-            } else {
+            if cli.tui {
                 frontend::tui::run_tui(config, effective_prompt, permission_mode).await
+            } else {
+                frontend::repl::run_cli(config, effective_prompt, permission_mode).await
             }
         }
         Some(Command::Init) => {
@@ -163,11 +163,11 @@ async fn main() -> Result<()> {
             Ok(())
         }
         None => {
-            // Default: TUI mode unless --classic is given
-            if cli.classic {
-                frontend::repl::run_cli(config, cli.prompt, permission_mode).await
-            } else {
+            // Default: REPL mode unless --tui is given
+            if cli.tui {
                 frontend::tui::run_tui(config, cli.prompt, permission_mode).await
+            } else {
+                frontend::repl::run_cli(config, cli.prompt, permission_mode).await
             }
         }
     }
