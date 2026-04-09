@@ -19,7 +19,7 @@ pub async fn run_cli(
     let (action_tx, action_rx) = mpsc::channel::<UserAction>(ACTION_CHANNEL_BUFFER);
     let (event_tx, event_rx) = broadcast::channel::<EngineEvent>(EVENT_CHANNEL_BUFFER);
 
-    let registry = create_default_registry(&config);
+    let registry = create_default_registry(&config, std::env::current_dir()?);
     let engine = KezenEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode).await?;
 
     // Spawn the engine loop in a background task

@@ -6,7 +6,7 @@
 //! - Path traversal prevention
 //! - Read-only command recognition
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 // ── Dangerous paths ──────────────────────────────────────────────────
 
@@ -182,7 +182,17 @@ pub fn extract_file_suggestion(file_path: &str, working_dir: &str) -> Option<Str
 
 // ── Shared file tool capabilities ─────────────────────────────────────
 
-pub async fn check_file_permissions(file_path: &str) -> crate::permissions::PermissionResult {
+/// Validate file path safety and working directory constraints.
+///
+/// # Arguments
+/// - `file_path`: Path to check (may be relative or absolute)
+/// - `work_dir`: Baseline working directory for path boundary checks
+///
+/// # Security
+/// - Rejects directory traversal attempts (`..`)
+/// - Asks for confirmation on critical system/project files
+/// - Asks for confirmation if the computed path escapes `work_dir`.
+pub async fn check_file_permissions(file_path: &str, work_dir: &Path) -> crate::permissions::PermissionResult {
     // Path traversal → deny
     if contains_path_traversal(file_path) {
         return crate::permissions::PermissionResult::Deny {
@@ -198,27 +208,23 @@ pub async fn check_file_permissions(file_path: &str) -> crate::permissions::Perm
     }
 
     // Working directory check
-    if let Ok(cwd) = std::env::current_dir() {
-        let cwd_str = cwd.to_string_lossy();
-        if !is_within_working_directory(file_path, &cwd_str).await {
-            return crate::permissions::PermissionResult::Ask {
-                message: format!("⚠️ File is outside the working directory: {}", file_path),
-            };
-        }
+    let wd_str = work_dir.to_string_lossy();
+    if !is_within_working_directory(file_path, &wd_str).await {
+        return crate::permissions::PermissionResult::Ask {
+            message: format!("⚠️ File is outside the working directory: {}", file_path),
+        };
     }
 
     crate::permissions::PermissionResult::Passthrough
 }
 
-pub fn file_permission_matcher(path: String) -> Box<dyn Fn(&str) -> bool> {
+pub fn file_permission_matcher(path: String, work_dir: PathBuf) -> Box<dyn Fn(&str) -> bool> {
     Box::new(move |pattern: &str| {
         if let Some(dir) = pattern.strip_suffix("/**") {
             let prefix = if dir.starts_with('/') {
                 format!("{}/", dir)
-            } else if let Ok(cwd) = std::env::current_dir() {
-                format!("{}/{}/", cwd.display(), dir)
             } else {
-                format!("{}/", dir)
+                format!("{}/{}/", work_dir.display(), dir)
             };
             path.starts_with(&prefix)
         } else {

@@ -1,10 +1,14 @@
+use std::path::PathBuf;
 use async_trait::async_trait;
 use serde_json::json;
 use regex::RegexBuilder;
 
 use super::{Tool, ToolResult};
 
-pub struct GrepTool;
+
+pub struct GrepTool {
+    pub work_dir: PathBuf,
+}
 
 #[async_trait]
 impl Tool for GrepTool {
@@ -45,9 +49,9 @@ impl Tool for GrepTool {
             }
         };
 
-        let current_dir = std::env::current_dir().unwrap_or_default();
+        let default_dir = self.work_dir.to_string_lossy().to_string();
         let path_str = input.get("path").and_then(|v| v.as_str())
-            .unwrap_or(current_dir.to_str().unwrap_or("."))
+            .unwrap_or(&default_dir)
             .to_string();
         let include_pat = input.get("include").and_then(|v| v.as_str())
             .unwrap_or("**/*")
@@ -138,7 +142,7 @@ mod tests {
         std::fs::write(&path, "hello world\nignore this\nhello rust").unwrap();
         let dir_str = dir.path().to_str().unwrap().to_string();
 
-        let tool = GrepTool;
+        let tool = GrepTool { work_dir: std::env::current_dir().unwrap() };
         let result = tool.call(json!({
             "pattern": "hello",
             "path": dir_str,
@@ -155,7 +159,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let dir_str = dir.path().to_str().unwrap().to_string();
 
-        let tool = GrepTool;
+        let tool = GrepTool { work_dir: std::env::current_dir().unwrap() };
         let result = tool.call(json!({
             "pattern": "impossible_string",
             "path": dir_str
@@ -167,7 +171,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_grep_invalid_regex() {
-        let tool = GrepTool;
+        let tool = GrepTool { work_dir: std::env::current_dir().unwrap() };
         let result = tool.call(json!({
             "pattern": "[invalid_regex",
             "path": "."
