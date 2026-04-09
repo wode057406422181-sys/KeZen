@@ -1,9 +1,13 @@
+use std::path::PathBuf;
 use async_trait::async_trait;
 use serde_json::json;
 
 use super::{Tool, ToolResult};
 
-pub struct GlobTool;
+
+pub struct GlobTool {
+    pub work_dir: PathBuf,
+}
 
 #[async_trait]
 impl Tool for GlobTool {
@@ -40,9 +44,9 @@ impl Tool for GlobTool {
             }
         };
 
-        let current_dir = std::env::current_dir().unwrap_or_default();
+        let default_dir = self.work_dir.to_string_lossy().to_string();
         let path_str = input.get("path").and_then(|v| v.as_str())
-            .unwrap_or(current_dir.to_str().unwrap_or("."))
+            .unwrap_or(&default_dir)
             .to_string();
 
         // Offload directory traversal to a blocking thread
@@ -116,7 +120,7 @@ mod tests {
         std::fs::write(dir.path().join("a.rs"), "fn main(){}").unwrap();
         std::fs::write(dir.path().join("b.txt"), "hello").unwrap();
         
-        let tool = GlobTool;
+        let tool = GlobTool { work_dir: std::env::current_dir().unwrap() };
         let result = tool.call(json!({
             "pattern": "*.rs",
             "path": dir.path().to_str().unwrap()
@@ -131,7 +135,7 @@ mod tests {
     async fn test_glob_no_match() {
         let dir = tempdir().unwrap();
         
-        let tool = GlobTool;
+        let tool = GlobTool { work_dir: std::env::current_dir().unwrap() };
         let result = tool.call(json!({
             "pattern": "*.rs",
             "path": dir.path().to_str().unwrap()
@@ -143,7 +147,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_glob_invalid_pattern() {
-        let tool = GlobTool;
+        let tool = GlobTool { work_dir: std::env::current_dir().unwrap() };
         let _result = tool.call(json!({
             "pattern": "***"
         })).await;

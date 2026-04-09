@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::Tool;
@@ -60,6 +61,7 @@ impl Default for ToolRegistry {
     }
 }
 
+
 /// Create a registry pre-loaded with all built-in tools.
 ///
 /// `config` controls which optional tools are registered:
@@ -69,14 +71,14 @@ impl Default for ToolRegistry {
 ///   - `search_mode = "brave"|…`                      → register WebSearchTool
 ///   - `fetch_mode  = "native"`                        → skip WebFetchTool
 ///   - `fetch_mode  = "client"` (or no config)         → register WebFetchTool
-pub fn create_default_registry(config: &AppConfig) -> ToolRegistry {
+pub fn create_default_registry(config: &AppConfig, work_dir: PathBuf) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(super::bash::BashTool));
     registry.register(Arc::new(super::file_read::FileReadTool));
-    registry.register(Arc::new(super::file_write::FileWriteTool));
-    registry.register(Arc::new(super::file_edit::FileEditTool));
-    registry.register(Arc::new(super::grep::GrepTool));
-    registry.register(Arc::new(super::glob::GlobTool));
+    registry.register(Arc::new(super::file_write::FileWriteTool { work_dir: work_dir.clone() }));
+    registry.register(Arc::new(super::file_edit::FileEditTool { work_dir: work_dir.clone() }));
+    registry.register(Arc::new(super::grep::GrepTool { work_dir: work_dir.clone() }));
+    registry.register(Arc::new(super::glob::GlobTool { work_dir }));
 
     // Resolve effective modes.
     // No [search] section: search_mode defaults to "off", fetch_mode defaults to "client".
@@ -136,7 +138,7 @@ mod tests {
     #[test]
     fn test_no_search_config_defaults() {
         let config = AppConfig::default();
-        let registry = create_default_registry(&config);
+        let registry = create_default_registry(&config, std::env::current_dir().unwrap());
         assert!(registry.get("Bash").is_some());
         assert!(registry.get("WebSearch").is_none());
         assert!(registry.get("WebFetch").is_some()); // default fetch_mode = "client"
@@ -148,7 +150,7 @@ mod tests {
     fn test_explicit_default_search_config() {
         let mut config = AppConfig::default();
         config.search = Some(SearchConfig::default());
-        let registry = create_default_registry(&config);
+        let registry = create_default_registry(&config, std::env::current_dir().unwrap());
         assert!(registry.get("WebSearch").is_none());
         assert!(registry.get("WebFetch").is_some());
         assert_eq!(registry.schemas().len(), 7);
@@ -164,7 +166,7 @@ mod tests {
             api_key: Some("key".into()),
             ..SearchConfig::default()
         });
-        let registry = create_default_registry(&config);
+        let registry = create_default_registry(&config, std::env::current_dir().unwrap());
         assert!(registry.get("WebSearch").is_some());
         assert!(registry.get("WebFetch").is_none());
         assert_eq!(registry.schemas().len(), 7);
@@ -179,7 +181,7 @@ mod tests {
             fetch_mode: "client".into(),
             ..SearchConfig::default()
         });
-        let registry = create_default_registry(&config);
+        let registry = create_default_registry(&config, std::env::current_dir().unwrap());
         assert!(registry.get("WebSearch").is_none());
         assert!(registry.get("WebFetch").is_some());
         assert_eq!(registry.schemas().len(), 7);
@@ -194,7 +196,7 @@ mod tests {
             fetch_mode: "native".into(),
             ..SearchConfig::default()
         });
-        let registry = create_default_registry(&config);
+        let registry = create_default_registry(&config, std::env::current_dir().unwrap());
         assert!(registry.get("WebSearch").is_none());
         assert!(registry.get("WebFetch").is_none());
         assert_eq!(registry.schemas().len(), 6);
@@ -210,7 +212,7 @@ mod tests {
             api_key: Some("key".into()),
             ..SearchConfig::default()
         });
-        let registry = create_default_registry(&config);
+        let registry = create_default_registry(&config, std::env::current_dir().unwrap());
         assert!(registry.get("WebSearch").is_some());
         assert!(registry.get("WebFetch").is_some());
         assert_eq!(registry.schemas().len(), 8);
@@ -226,7 +228,7 @@ mod tests {
             base_url: Some("http://localhost:8080".into()),
             ..SearchConfig::default()
         });
-        let registry = create_default_registry(&config);
+        let registry = create_default_registry(&config, std::env::current_dir().unwrap());
         assert!(registry.get("WebSearch").is_some());
         assert!(registry.get("WebFetch").is_some());
         assert_eq!(registry.schemas().len(), 8);
@@ -241,7 +243,7 @@ mod tests {
             search_strategy: Some("agent_max".into()),
             ..SearchConfig::default()
         });
-        let registry = create_default_registry(&config);
+        let registry = create_default_registry(&config, std::env::current_dir().unwrap());
         assert!(registry.get("WebSearch").is_none());
         assert!(registry.get("WebFetch").is_some()); // default fetch_mode = "client"
         assert_eq!(registry.schemas().len(), 7);
@@ -293,7 +295,7 @@ mod tests {
     #[test]
     fn test_default_registry_aliases() {
         let config = AppConfig::default();
-        let registry = create_default_registry(&config);
+        let registry = create_default_registry(&config, std::env::current_dir().unwrap());
         // Read → FileRead
         assert!(registry.get("Read").is_some());
         assert_eq!(registry.get("Read").unwrap().name(), "FileRead");
