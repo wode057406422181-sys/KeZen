@@ -1,14 +1,14 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use crate::skills::types::{SkillDefinition, SkillFrontmatter, SkillSource};
 
 /// Discover skills from all configured paths (global + project-local).
 ///
 /// Search order:
 /// 1. `~/.kezen/skills/` — user global skills
-/// 2. Walk upward from CWD looking for `.kezen/skills/` — project skills
+/// 2. Walk upward from `work_dir` looking for `.kezen/skills/` — project skills
 ///
 /// Duplicates (same canonical path) are de-duplicated.
-pub async fn discover_all_skills() -> Vec<SkillDefinition> {
+pub async fn discover_all_skills(work_dir: &Path) -> Vec<SkillDefinition> {
     let mut skills = Vec::new();
     let mut seen_canonical_paths = std::collections::HashSet::new();
 
@@ -28,10 +28,7 @@ pub async fn discover_all_skills() -> Vec<SkillDefinition> {
     }
 
     // 2. Project Local Skills: Traverse up to find .kezen/skills/
-    let mut current_dir = std::env::current_dir().unwrap_or_else(|e| {
-        tracing::warn!(error = %e, "current_dir() failed, falling back to \".\" — project skills may not be discovered");
-        PathBuf::from(".")
-    });
+    let mut current_dir = work_dir.to_path_buf();
     loop {
         let local_skills_path = current_dir.join(".kezen").join("skills");
         if tokio::fs::metadata(&local_skills_path).await.map(|m| m.is_dir()).unwrap_or(false) {
@@ -294,6 +291,7 @@ pub fn parse_skill_frontmatter(text: &str) -> (SkillFrontmatter, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     // ── Frontmatter parsing (pure, sync) ────────────────────────────────────
 

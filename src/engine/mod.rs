@@ -59,10 +59,11 @@ impl KezenEngine {
         event_tx: broadcast::Sender<EngineEvent>,
         mut registry: ToolRegistry,
         permission_mode: PermissionMode,
+        work_dir: std::path::PathBuf,
     ) -> Result<Self, crate::error::KezenError> {
         let client = api::create_client(&config)?;
         let mut skill_registry = SkillRegistry::new();
-        let discovered_skills = discover_all_skills().await;
+        let discovered_skills = discover_all_skills(&work_dir).await;
         for skill in discovered_skills {
             skill_registry.register(skill);
         }
@@ -71,8 +72,7 @@ impl KezenEngine {
 
         registry.register(Arc::new(SkillTool::new(Arc::clone(&skill_registry))));
 
-        // Build the static system prompt once.
-        let system_prompt = build_static_system_prompt(config.model.as_deref(), Some(&skill_registry)).await;
+        let system_prompt = build_static_system_prompt(&work_dir, config.model.as_deref(), Some(&skill_registry)).await;
         let model_name = config.model.clone().unwrap_or_default();
         let pricing = crate::cost::get_model_pricing(&model_name);
         
@@ -114,9 +114,7 @@ impl KezenEngine {
         }
 
         let session = Session::new(model_name.clone(), pricing);
-        let cwd = std::env::current_dir()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
+        let cwd = work_dir.display().to_string();
 
         // Initialize audit logger
         let mut audit = SessionAuditLogger::new(&session.id).await
@@ -142,7 +140,7 @@ impl KezenEngine {
             stream_options,
             audit,
             skill_registry,
-            git_watcher: crate::context::git_watcher::GitWatcher::start().await,
+            git_watcher: crate::context::git_watcher::GitWatcher::start(work_dir).await,
             runtime_cache_enabled: config.enable_cache,
         })
     }

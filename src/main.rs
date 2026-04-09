@@ -127,8 +127,9 @@ async fn main() -> Result<()> {
             let (action_tx, action_rx) = tokio::sync::mpsc::channel(crate::constants::defaults::ACTION_CHANNEL_BUFFER);
             let (event_tx, _) = tokio::sync::broadcast::channel(crate::constants::defaults::EVENT_CHANNEL_BUFFER);
 
-            let registry = crate::tools::registry::create_default_registry(&config, std::env::current_dir()?);
-            let engine = engine::KezenEngine::new(config.clone(), action_rx, event_tx.clone(), registry, permission_mode).await?;
+            let work_dir = std::env::current_dir()?;
+            let registry = crate::tools::registry::create_default_registry(&config, work_dir.clone());
+            let engine = engine::KezenEngine::new(config.clone(), action_rx, event_tx.clone(), registry, permission_mode, work_dir).await?;
 
             tokio::spawn(async move {
                 engine.run().await;
