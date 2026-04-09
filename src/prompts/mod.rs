@@ -10,17 +10,16 @@ fn get_simple_intro_section() -> String {
     )
 }
 
-async fn compute_env_info(model: Option<&str>) -> String {
+async fn compute_env_info(work_dir: &std::path::Path, model: Option<&str>) -> String {
     let os_type = env::consts::OS;
     let os_version = env::consts::FAMILY;
     let shell = env::var("SHELL").unwrap_or_else(|_| "unknown".to_string());
-    let cwd = env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
+    let cwd = work_dir.display().to_string();
 
     let mut is_git = false;
     if let Ok(output) = tokio::process::Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
+        .current_dir(work_dir)
         .output()
         .await
         && output.status.success()
@@ -54,6 +53,7 @@ async fn compute_env_info(model: Option<&str>) -> String {
 }
 
 pub async fn build_static_system_prompt(
+    work_dir: &std::path::Path,
     model: Option<&str>,
     skill_registry: Option<&SkillRegistry>,
 ) -> String {
@@ -67,19 +67,18 @@ pub async fn build_static_system_prompt(
         OUTPUT_EFFICIENCY.to_string(),
         SESSION_GUIDANCE.to_string(),
         SYSTEM_PROMPT_DYNAMIC_BOUNDARY.to_string(),
-        compute_env_info(model).await,
+        compute_env_info(work_dir, model).await,
     ];
 
     let mut prompt = elements.join("\n\n");
 
-    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     prompt.push_str(&format!(
         "\n\n# Current Working Directory\n{}\n",
-        cwd.display()
+        work_dir.display()
     ));
 
     // Memory files are treated as static for cache hit rate (they rarely change block sizes within a single conversation)
-    let memory_files = crate::context::memory::load_memory_files().await;
+    let memory_files = crate::context::memory::load_memory_files(work_dir).await;
     if let Some(memory_prompt) = crate::context::memory::format_memory_prompt(&memory_files) {
         prompt.push_str("\n\n");
         prompt.push_str(&memory_prompt);
@@ -145,7 +144,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_intro_sentinel() {
-        let prompt = build_static_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(std::path::Path::new("."), None, None).await;
         assert!(
             prompt.contains("interactive agent"),
             "Prompt must contain intro section"
@@ -154,7 +153,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_dynamic_boundary_marker() {
-        let prompt = build_static_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(std::path::Path::new("."), None, None).await;
         assert!(
             prompt.contains(SYSTEM_PROMPT_DYNAMIC_BOUNDARY),
             "Prompt must contain the dynamic boundary marker used for runtime injection"
@@ -163,7 +162,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_tone_section() {
-        let prompt = build_static_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(std::path::Path::new("."), None, None).await;
         assert!(
             prompt.contains("# Tone and style"),
             "Prompt must include tone and style section"
@@ -172,7 +171,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_output_efficiency_section() {
-        let prompt = build_static_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(std::path::Path::new("."), None, None).await;
         assert!(
             prompt.contains("# Output efficiency"),
             "Prompt must include output efficiency section"
@@ -181,7 +180,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_environment_header() {
-        let prompt = build_static_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(std::path::Path::new("."), None, None).await;
         assert!(
             prompt.contains("# Environment"),
             "Prompt must include the Environment section"
@@ -190,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_contains_platform_info() {
-        let prompt = build_static_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(std::path::Path::new("."), None, None).await;
         let expected_os = std::env::consts::OS;
         assert!(
             prompt.contains(expected_os),
@@ -202,7 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_injects_model_name_when_provided() {
-        let prompt = build_static_system_prompt(Some("claude-opus-4-5"), None).await;
+        let prompt = build_static_system_prompt(std::path::Path::new("."), Some("claude-opus-4-5"), None).await;
         assert!(
             prompt.contains("claude-opus-4-5"),
             "Model name should appear in the Environment section"
@@ -211,7 +210,7 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_without_model_has_no_model_line() {
-        let prompt = build_static_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(std::path::Path::new("."), None, None).await;
         assert!(
             !prompt.contains("You are powered by the model"),
             "Without a model arg, model description should not appear"
@@ -222,7 +221,7 @@ mod tests {
 
     #[tokio::test]
     async fn environment_section_comes_after_dynamic_boundary() {
-        let prompt = build_static_system_prompt(None, None).await;
+        let prompt = build_static_system_prompt(std::path::Path::new("."), None, None).await;
         let boundary_pos = prompt.find(SYSTEM_PROMPT_DYNAMIC_BOUNDARY).unwrap();
         let env_pos = prompt.find("# Environment").unwrap();
         assert!(
@@ -235,19 +234,19 @@ mod tests {
 
     #[tokio::test]
     async fn env_info_with_model_contains_model_name() {
-        let info = compute_env_info(Some("test-model-xyz")).await;
+        let info = compute_env_info(std::path::Path::new("."), Some("test-model-xyz")).await;
         assert!(info.contains("test-model-xyz"));
     }
 
     #[tokio::test]
     async fn env_info_without_model_omits_model_line() {
-        let info = compute_env_info(None).await;
+        let info = compute_env_info(std::path::Path::new("."), None).await;
         assert!(!info.contains("You are powered by the model"));
     }
 
     #[tokio::test]
     async fn env_info_always_contains_platform() {
-        let info = compute_env_info(None).await;
+        let info = compute_env_info(std::path::Path::new("."), None).await;
         assert!(info.contains(std::env::consts::OS));
     }
 }

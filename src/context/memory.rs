@@ -92,7 +92,7 @@ async fn load_memory_file(path: PathBuf, memory_type: MemoryType) -> Option<Memo
     }
 }
 
-pub async fn load_memory_files() -> Vec<MemoryFile> {
+pub async fn load_memory_files(work_dir: &std::path::Path) -> Vec<MemoryFile> {
     let mut results = Vec::new();
 
     // 1. User Layer: ~/.kezen/.kezen.md
@@ -105,7 +105,7 @@ pub async fn load_memory_files() -> Vec<MemoryFile> {
     }
 
     // 2. Project Layers
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let cwd = work_dir;
 
     // Find git root via async command
     let git_root = match tokio::process::Command::new("git")
@@ -118,11 +118,11 @@ pub async fn load_memory_files() -> Vec<MemoryFile> {
             let root_str = String::from_utf8_lossy(&out.stdout).trim().to_string();
             PathBuf::from(root_str)
         }
-        _ => cwd.clone(),
+        _ => cwd.to_path_buf(),
     };
 
     let mut traverse_dirs = Vec::new();
-    let mut current = cwd.as_path();
+    let mut current = cwd;
     loop {
         traverse_dirs.push(current.to_path_buf());
         if current == git_root {

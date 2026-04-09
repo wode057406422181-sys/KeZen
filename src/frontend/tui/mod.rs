@@ -31,9 +31,10 @@ pub async fn run_tui(
     let (event_tx, event_rx) = broadcast::channel::<EngineEvent>(EVENT_CHANNEL_BUFFER);
 
     // ── 2. Start Engine in background ──────────────────────────────────
-    let registry = create_default_registry(&config, std::env::current_dir()?);
+    let work_dir = std::env::current_dir()?;
+    let registry = create_default_registry(&config, work_dir.clone());
     let engine =
-        KezenEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode).await?;
+        KezenEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode, work_dir).await?;
     tokio::spawn(async move {
         engine.run().await;
     });

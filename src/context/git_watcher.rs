@@ -11,11 +11,11 @@ pub struct GitWatcher {
 
 impl GitWatcher {
     /// Start the background watcher and return the watcher instance
-    pub async fn start() -> Self {
+    pub async fn start(work_dir: std::path::PathBuf) -> Self {
         let cache = Arc::new(RwLock::new(None));
 
         // Initial collection
-        if let Some(ctx) = collect_git_context().await {
+        if let Some(ctx) = collect_git_context(&work_dir).await {
             *cache.write().await = Some(ctx);
         }
 
@@ -24,7 +24,7 @@ impl GitWatcher {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(GIT_WATCHER_INTERVAL_SECS));
             loop {
                 interval.tick().await;
-                match collect_git_context().await {
+                match collect_git_context(&work_dir).await {
                     Some(ctx) => {
                         *clone_cache.write().await = Some(ctx);
                     }

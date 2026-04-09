@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::process::Command;
 
@@ -12,12 +12,8 @@ pub struct GitContext {
     pub user_name: Option<String>,
 }
 
-pub async fn collect_git_context() -> Option<GitContext> {
-    let cwd: Arc<Path> = Arc::from(
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .as_path(),
-    );
+pub async fn collect_git_context(work_dir: &Path) -> Option<GitContext> {
+    let cwd: Arc<Path> = Arc::from(work_dir);
 
     // Quick check: are we inside a git work tree?
     let ok = git(&cwd, &["rev-parse", "--is-inside-work-tree"])
