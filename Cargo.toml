@@ -10,9 +10,7 @@ readme = "README.md"
 keywords = ["cli", "ai", "coding", "llm"]
 categories = ["command-line-utilities"]
 
-[[bin]]
-name = "kezen"
-path = "src/main.rs"
+
 
 [dependencies]
 # CLI framework

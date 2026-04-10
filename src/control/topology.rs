@@ -12,6 +12,8 @@ pub struct ClusterConfig {
     #[serde(default)]
     pub defaults: DefaultsConfig,
     #[serde(default)]
+    pub models: HashMap<String, crate::config::ModelProfile>,
+    #[serde(default)]
     pub agents: Vec<AgentConfig>,
 }
 

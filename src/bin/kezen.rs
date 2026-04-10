@@ -1,30 +1,12 @@
-mod agent_core;
-mod api;
-mod audit;
-mod cli;
-mod config;
-mod constants;
-mod context;
-mod control;
-mod cost;
-mod engine;
-mod error;
-mod frontend;
-mod mcp;
-mod permissions;
-mod prompts;
-mod session;
-mod skills;
-pub mod tools;
-
+use kezen::*;
 use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
-use crate::cli::{Cli, Command};
-use crate::config::Provider;
+use kezen::cli::{Cli, Command};
+use kezen::config::Provider;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -85,14 +67,14 @@ async fn main() -> Result<()> {
     let mut config = config::AppConfig::load()?;
 
     let permission_mode = if cli.yes {
-        crate::permissions::PermissionMode::DontAsk
+        kezen::permissions::PermissionMode::DontAsk
     } else {
-        crate::permissions::PermissionMode::Default
+        kezen::permissions::PermissionMode::Default
     };
 
     if config.multiagent {
         if let Ok(config_file) = config::AppConfig::config_path() {
-            match crate::control::topology::load_cluster_config(&config_file).await {
+            match kezen::control::topology::load_cluster_config(&config_file).await {
                 Ok(cluster) => {
                     eprintln!("  🚀 Multi-Agent Mode Detected!");
                     eprintln!("     Cluster: {}", cluster.cluster.name.as_deref().unwrap_or("unnamed"));
@@ -105,35 +87,37 @@ async fn main() -> Result<()> {
                         config.merge_with_toml(gateway, &cluster);
                     }
 
-                    // Build the AgentNode tree from ClusterConfig.
-                    match crate::agent_core::pod::build_agent_tree(
-                        &cluster,
-                        &config,
-                        permission_mode,
-                    ) {
-                        Ok(root) => {
-                            eprintln!("     Root   : {} (gateway={})", root.id(), root.is_gateway());
-                            let children = root.children();
-                            for child_id in &children {
-                                eprintln!("       └─ {}", child_id);
-                            }
-                            tracing::info!(
-                                root = %root.id(),
-                                children = children.len(),
-                                "Agent tree built successfully"
-                            );
-                            // TODO: In a future iteration, init() the tree and start
-                            // the Gateway routing loop. For now, fall through to
-                            // single-agent startup with the merged config.
-                        }
-                        Err(e) => {
-                            eprintln!("  ⚠ Failed to build agent tree: {}", e);
-                            tracing::warn!(error = %e, "Agent tree build failed, falling back to single-agent");
-                        }
+                    // CLI argument overrides (highest priority) — apply before runtime.
+                    if let Some(ref m) = cli.model {
+                        config.model = Some(m.clone());
                     }
+                    if let Some(ref p) = cli.provider {
+                        config.provider = match p.to_lowercase().as_str() {
+                            "openai" => Provider::OpenAi,
+                            _ => Provider::Anthropic,
+                        };
+                    }
+                    if let Some(ref k) = cli.api_key {
+                        config.api_key = Some(k.clone());
+                    }
+                    if let Some(t) = cli.max_tokens {
+                        config.max_tokens = Some(t);
+                    }
+                    if cli.no_mcp {
+                        config.no_mcp = true;
+                    }
+
+                    return kezen::agent_core::runtime::run_multiagent(
+                        config,
+                        &cluster,
+                        permission_mode,
+                        cli.prompt,
+                    )
+                    .await;
                 }
                 Err(e) => {
                     eprintln!("  ⚠ Failed to load cluster topology from {}: {}", config_file.display(), e);
+                    eprintln!("  ⚠ Falling back to single-agent mode");
                 }
             }
         }
@@ -174,11 +158,11 @@ async fn main() -> Result<()> {
                 tracing::error!("Invalid address {}: {}", addr, e);
                 std::process::exit(1);
             });
-            let (action_tx, action_rx) = tokio::sync::mpsc::channel(crate::constants::defaults::ACTION_CHANNEL_BUFFER);
-            let (event_tx, _) = tokio::sync::broadcast::channel(crate::constants::defaults::EVENT_CHANNEL_BUFFER);
+            let (action_tx, action_rx) = tokio::sync::mpsc::channel(kezen::constants::defaults::ACTION_CHANNEL_BUFFER);
+            let (event_tx, _) = tokio::sync::broadcast::channel(kezen::constants::defaults::EVENT_CHANNEL_BUFFER);
 
             let work_dir = std::env::current_dir()?;
-            let registry = crate::tools::registry::create_default_registry(&config, work_dir.clone());
+            let registry = kezen::tools::registry::create_default_registry(&config, work_dir.clone());
             let engine = engine::KezenEngine::new(config.clone(), action_rx, event_tx.clone(), registry, permission_mode, work_dir).await?;
 
             tokio::spawn(async move {

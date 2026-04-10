@@ -3,12 +3,9 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::engine::events::{EngineEvent, UserAction};
 
-// Import generated proto types
-pub(crate) mod kezen_proto {
-    tonic::include_proto!("kezen");
-}
+use super::kezen_proto;
 
-use kezen_proto::{
+use super::kezen_proto::{
     kezen_agent_server::{KezenAgent, KezenAgentServer},
     ClientMessage, ServerMessage,
 };

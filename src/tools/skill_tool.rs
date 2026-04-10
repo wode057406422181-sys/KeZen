@@ -226,21 +226,6 @@ mod tests {
         Arc::new(reg)
     }
 
-    fn make_registry_with_non_invocable_skill() -> Arc<SkillRegistry> {
-        let mut reg = SkillRegistry::new();
-        reg.register(SkillDefinition {
-            name: "internal".to_string(),
-            frontmatter: SkillFrontmatter {
-                description: Some("Internal only".to_string()),
-                user_invocable: false,
-                ..Default::default()
-            },
-            body_length: 100,
-            source: SkillSource::Project,
-            base_dir: PathBuf::from("/tmp/test-internal"),
-        });
-        Arc::new(reg)
-    }
 
     // ── normalize_skill_name ────────────────────────────────────────────────
 

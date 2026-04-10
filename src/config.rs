@@ -78,6 +78,15 @@ impl Default for SearchConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelProfile {
+    #[serde(default)]
+    pub provider: Provider,
+    pub model: String,
+    pub api_key: Option<String>,
+    pub api_url: Option<String>,
+}
+
 /// Application configuration
 ///
 /// Loading priority (high → low):
@@ -132,6 +141,10 @@ pub struct AppConfig {
     #[serde(default = "default_true")]
     pub enable_cache: bool,
 
+    /// Named model profiles
+    #[serde(default)]
+    pub models: std::collections::HashMap<String, ModelProfile>,
+
     /// Web search configuration (loaded from [search] section).
     pub search: Option<SearchConfig>,
 }
@@ -151,6 +164,7 @@ impl Default for AppConfig {
             no_mcp: false,
             include_stream_usage: true,
             enable_cache: true,
+            models: std::collections::HashMap::new(),
             search: None,
         }
     }
@@ -282,12 +296,33 @@ impl AppConfig {
         agent: &crate::control::topology::AgentConfig,
         cluster: &crate::control::topology::ClusterConfig,
     ) {
-        // Model
+        // Model resolution
+        let mut model_str = None;
         if self.model.is_none() {
             if let Some(m) = &agent.model {
-                self.model = Some(m.clone());
+                model_str = Some(m.clone());
             } else if let Some(m) = &cluster.defaults.model {
-                self.model = Some(m.clone());
+                model_str = Some(m.clone());
+            }
+        } else {
+            // Already set by base config, but let's see if it's a profile we need to resolve
+            model_str = self.model.clone();
+        }
+
+        if let Some(m) = model_str {
+            // Try resolving as a profile from ClusterConfig first, then AppConfig
+            if let Some(profile) = cluster.models.get(&m).or_else(|| self.models.get(&m)) {
+                self.provider = profile.provider;
+                self.model = Some(profile.model.clone());
+                if let Some(ref key) = profile.api_key {
+                    self.api_key = Some(key.clone());
+                }
+                if let Some(ref url) = profile.api_url {
+                    self.api_url = Some(url.clone());
+                }
+            } else {
+                // Not a profile, treat as raw model name
+                self.model = Some(m);
             }
         }
 

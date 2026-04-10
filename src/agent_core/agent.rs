@@ -134,6 +134,22 @@ pub trait AgentNode: Send + Sync {
     fn is_gateway(&self) -> bool {
         false
     }
+
+    /// 将 `Box<dyn AgentNode>` 转换为 `Box<dyn Any>`，用于安全向下转型。
+    ///
+    /// runtime 模块需要将根节点 downcast 为 `GatewayNode` 以访问
+    /// `take_action_rx()` / `take_children()` 等具体方法。
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any>;
+
+    /// 获取 action sender 返回一个克隆，如果此 Node 支持
+    fn action_sender(&self) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
+        None
+    }
+
+    /// 获取事件广播的订阅 receiver，如果此 Node 支持
+    fn subscribe_events(&self) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {
+        None
+    }
 }
 
 #[cfg(test)]

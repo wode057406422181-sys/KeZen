@@ -14,15 +14,32 @@ use crate::permissions::PermissionMode;
 /// Worker 没有子节点。收到 `assign()` 后，将任务指令通过 `action_tx`
 /// 发送到内部 KezenEngine，引擎在独立 tokio task 上运行 agentic loop。
 ///
-/// Worker 的 `event_rx` 用于上级监听引擎产生的事件流。
+/// ## Channel 架构
+///
+/// ```text
+///   action_tx ──►  action_rx (Engine.run 消费)
+///                       │
+///   event_tx  ◄──  Engine 产生事件
+///       │
+///   subscribe() → 上级节点 / routing_loop 订阅
+/// ```
+///
+/// `action_tx` / `action_rx` / `event_tx` 在 `new()` 时创建一次，
+/// `init()` 时从 `action_rx` take 出来传给 KezenEngine 构造函数。
+/// 整个生命周期只有一对 channel，不存在断线问题。
 pub struct LlmWorkerNode {
     id: AgentId,
     access_points: Vec<AccessPoint>,
     status: RwLock<AgentStatus>,
 
     /// 用于向内部 KezenEngine 发送指令的 channel sender。
+    /// 上级节点通过 `action_sender()` 获取 clone。
     action_tx: mpsc::Sender<UserAction>,
+    /// action_rx 存在 Option 中，init() 时 take() 出来传给 Engine。
+    /// 一旦 take 就不可再次初始化。
+    action_rx: RwLock<Option<mpsc::Receiver<UserAction>>>,
     /// 用于上级订阅引擎事件的 broadcast sender。
+    /// Engine 直接持有此 sender 的 clone，产生事件时 send 到这里。
     event_tx: broadcast::Sender<EngineEvent>,
 
     /// 构建 KezenEngine 所需的配置（在 `init()` 时使用）。
@@ -37,7 +54,7 @@ pub struct LlmWorkerNode {
 impl LlmWorkerNode {
     /// 构造一个新的 LlmWorkerNode。
     ///
-    /// 引擎不会立即启动——需要调用 `init()` 来构建并启动 KezenEngine。
+    /// channel pair 在此时创建一次。引擎不会立即启动——需要调用 `init()`。
     pub fn new(
         id: AgentId,
         access_points: Vec<AccessPoint>,
@@ -45,19 +62,15 @@ impl LlmWorkerNode {
         work_dir: PathBuf,
         permission_mode: PermissionMode,
     ) -> Self {
-        let (action_tx, _action_rx) = mpsc::channel(ACTION_CHANNEL_BUFFER);
+        let (action_tx, action_rx) = mpsc::channel(ACTION_CHANNEL_BUFFER);
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_BUFFER);
-
-        // Note: _action_rx is dropped here intentionally.
-        // A fresh channel pair is created in init() when the engine is actually built.
-        // We keep action_tx and event_tx here as the stable handles for the node.
-        // The real rx ends are wired during init().
 
         Self {
             id,
             access_points,
             status: RwLock::new(AgentStatus::Created),
             action_tx,
+            action_rx: RwLock::new(Some(action_rx)),
             event_tx,
             config,
             work_dir,
@@ -67,14 +80,20 @@ impl LlmWorkerNode {
     }
 
     /// 获取事件广播的订阅 receiver。
-    /// 上级节点（Pod/Gateway）通过此方法订阅 Worker 的事件流。
+    /// 上级节点（Pod/Gateway routing_loop）通过此方法订阅 Worker 的事件流。
     pub fn subscribe_events(&self) -> broadcast::Receiver<EngineEvent> {
         self.event_tx.subscribe()
     }
 
     /// 获取 action sender 的克隆，用于向此 Worker 发送指令。
+    /// routing_loop 通过此方法直接发送 UserAction 到 Worker 的 Engine。
     pub fn action_sender(&self) -> mpsc::Sender<UserAction> {
         self.action_tx.clone()
+    }
+
+    /// 获取 event broadcast sender 的克隆。
+    pub fn event_sender(&self) -> broadcast::Sender<EngineEvent> {
+        self.event_tx.clone()
     }
 }
 
@@ -95,16 +114,13 @@ impl AgentNode for LlmWorkerNode {
     async fn init(&self) -> anyhow::Result<()> {
         tracing::info!(agent = %self.id, work_dir = %self.work_dir.display(), "Worker node initializing");
 
-        // Create a fresh channel pair for the engine.
-        let (_action_tx, action_rx) = mpsc::channel(ACTION_CHANNEL_BUFFER);
-        let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_BUFFER);
-
-        // Replace the stable handles with the new ones.
-        // Safety: we use ptr::write through the RwLock to update the sender/tx.
-        // Since we hold exclusive access during init, this is safe.
-        // However, since action_tx and event_tx are not behind RwLock, we need
-        // a different approach. For now, we pre-create channels in new() and
-        // use those directly. The engine will be wired to these channels.
+        // Take the action_rx (one-shot: cannot re-init).
+        let action_rx = self
+            .action_rx
+            .write()
+            .await
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Worker {} already initialized (action_rx taken)", self.id))?;
 
         let registry = crate::tools::registry::create_default_registry(
             &self.config,
@@ -114,7 +130,7 @@ impl AgentNode for LlmWorkerNode {
         let engine = crate::engine::KezenEngine::new(
             self.config.clone(),
             action_rx,
-            event_tx.clone(),
+            self.event_tx.clone(),
             registry,
             self.permission_mode,
             self.work_dir.clone(),
@@ -132,17 +148,6 @@ impl AgentNode for LlmWorkerNode {
 
         let mut engine_handle = self.engine_handle.write().await;
         *engine_handle = Some(handle);
-
-        // Update the action_tx to point to the new channel.
-        // Note: Since action_tx is not behind RwLock, the initial channels from new()
-        // are used. To properly wire this, we create channels in new() that are
-        // passed directly to the engine. This means the action_tx from new() IS
-        // the one the engine listens on.
-        //
-        // Actually, we need to restructure: create the real channels in new(),
-        // store the rx in an Option, and take() it during init().
-        // For this iteration, we use the approach where init() creates a new engine
-        // with its own channels, and the node exposes the event_tx for subscriptions.
 
         let mut status = self.status.write().await;
         *status = AgentStatus::Ready;
@@ -227,11 +232,6 @@ impl AgentNode for LlmWorkerNode {
     async fn shutdown(&self) -> anyhow::Result<()> {
         tracing::info!(agent = %self.id, "Worker shutting down");
 
-        // Signal the engine to stop by dropping the action channel.
-        // The engine's run() loop exits when action_rx returns None.
-        // We can't drop action_tx directly, but closing the channel
-        // will cause the engine to exit naturally.
-
         let mut handle = self.engine_handle.write().await;
         if let Some(h) = handle.take() {
             h.abort();
@@ -249,6 +249,18 @@ impl AgentNode for LlmWorkerNode {
 
     fn is_gateway(&self) -> bool {
         false
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
+
+    fn action_sender(&self) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
+        Some(self.action_tx.clone())
+    }
+
+    fn subscribe_events(&self) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {
+        Some(self.event_tx.subscribe())
     }
 }
 
@@ -341,5 +353,31 @@ mod tests {
 
         worker.shutdown().await.unwrap();
         assert_eq!(worker.status().await, AgentStatus::Stopped);
+    }
+
+    #[tokio::test]
+    async fn worker_channel_connected() {
+        // Verify action_tx and event_tx are the same pair that init() would use.
+        let worker = LlmWorkerNode::new(
+            AgentId::from("default/coder"),
+            vec![],
+            make_worker_config(),
+            PathBuf::from("/tmp/test"),
+            PermissionMode::DontAsk,
+        );
+
+        // Subscribe to events BEFORE init — this is what routing_loop does.
+        let mut event_rx = worker.subscribe_events();
+        let action_tx = worker.action_sender();
+
+        // Verify the event_tx is functional
+        let _ = worker.event_tx.send(EngineEvent::TextDelta {
+            text: "hello".to_string(),
+        });
+        let evt = event_rx.recv().await.unwrap();
+        assert!(matches!(evt, EngineEvent::TextDelta { text } if text == "hello"));
+
+        // Verify action_tx can send (even though no engine is running)
+        assert!(action_tx.capacity() > 0);
     }
 }

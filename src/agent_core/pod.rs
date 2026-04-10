@@ -4,6 +4,7 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 
 use super::access_point::AccessPoint;
 use super::agent::{AgentId, AgentNode, AgentStatus, AgentTask, AgentTaskResult};
+use super::bus::{self, ChannelPair};
 use super::worker::LlmWorkerNode;
 use crate::config::AppConfig;
 use crate::constants::defaults::{ACTION_CHANNEL_BUFFER, EVENT_CHANNEL_BUFFER};
@@ -12,15 +13,13 @@ use crate::permissions::PermissionMode;
 
 /// 子节点的运行时句柄。
 ///
-/// 持有与子 Agent 通信所需的 channel 端和 AgentNode trait object。
+/// 持有与子 Agent 通信所需的 `ChannelPair` 和 `AgentNode` trait object。
 /// Pod 通过 ChildHandle 向子节点分发任务并接收事件。
 pub struct ChildHandle {
     /// 子节点的 AgentNode 实现。
     pub node: Box<dyn AgentNode>,
-    /// 向子节点发送指令的 channel。
-    pub action_tx: mpsc::Sender<UserAction>,
-    /// 订阅子节点事件的 broadcast sender（用于创建新 subscriber）。
-    pub event_tx: broadcast::Sender<EngineEvent>,
+    /// 父子间通信 channel 对。
+    pub channels: ChannelPair,
 }
 
 /// PodNode — 容器节点，持有 Master Engine + 子节点集合。
@@ -74,8 +73,9 @@ impl PodNode {
             .map(|ch| ch.node.id().clone())
             .collect();
 
-        let (master_action_tx, _) = mpsc::channel(ACTION_CHANNEL_BUFFER);
-        let (master_event_tx, _) = broadcast::channel(EVENT_CHANNEL_BUFFER);
+        let master_channels = bus::create_default_channel_pair();
+        let master_action_tx = master_channels.action_tx;
+        let master_event_tx = master_channels.event_tx;
 
         Self {
             id,
@@ -267,6 +267,18 @@ impl AgentNode for PodNode {
     fn is_gateway(&self) -> bool {
         false
     }
+
+    fn into_any(self: Box<Self>) -> Box<dyn std::any::Any> {
+        self
+    }
+
+    fn action_sender(&self) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
+        Some(self.master_action_tx.clone())
+    }
+
+    fn subscribe_events(&self) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {
+        Some(self.master_event_tx.subscribe())
+    }
 }
 
 /// 从 `ClusterConfig` 递归构建 `AgentNode` 树。
@@ -299,7 +311,7 @@ pub fn build_agent_tree(
 }
 
 /// 递归构建单个 AgentNode。
-fn build_agent_node(
+pub fn build_agent_node(
     agent_config: &crate::control::topology::AgentConfig,
     namespace: &str,
     parent_work_dir: &std::path::Path,
@@ -314,7 +326,32 @@ fn build_agent_node(
 
     match kind {
         Some(AgentKind::Gateway) => {
-            let gw = super::gateway::GatewayNode::from_config(agent_config, Some(namespace))?;
+            let mut gw = super::gateway::GatewayNode::from_config(agent_config, Some(namespace))?;
+
+            let work_dir = agent_config
+                .work_dir
+                .clone()
+                .unwrap_or_else(|| parent_work_dir.to_path_buf());
+
+            // Recursively build child nodes for the Gateway (same as Pod).
+            let mut child_handles = Vec::new();
+            for worker_config in &agent_config.workers {
+                let child_node = build_agent_node(
+                    worker_config,
+                    namespace,
+                    &work_dir,
+                    base_config,
+                    cluster,
+                    permission_mode,
+                )?;
+                let channels = bus::create_default_channel_pair();
+                child_handles.push(ChildHandle {
+                    node: child_node,
+                    channels,
+                });
+            }
+
+            gw.set_children(child_handles);
             Ok(Box::new(gw))
         }
         Some(AgentKind::Worker) | None => {
@@ -325,11 +362,28 @@ fn build_agent_node(
                 .unwrap_or_else(|| parent_work_dir.to_path_buf());
 
             let mut agent_app_config = base_config.clone();
-            // Apply agent-level model override.
+            
+            // Resolve model profile
+            let mut model_str = None;
             if let Some(m) = &agent_config.model {
-                agent_app_config.model = Some(m.clone());
+                model_str = Some(m.clone());
             } else if let Some(m) = &cluster.defaults.model {
-                agent_app_config.model = Some(m.clone());
+                model_str = Some(m.clone());
+            }
+
+            if let Some(ref m) = model_str {
+                if let Some(profile) = cluster.models.get(m).or_else(|| base_config.models.get(m)) {
+                    agent_app_config.provider = profile.provider;
+                    agent_app_config.model = Some(profile.model.clone());
+                    if let Some(ref key) = profile.api_key {
+                        agent_app_config.api_key = Some(key.clone());
+                    }
+                    if let Some(ref url) = profile.api_url {
+                        agent_app_config.api_url = Some(url.clone());
+                    }
+                } else {
+                    agent_app_config.model = Some(m.clone());
+                }
             }
 
             let id = AgentId(format!("{}/{}", namespace, name));
@@ -353,19 +407,36 @@ fn build_agent_node(
                 .unwrap_or_else(|| parent_work_dir.to_path_buf());
 
             let mut agent_app_config = base_config.clone();
-            // Apply master-level model override if present.
+
+            // Resolve master-level model profile if present
+            let mut model_str = None;
             if let Some(ref master) = agent_config.master {
                 if let Some(m) = &master.model {
-                    agent_app_config.model = Some(m.clone());
+                    model_str = Some(m.clone());
                 }
             }
-            if agent_app_config.model.is_none() {
+            if model_str.is_none() {
                 if let Some(m) = &cluster.defaults.model {
+                    model_str = Some(m.clone());
+                }
+            }
+
+            if let Some(ref m) = model_str {
+                if let Some(profile) = cluster.models.get(m).or_else(|| base_config.models.get(m)) {
+                    agent_app_config.provider = profile.provider;
+                    agent_app_config.model = Some(profile.model.clone());
+                    if let Some(ref key) = profile.api_key {
+                        agent_app_config.api_key = Some(key.clone());
+                    }
+                    if let Some(ref url) = profile.api_url {
+                        agent_app_config.api_url = Some(url.clone());
+                    }
+                } else {
                     agent_app_config.model = Some(m.clone());
                 }
             }
 
-            // Recursively build child nodes.
+            // Recursively build child nodes with channel pairs.
             let mut child_handles = Vec::new();
             for worker_config in &agent_config.workers {
                 let child_node = build_agent_node(
@@ -377,13 +448,11 @@ fn build_agent_node(
                     permission_mode,
                 )?;
 
-                let (action_tx, _) = mpsc::channel(ACTION_CHANNEL_BUFFER);
-                let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_BUFFER);
+                let channels = bus::create_default_channel_pair();
 
                 child_handles.push(ChildHandle {
                     node: child_node,
-                    action_tx,
-                    event_tx,
+                    channels,
                 });
             }
 
@@ -473,13 +542,11 @@ mod tests {
             PermissionMode::DontAsk,
         );
 
-        let (action_tx, _) = mpsc::channel(ACTION_CHANNEL_BUFFER);
-        let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_BUFFER);
+        let channels = bus::create_default_channel_pair();
 
         let handle = ChildHandle {
             node: Box::new(child),
-            action_tx,
-            event_tx,
+            channels,
         };
 
         let pod = PodNode::new(
@@ -532,6 +599,7 @@ mod tests {
                 model: Some("claude-3-5-sonnet-latest".to_string()),
                 ..Default::default()
             },
+            models: std::collections::HashMap::new(),
             agents: vec![crate::control::topology::AgentConfig {
                 kind: Some(crate::control::topology::AgentKind::Gateway),
                 name: Some("gateway".to_string()),
@@ -572,6 +640,7 @@ mod tests {
                 model: Some("default-model".to_string()),
                 ..Default::default()
             },
+            models: std::collections::HashMap::new(),
             agents: vec![crate::control::topology::AgentConfig {
                 kind: Some(crate::control::topology::AgentKind::Gateway),
                 name: Some("gateway".to_string()),
