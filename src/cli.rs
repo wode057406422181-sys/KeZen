@@ -33,10 +33,6 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub api_key: Option<String>,
 
-    /// Override max tokens
-    #[arg(long, global = true)]
-    pub max_tokens: Option<u32>,
-
     /// Use TUI mode instead of REPL (experimental)
     #[arg(long, global = true)]
     pub tui: bool,

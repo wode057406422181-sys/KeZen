@@ -383,6 +383,7 @@ pub fn build_agent_node(
 
             if let Some(ref m) = model_str {
                 if let Some(profile) = cluster.models.get(m).or_else(|| base_config.models.get(m)) {
+                    agent_app_config.active_profile = Some(m.clone());
                     agent_app_config.provider = profile.provider;
                     agent_app_config.model = Some(profile.model.clone());
                     if let Some(ref key) = profile.api_key {
@@ -433,6 +434,7 @@ pub fn build_agent_node(
 
             if let Some(ref m) = model_str {
                 if let Some(profile) = cluster.models.get(m).or_else(|| base_config.models.get(m)) {
+                    agent_app_config.active_profile = Some(m.clone());
                     agent_app_config.provider = profile.provider;
                     agent_app_config.model = Some(profile.model.clone());
                     if let Some(ref key) = profile.api_key {

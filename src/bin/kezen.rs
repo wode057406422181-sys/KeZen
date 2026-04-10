@@ -112,9 +112,6 @@ async fn main() -> Result<()> {
                     if let Some(ref k) = cli.api_key {
                         config.api_key = kezen::config::keys::resolve_key(Some(k.clone()));
                     }
-                    if let Some(t) = cli.max_tokens {
-                        config.max_tokens = Some(t);
-                    }
                     if cli.no_mcp {
                         config.no_mcp = true;
                     }
@@ -153,9 +150,6 @@ async fn main() -> Result<()> {
     }
     if let Some(ref k) = cli.api_key {
         config.api_key = kezen::config::keys::resolve_key(Some(k.clone()));
-    }
-    if let Some(t) = cli.max_tokens {
-        config.max_tokens = Some(t);
     }
     if cli.no_mcp {
         config.no_mcp = true;

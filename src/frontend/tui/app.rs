@@ -147,7 +147,7 @@ impl App {
             session_cache_read_tokens: 0,
             pricing,
             context_window: config
-                .context_window
+                .context_window()
                 .unwrap_or_else(|| crate::engine::compact::context_window_for_model(&model)),
 
             should_quit: false,

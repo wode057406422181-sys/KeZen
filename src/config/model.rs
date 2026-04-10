@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{Provider, default_true};
 
+use crate::constants::api::DEFAULT_MAX_TOKENS;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelProfile {
     #[serde(default)]
@@ -19,6 +21,17 @@ pub struct ModelProfile {
     pub include_stream_usage: bool,
     #[serde(default = "default_true")]
     pub enable_cache: bool,
+    /// Max output tokens for this model. Defaults to DEFAULT_MAX_TOKENS.
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+    /// Context window size for this model (tokens).
+    pub context_window: Option<u64>,
+    /// Custom User-Agent string for this model's HTTP requests.
+    pub user_agent: Option<String>,
+}
+
+fn default_max_tokens() -> u32 {
+    DEFAULT_MAX_TOKENS
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
