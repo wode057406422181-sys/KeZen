@@ -75,6 +75,9 @@ async def harness(request):
     """Session-scoped harness: one per provider (anthropic, openai).
 
     Kept for backward compatibility with test_smoke.py.
+    NOTE: This fixture performs Docker builds which can take 5+ minutes
+    on a cold cache. The global pytest-timeout does not apply to fixtures,
+    so we rely on the subprocess completing within a reasonable window.
     """
     provider = request.param
     h = KezenTestHarness(fixture_file="manual/smoke.yaml", provider=provider)

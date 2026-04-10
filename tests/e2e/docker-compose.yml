@@ -37,7 +37,6 @@ services:
       KEZEN_API_KEY: "${KEZEN_API_KEY:-mock-test-key}"
       KEZEN_MODEL: "${KEZEN_MODEL:-mock-model}"
       KEZEN_PROVIDER: "${KEZEN_PROVIDER:-anthropic}"
-      KEZEN_MAX_TOKENS: "${KEZEN_MAX_TOKENS:-128000}"
       KEZEN_SEARCH_MODE: "${KEZEN_SEARCH_MODE:-off}"
       RUST_LOG: "debug"
     volumes:

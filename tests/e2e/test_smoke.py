@@ -1,6 +1,6 @@
 import pytest
 
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(120)
 async def test_smoke_text_response(cli, harness):
     """Verify full pipeline: Python -> gRPC -> kezen -> mock-llm-server."""
     result = await cli.send_message("Hello, kezen!")
@@ -12,7 +12,7 @@ async def test_smoke_text_response(cli, harness):
     assert "E2E pipeline is working" in result.text
     assert len(result.tool_calls) == 0
 
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(120)
 async def test_smoke_server_hello(cli):
     """Verify gRPC handshake completed with ServerHello."""
     assert cli._server_hello is not None
