@@ -74,4 +74,21 @@ pub enum Command {
         #[arg(short, long)]
         set: Option<String>,
     },
+
+    /// Manage API keys securely
+    Keys {
+        #[command(subcommand)]
+        command: KeysCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum KeysCommand {
+    /// Save an API key securely into the OS keychain
+    Set {
+        /// The profile identifier to bind the key to (e.g. qwen, anthropic)
+        profile: String,
+        /// The plaintext API string
+        key: String,
+    },
 }

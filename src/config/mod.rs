@@ -3,9 +3,11 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use secrecy::SecretString;
 
 pub mod mcp;
 pub mod model;
+pub mod keys;
 
 pub use self::model::ModelProfile;
 
@@ -116,7 +118,7 @@ pub struct AppConfig {
     #[serde(skip)]
     pub api_url: Option<String>,
     #[serde(skip)]
-    pub api_key: Option<String>,
+    pub api_key: Option<SecretString>,
     #[serde(skip)]
     pub thinking: bool,
     #[serde(skip, default = "default_true")]
@@ -202,13 +204,13 @@ impl AppConfig {
         // Layer 3: fallback provider-specific env vars (lower priority)
         if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
             if config.api_key.is_none() {
-                config.api_key = Some(key);
+                config.api_key = keys::resolve_key(Some(key));
                 config.provider = Provider::Anthropic;
             }
         } else if let Ok(key) = std::env::var("OPENAI_API_KEY")
             && config.api_key.is_none()
         {
-            config.api_key = Some(key);
+            config.api_key = keys::resolve_key(Some(key));
             config.provider = Provider::OpenAi;
         }
 
@@ -220,7 +222,7 @@ impl AppConfig {
             };
         }
         if let Ok(val) = std::env::var("KEZEN_API_KEY") {
-            config.api_key = Some(val);
+            config.api_key = keys::resolve_key(Some(val));
         }
         if let Ok(val) = std::env::var("KEZEN_BASE_URL") {
             config.api_url = Some(val);
@@ -315,7 +317,7 @@ impl AppConfig {
                 self.provider = profile.provider;
                 self.model = Some(profile.model.clone());
                 if let Some(ref key) = profile.api_key {
-                    self.api_key = Some(key.clone());
+                    self.api_key = Some(SecretString::from(key.clone()));
                 }
                 if let Some(ref url) = profile.api_url {
                     self.api_url = Some(url.clone());
@@ -379,7 +381,7 @@ impl AppConfig {
             self.include_stream_usage = profile.include_stream_usage;
             self.enable_cache = profile.enable_cache;
             if let Some(key) = profile.api_key {
-                self.api_key = Some(key);
+                self.api_key = keys::resolve_key(Some(key));
             }
             if let Some(url) = profile.api_url {
                 self.api_url = Some(url);
@@ -396,7 +398,7 @@ impl fmt::Debug for AppConfig {
             .field("provider", &self.provider)
             .field("api_url", &self.api_url)
             // Redact the API key — never print credentials to the terminal.
-            .field("api_key", &self.api_key.as_deref().map(|_| "[REDACTED]"))
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
             .field("model", &self.model)
             .field("max_tokens", &self.max_tokens)
             .field("thinking", &self.thinking)
@@ -493,7 +495,7 @@ mod tests {
     #[test]
     fn debug_output_redacts_api_key() {
         let config = AppConfig {
-            api_key: Some("sk-secret-key-1234".to_string()),
+            api_key: Some(SecretString::from("sk-secret-key-1234")),
             ..AppConfig::default()
         };
         let debug_str = format!("{:?}", config);

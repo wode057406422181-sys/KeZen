@@ -74,6 +74,8 @@ htmd = "0.1"
 lru = "0.13"
 url = "2"
 indexmap = { version = "2.13.1", features = ["serde"] }
+keyring = "3.6.3"
+secrecy = { version = "0.10.3", features = ["serde"] }
 
 [profile.release]
 opt-level = 3

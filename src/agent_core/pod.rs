@@ -386,7 +386,7 @@ pub fn build_agent_node(
                     agent_app_config.provider = profile.provider;
                     agent_app_config.model = Some(profile.model.clone());
                     if let Some(ref key) = profile.api_key {
-                        agent_app_config.api_key = Some(key.clone());
+                        agent_app_config.api_key = crate::config::keys::resolve_key(Some(key.clone()));
                     }
                     if let Some(ref url) = profile.api_url {
                         agent_app_config.api_url = Some(url.clone());
@@ -436,7 +436,7 @@ pub fn build_agent_node(
                     agent_app_config.provider = profile.provider;
                     agent_app_config.model = Some(profile.model.clone());
                     if let Some(ref key) = profile.api_key {
-                        agent_app_config.api_key = Some(key.clone());
+                        agent_app_config.api_key = crate::config::keys::resolve_key(Some(key.clone()));
                     }
                     if let Some(ref url) = profile.api_url {
                         agent_app_config.api_url = Some(url.clone());
@@ -519,7 +519,7 @@ mod tests {
     fn make_pod_config() -> AppConfig {
         AppConfig {
             model: Some("test-model".to_string()),
-            api_key: Some("test-key".to_string()),
+            api_key: Some(secrecy::SecretString::from("test-key")),
             ..AppConfig::default()
         }
     }
@@ -616,7 +616,7 @@ mod tests {
         };
 
         let base_config = AppConfig {
-            api_key: Some("test-key".to_string()),
+            api_key: Some(secrecy::SecretString::from("test-key")),
             ..AppConfig::default()
         };
 
@@ -674,7 +674,7 @@ mod tests {
         };
 
         let base_config = AppConfig {
-            api_key: Some("test-key".to_string()),
+            api_key: Some(secrecy::SecretString::from("test-key")),
             ..AppConfig::default()
         };
 

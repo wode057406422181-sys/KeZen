@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue};
+use secrecy::ExposeSecret;
 use serde_json::json;
 
 use crate::api::debug_logger;
@@ -22,7 +23,7 @@ pub struct AnthropicClient {
 
 impl AnthropicClient {
     pub fn new(config: &AppConfig) -> Result<Self, KezenError> {
-        let api_key = config.api_key.as_deref().ok_or(KezenError::NoApiKey)?;
+        let api_key = config.api_key.as_ref().map(|s| s.expose_secret().to_string()).ok_or(KezenError::NoApiKey)?;
         let model = config
             .model
             .as_deref()
@@ -32,7 +33,7 @@ impl AnthropicClient {
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-api-key",
-            HeaderValue::from_str(api_key)
+            HeaderValue::from_str(&api_key)
                 .map_err(|e| KezenError::Config(format!("Invalid API key format: {}", e)))?,
         );
         headers.insert(

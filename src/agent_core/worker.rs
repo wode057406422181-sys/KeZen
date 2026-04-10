@@ -270,7 +270,7 @@ mod tests {
     fn make_worker_config() -> AppConfig {
         AppConfig {
             model: Some("test-model".to_string()),
-            api_key: Some("test-key".to_string()),
+            api_key: Some(secrecy::SecretString::from("test-key")),
             ..AppConfig::default()
         }
     }

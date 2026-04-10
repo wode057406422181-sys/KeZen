@@ -5,7 +5,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
-use kezen::cli::{Cli, Command};
+use kezen::cli::{Cli, Command, KeysCommand};
 use kezen::config::Provider;
 
 #[tokio::main]
@@ -110,7 +110,7 @@ async fn main() -> Result<()> {
                         };
                     }
                     if let Some(ref k) = cli.api_key {
-                        config.api_key = Some(k.clone());
+                        config.api_key = kezen::config::keys::resolve_key(Some(k.clone()));
                     }
                     if let Some(t) = cli.max_tokens {
                         config.max_tokens = Some(t);
@@ -152,7 +152,7 @@ async fn main() -> Result<()> {
         };
     }
     if let Some(ref k) = cli.api_key {
-        config.api_key = Some(k.clone());
+        config.api_key = kezen::config::keys::resolve_key(Some(k.clone()));
     }
     if let Some(t) = cli.max_tokens {
         config.max_tokens = Some(t);
@@ -224,6 +224,33 @@ async fn main() -> Result<()> {
                 (Some(k), Some(v)) => println!("Setting {k} = {v} (not fully implemented)"),
                 (Some(k), None) => println!("Getting config: {k} (not fully implemented)"),
                 _ => println!("Current configuration:\n{:#?}", config),
+            }
+            Ok(())
+        }
+        Some(Command::Keys { command }) => {
+            match command {
+                KeysCommand::Set { profile, key } => {
+                    let entry = keyring::Entry::new("kezen", &profile)?;
+                    entry.set_password(&key)?;
+                    println!("Successfully stored API key for profile '{}' in OS keychain.", profile);
+                    
+                    let mut models_config = kezen::config::model::ModelsConfig::load()?;
+                    if !models_config.models.contains_key(&profile) {
+                        models_config.models.insert(profile.clone(), kezen::config::ModelProfile {
+                            provider: kezen::config::Provider::Anthropic, // Defaulting, better to just edit API key and leave alone or create new
+                            model: format!("{}-model", profile),
+                            api_key: Some(format!("keystore://{}", profile)),
+                            api_url: None,
+                            thinking: false,
+                            include_stream_usage: false,
+                            enable_cache: false,
+                        });
+                    } else if let Some(p) = models_config.models.get_mut(&profile) {
+                        p.api_key = Some(format!("keystore://{}", profile));
+                    }
+                    models_config.save()?;
+                    println!("Updated ~/.kezen/config/model.toml to use keystore://{}", profile);
+                }
             }
             Ok(())
         }

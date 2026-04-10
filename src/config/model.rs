@@ -50,4 +50,18 @@ impl ModelsConfig {
             Ok(Self::default())
         }
     }
+
+    /// Save the models dictionary to model.toml
+    pub fn save(&self) -> Result<()> {
+        let path = Self::config_path()?;
+        
+        let parent = path.parent().unwrap();
+        if !parent.exists() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        let content = toml::to_string_pretty(self)?;
+        std::fs::write(&path, content)?;
+        Ok(())
+    }
 }
