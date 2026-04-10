@@ -99,7 +99,9 @@ async fn main() -> Result<()> {
 
                     // CLI argument overrides (highest priority) — apply before runtime.
                     if let Some(ref m) = cli.model {
-                        config.model = Some(m.clone());
+                        config.resolve_model_profile(m);
+                    } else if let Some(m) = config.model.clone() {
+                        config.resolve_model_profile(&m);
                     }
                     if let Some(ref p) = cli.provider {
                         config.provider = match p.to_lowercase().as_str() {
@@ -139,7 +141,9 @@ async fn main() -> Result<()> {
 
     // Layer 1: CLI argument overrides (highest priority)
     if let Some(ref m) = cli.model {
-        config.model = Some(m.clone());
+        config.resolve_model_profile(m);
+    } else if let Some(m) = config.model.clone() {
+        config.resolve_model_profile(&m);
     }
     if let Some(ref p) = cli.provider {
         config.provider = match p.to_lowercase().as_str() {

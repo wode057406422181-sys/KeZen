@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use super::config::McpServerConfig;
+use crate::config::mcp::McpServerConfig;
 
 pub struct StdioTransport {
     /// Wrapped in `Option` so `Drop` can take ownership and spawn an async

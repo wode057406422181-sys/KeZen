@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::config::{McpConfig, McpServerConfig};
+use crate::config::mcp::{McpConfig, McpServerConfig};
 use super::tool::McpTool;
 use super::transport::StdioTransport;
 use crate::constants::api::MCP_PROTOCOL_VERSION;

@@ -869,19 +869,28 @@ impl KezenEngine {
             }
             "model" => {
                 if args.is_empty() {
+                    let mut aliases: Vec<String> = self.config.models.keys().cloned().collect();
+                    aliases.sort();
+                    let aliases_str = if aliases.is_empty() {
+                        "No custom [models] configured in kezen.toml.".to_string()
+                    } else {
+                        format!("Available model profiles: {}", aliases.join(", "))
+                    };
+
                     let _ = self.event_tx.send(EngineEvent::SlashCommandResult {
                         command: "/model".into(),
                         output: format!(
-                            "Current model: {}. Usage: /model <name>",
-                            self.config.model.as_deref().unwrap_or("none")
+                            "Current model: {}\nUsage: /model <name>\n{}",
+                            self.config.model.as_deref().unwrap_or("none"),
+                            aliases_str
                         ),
                     });
                 } else {
-                    self.config.model = Some(args.to_string());
+                    self.config.resolve_model_profile(args);
                     match api::create_client(&self.config) {
                         Ok(client) => {
                             self.client = client;
-                            let pricing = crate::cost::get_model_pricing(args);
+                            let pricing = crate::cost::get_model_pricing(self.config.model.as_deref().unwrap_or(args));
                             self.session.pricing = pricing;
                             self.session.model_name = args.to_string();
                             let _ = self.event_tx.send(EngineEvent::SlashCommandResult {

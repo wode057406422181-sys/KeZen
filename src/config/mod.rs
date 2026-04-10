@@ -4,6 +4,11 @@ use std::path::PathBuf;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+pub mod mcp;
+pub mod model;
+
+pub use self::model::ModelProfile;
+
 use crate::constants::api::DEFAULT_MAX_TOKENS;
 use crate::constants::api::{
     DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT,
@@ -79,14 +84,7 @@ impl Default for SearchConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ModelProfile {
-    #[serde(default)]
-    pub provider: Provider,
-    pub model: String,
-    pub api_key: Option<String>,
-    pub api_url: Option<String>,
-}
+
 
 /// Application configuration
 ///
@@ -99,55 +97,33 @@ pub struct ModelProfile {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
-    pub provider: Provider,
-
-    /// Whether to start in multi-agent mode
-    #[serde(default)]
     pub multiagent: bool,
-
-    /// Custom API endpoint URL
-    pub api_url: Option<String>,
-
-    /// API key
-    pub api_key: Option<String>,
-
-    /// Model to use (no default; user must specify)
     pub model: Option<String>,
-
-    /// Maximum tokens for responses
     pub max_tokens: Option<u32>,
-
-    /// Override the context window size
     pub context_window: Option<u64>,
-
-    /// Enable extended thinking (Anthropic only)
-    #[serde(default)]
-    pub thinking: bool,
-
-    /// Custom User-Agent header (useful for Coding Plan endpoints)
     pub user_agent: Option<String>,
 
-    /// Disable MCP server connections
     #[serde(default)]
     pub no_mcp: bool,
 
-    /// Send stream_options.include_usage in OpenAI streaming requests.
-    ///
-    /// Set to `false` for endpoints that don't support this field (DashScope,
-    /// Ollama, vLLM, etc.). Defaults to `true` for the official OpenAI API.
-    #[serde(default = "default_true")]
-    pub include_stream_usage: bool,
-
-    /// Enable LLM Prompt Caching (e.g. Anthropic cache_control)
-    #[serde(default = "default_true")]
-    pub enable_cache: bool,
-
-    /// Named model profiles
     #[serde(default)]
     pub models: std::collections::HashMap<String, ModelProfile>,
-
-    /// Web search configuration (loaded from [search] section).
     pub search: Option<SearchConfig>,
+
+    // Runtime loaded active profile fields (not serialized from root)
+    #[serde(skip)]
+    pub provider: Provider,
+    #[serde(skip)]
+    pub api_url: Option<String>,
+    #[serde(skip)]
+    pub api_key: Option<String>,
+    #[serde(skip)]
+    pub thinking: bool,
+    #[serde(skip, default = "default_true")]
+    pub include_stream_usage: bool,
+    #[serde(skip, default = "default_true")]
+    pub enable_cache: bool,
+
 }
 
 impl Default for AppConfig {
@@ -213,6 +189,13 @@ impl AppConfig {
                         e
                     ));
                 }
+            }
+        }
+
+        // Layer 3.5: merge additional models from model.toml
+        if let Ok(models_config) = crate::config::model::ModelsConfig::load() {
+            for (k, v) in models_config.models {
+                config.models.entry(k).or_insert(v);
             }
         }
 
@@ -301,13 +284,7 @@ impl AppConfig {
     pub fn config_path() -> Result<PathBuf> {
         let home =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        let new_path = home.join(".kezen").join("config").join("kezen.toml");
-        let old_path = home.join(".kezen").join("config").join("config.toml");
-        if !new_path.exists() && old_path.exists() {
-            eprintln!("  ⚠ Please rename ~/.kezen/config/config.toml → kezen.toml");
-            return Ok(old_path);
-        }
-        Ok(new_path)
+        Ok(home.join(".kezen").join("config").join("kezen.toml"))
     }
 
     /// Merge AppConfig with multi-agent topology configs.
@@ -390,6 +367,26 @@ impl AppConfig {
     /// Get User-Agent string (configurable, defaults to kezen/<version>)
     pub fn user_agent(&self) -> &str {
         self.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT)
+    }
+
+    /// Resolves a model name against the predefined model profiles (`[models]`).
+    /// Updates the configuration (provider, model, API keys/URLs) if matched.
+    pub fn resolve_model_profile(&mut self, profile_name: &str) {
+        if let Some(profile) = self.models.get(profile_name).cloned() {
+            self.provider = profile.provider;
+            self.model = Some(profile.model);
+            self.thinking = profile.thinking;
+            self.include_stream_usage = profile.include_stream_usage;
+            self.enable_cache = profile.enable_cache;
+            if let Some(key) = profile.api_key {
+                self.api_key = Some(key);
+            }
+            if let Some(url) = profile.api_url {
+                self.api_url = Some(url);
+            }
+        } else {
+            self.model = Some(profile_name.to_string());
+        }
     }
 }
 
