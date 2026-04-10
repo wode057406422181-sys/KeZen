@@ -31,7 +31,7 @@ pub async fn run_grpc_client(
     // 3. Forward REPL actions to gRPC Outbound
     let out_tx_clone = outbound_tx.clone();
     drop(outbound_tx); // Drop the original sender so the stream completes when task finishes
-    tokio::spawn(async move {
+    let action_task = tokio::spawn(async move {
         while let Some(action) = action_rx.recv().await {
             if let Some(msg) = user_action_to_client_message(action) {
                 if out_tx_clone.send(msg).await.is_err() {
@@ -44,17 +44,31 @@ pub async fn run_grpc_client(
     // 4. Send request and get response stream
     let response = client
         .stream_session(tonic::Request::new(request_stream))
-        .await?;
-    let mut inbound_stream = response.into_inner();
+        .await;
 
-    // 5. Forward gRPC Inbound to REPL events
-    while let Ok(Some(server_msg)) = inbound_stream.message().await {
-        if let Some(event) = server_message_to_engine_event(server_msg) {
-            let _ = event_tx.send(event);
+    let res = match response {
+        Ok(res) => {
+            let mut inbound_stream = res.into_inner();
+            while let Ok(Some(server_msg)) = inbound_stream.message().await {
+                if let Some(event) = server_message_to_engine_event(server_msg) {
+                    let _ = event_tx.send(event);
+                }
+            }
+            let _ = event_tx.send(EngineEvent::Error {
+                message: "Server disconnected gracefully".to_string(),
+            });
+            Ok(())
         }
-    }
+        Err(e) => {
+            let _ = event_tx.send(EngineEvent::Error {
+                message: format!("Lost connection to server: {}", e),
+            });
+            Err(anyhow::anyhow!("gRPC session error: {}", e))
+        }
+    };
 
-    Ok(())
+    action_task.abort();
+    res
 }
 
 fn user_action_to_client_message(action: UserAction) -> Option<ClientMessage> {

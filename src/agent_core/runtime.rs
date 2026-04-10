@@ -63,7 +63,7 @@ pub async fn run_multiagent(
     let gateway_id = gateway.id().clone();
     let event_tx_for_loop = event_tx.clone();
 
-    tokio::spawn(async move {
+    let routing_handle = tokio::spawn(async move {
         tracing::info!(agent = %gateway_id, "Routing loop started");
 
         if children.is_empty() {
@@ -72,8 +72,18 @@ pub async fn run_multiagent(
         }
 
         let mut task_counter = 0u64;
+        let mut pending_actions: std::collections::VecDeque<UserAction> = std::collections::VecDeque::new();
 
-        while let Some(action) = action_rx.recv().await {
+        loop {
+            let action = if let Some(a) = pending_actions.pop_front() {
+                a
+            } else {
+                match action_rx.recv().await {
+                    Some(a) => a,
+                    None => break,
+                }
+            };
+
             match action {
                 UserAction::SendMessage { content } => {
                     task_counter += 1;
@@ -111,9 +121,16 @@ pub async fn run_multiagent(
                             tokio::select! {
                                 action_opt = action_rx.recv() => {
                                     if let Some(action) = action_opt {
-                                        // 活跃期间收到新的 action，直接转发给当前子节点
-                                        if let Err(e) = action_tx.send(action).await {
-                                            tracing::warn!(task_id = %task_id, error = %e, "Failed to forward action to child");
+                                        match action {
+                                            UserAction::Cancel | UserAction::PermissionResponse { .. } => {
+                                                if let Err(e) = action_tx.send(action).await {
+                                                    tracing::warn!(task_id = %task_id, error = %e, "Failed to forward action to child");
+                                                }
+                                            }
+                                            UserAction::SendMessage { .. } => {
+                                                tracing::warn!(task_id = %task_id, "SendMessage received during active task — queuing");
+                                                pending_actions.push_back(action);
+                                            }
                                         }
                                     } else {
                                         // action_rx closed
@@ -216,6 +233,7 @@ pub async fn run_multiagent(
     crate::frontend::repl::repl::run_repl(config, action_tx, event_rx, initial_prompt).await?;
 
     // ── 7. Shutdown gateway (access points) ──────────────────────────────
+    let _ = routing_handle.await;
     gateway.shutdown().await?;
     tracing::info!("Multi-agent runtime shut down");
 
