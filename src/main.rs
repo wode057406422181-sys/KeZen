@@ -1,3 +1,4 @@
+mod agent_core;
 mod api;
 mod audit;
 mod cli;
@@ -83,6 +84,61 @@ async fn main() -> Result<()> {
     // Load config (file + env vars)
     let mut config = config::AppConfig::load()?;
 
+    let permission_mode = if cli.yes {
+        crate::permissions::PermissionMode::DontAsk
+    } else {
+        crate::permissions::PermissionMode::Default
+    };
+
+    if config.multiagent {
+        if let Ok(config_file) = config::AppConfig::config_path() {
+            match crate::control::topology::load_cluster_config(&config_file).await {
+                Ok(cluster) => {
+                    eprintln!("  🚀 Multi-Agent Mode Detected!");
+                    eprintln!("     Cluster: {}", cluster.cluster.name.as_deref().unwrap_or("unnamed"));
+                    eprintln!("     Agents : {}", cluster.agents.len());
+                    if let Some(wd) = &cluster.cluster.work_dir {
+                        eprintln!("     WorkDir: {}", wd.display());
+                    }
+
+                    if let Some(gateway) = cluster.agents.first() {
+                        config.merge_with_toml(gateway, &cluster);
+                    }
+
+                    // Build the AgentNode tree from ClusterConfig.
+                    match crate::agent_core::pod::build_agent_tree(
+                        &cluster,
+                        &config,
+                        permission_mode,
+                    ) {
+                        Ok(root) => {
+                            eprintln!("     Root   : {} (gateway={})", root.id(), root.is_gateway());
+                            let children = root.children();
+                            for child_id in &children {
+                                eprintln!("       └─ {}", child_id);
+                            }
+                            tracing::info!(
+                                root = %root.id(),
+                                children = children.len(),
+                                "Agent tree built successfully"
+                            );
+                            // TODO: In a future iteration, init() the tree and start
+                            // the Gateway routing loop. For now, fall through to
+                            // single-agent startup with the merged config.
+                        }
+                        Err(e) => {
+                            eprintln!("  ⚠ Failed to build agent tree: {}", e);
+                            tracing::warn!(error = %e, "Agent tree build failed, falling back to single-agent");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  ⚠ Failed to load cluster topology from {}: {}", config_file.display(), e);
+                }
+            }
+        }
+    }
+
     // Layer 1: CLI argument overrides (highest priority)
     if let Some(ref m) = cli.model {
         config.model = Some(m.clone());
@@ -111,12 +167,6 @@ async fn main() -> Result<()> {
 
     // Clean up audit logs older than 30 days
     audit::cleanup_old_audit_logs().await;
-
-    let permission_mode = if cli.yes {
-        crate::permissions::PermissionMode::DontAsk
-    } else {
-        crate::permissions::PermissionMode::Default
-    };
 
     match cli.command {
         Some(Command::ServeGrpc { addr }) => {

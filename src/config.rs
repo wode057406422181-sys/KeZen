@@ -91,6 +91,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub provider: Provider,
 
+    /// Whether to start in multi-agent mode
+    #[serde(default)]
+    pub multiagent: bool,
+
     /// Custom API endpoint URL
     pub api_url: Option<String>,
 
@@ -136,6 +140,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             provider: Provider::Anthropic,
+            multiagent: false,
             api_url: None,
             api_key: None,
             model: None,
@@ -265,7 +270,53 @@ impl AppConfig {
     pub fn config_path() -> Result<PathBuf> {
         let home =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        Ok(home.join(".kezen").join("config").join("config.toml"))
+        Ok(home.join(".kezen").join("config").join("kezen.toml"))
+    }
+
+    /// Merge AppConfig with multi-agent topology configs.
+    /// Priority: CLI > env > kezen.toml(AppConfig Root) > kezen.toml(Agent List) > kezen.toml([defaults])
+    /// Because AppConfig is already loaded with kezen.toml(AppConfig Root) + env, 
+    /// we only applying Agent/Cluster fields if the AppConfig field is currently None or default.
+    pub fn merge_with_toml(
+        &mut self,
+        agent: &crate::control::topology::AgentConfig,
+        cluster: &crate::control::topology::ClusterConfig,
+    ) {
+        // Model
+        if self.model.is_none() {
+            if let Some(m) = &agent.model {
+                self.model = Some(m.clone());
+            } else if let Some(m) = &cluster.defaults.model {
+                self.model = Some(m.clone());
+            }
+        }
+
+        // Max Tokens
+        if self.max_tokens.is_none() || self.max_tokens == Some(crate::constants::defaults::DEFAULT_MAX_TOKENS) {
+            if let Some(limits) = &agent.resource_limits {
+                if let Some(mt) = limits.max_tokens_per_turn {
+                    self.max_tokens = Some(mt as u32);
+                }
+            } else if let Some(mt) = cluster.defaults.max_tokens {
+                self.max_tokens = Some(mt as u32);
+            }
+        }
+
+        // Context Window
+        if self.context_window.is_none() {
+            if let Some(cw) = cluster.defaults.context_window {
+                self.context_window = Some(cw as u64);
+            }
+        }
+
+        // no_mcp: set to true if agent explicitly has empty mcp_servers
+        if !self.no_mcp {
+            if let Some(mcp) = &agent.mcp_servers {
+                if mcp.is_empty() {
+                    self.no_mcp = true;
+                }
+            }
+        }
     }
 
     /// Get the base URL for the configured provider
@@ -512,5 +563,72 @@ mod tests {
         let search = config.search.unwrap();
         assert_eq!(search.search_mode, "off");
         assert_eq!(search.fetch_mode, "client");
+    }
+
+    // ── Multiagent merge_with_toml tests ─────────────────────────────────────
+
+    #[test]
+    fn multiagent_deserializes_to_false_by_default() {
+        let toml_str = r#"
+            provider = "anthropic"
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.multiagent);
+    }
+
+    #[test]
+    fn multiagent_deserializes_to_true_when_set() {
+        let toml_str = r#"
+            multiagent = true
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.multiagent);
+    }
+
+    #[test]
+    fn merge_with_toml_inherits_agent_over_cluster() {
+        let mut config = AppConfig::default();
+        config.model = None;
+
+        let cluster = crate::control::topology::ClusterConfig {
+            defaults: crate::control::topology::DefaultsConfig {
+                model: Some("cluster-model".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let agent = crate::control::topology::AgentConfig {
+            model: Some("agent-model".to_string()),
+            ..Default::default()
+        };
+
+        config.merge_with_toml(&agent, &cluster);
+        assert_eq!(config.model.as_deref(), Some("agent-model"));
+    }
+
+    #[test]
+    fn merge_with_toml_does_not_override_existing_values() {
+        // Simulate existing values from config.toml or env
+        let mut config = AppConfig::default();
+        config.model = Some("existing-model".to_string());
+        config.max_tokens = Some(2048);
+
+        let cluster = crate::control::topology::ClusterConfig {
+            defaults: crate::control::topology::DefaultsConfig {
+                model: Some("cluster-model".to_string()),
+                max_tokens: Some(4096),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let agent = crate::control::topology::AgentConfig::default();
+
+        config.merge_with_toml(&agent, &cluster);
+        
+        // config should retain the higher priority "existing-model" and 2048
+        assert_eq!(config.model.as_deref(), Some("existing-model"));
+        assert_eq!(config.max_tokens, Some(2048));
     }
 }

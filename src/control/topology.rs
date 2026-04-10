@@ -133,6 +133,7 @@ pub async fn load_cluster_config(path: &Path) -> anyhow::Result<ClusterConfig> {
 }
 
 /// Returns true if the memory value should be treated as a file path.
+#[allow(dead_code)]
 pub fn is_memory_file_path(memory: &str) -> bool {
     memory.ends_with(".md") || memory.ends_with(".yaml") || memory.ends_with(".txt")
 }

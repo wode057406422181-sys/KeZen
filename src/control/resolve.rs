@@ -1,4 +1,7 @@
-use crate::control::topology::{AgentConfig, ClusterConfig, PermissionConfig};
+#![allow(dead_code)]
+
+use crate::control::topology::{
+AgentConfig, ClusterConfig, PermissionConfig};
 use std::env;
 use std::path::{Path, PathBuf};
 
