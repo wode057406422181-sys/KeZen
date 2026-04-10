@@ -385,11 +385,18 @@ pub fn build_agent_node(
                 if let Some(profile) = cluster.models.get(m).or_else(|| base_config.models.get(m)) {
                     agent_app_config.provider = profile.provider;
                     agent_app_config.model = Some(profile.model.clone());
+                    agent_app_config.max_tokens = Some(profile.max_tokens);
                     if let Some(ref key) = profile.api_key {
                         agent_app_config.api_key = Some(key.clone());
                     }
                     if let Some(ref url) = profile.api_url {
                         agent_app_config.api_url = Some(url.clone());
+                    }
+                    if let Some(cw) = profile.context_window {
+                        agent_app_config.context_window = Some(cw);
+                    }
+                    if let Some(ref ua) = profile.user_agent {
+                        agent_app_config.user_agent = Some(ua.clone());
                     }
                 } else {
                     agent_app_config.model = Some(m.clone());
@@ -435,11 +442,18 @@ pub fn build_agent_node(
                 if let Some(profile) = cluster.models.get(m).or_else(|| base_config.models.get(m)) {
                     agent_app_config.provider = profile.provider;
                     agent_app_config.model = Some(profile.model.clone());
+                    agent_app_config.max_tokens = Some(profile.max_tokens);
                     if let Some(ref key) = profile.api_key {
                         agent_app_config.api_key = Some(key.clone());
                     }
                     if let Some(ref url) = profile.api_url {
                         agent_app_config.api_url = Some(url.clone());
+                    }
+                    if let Some(cw) = profile.context_window {
+                        agent_app_config.context_window = Some(cw);
+                    }
+                    if let Some(ref ua) = profile.user_agent {
+                        agent_app_config.user_agent = Some(ua.clone());
                     }
                 } else {
                     agent_app_config.model = Some(m.clone());

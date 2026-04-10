@@ -98,10 +98,8 @@ impl Default for SearchConfig {
 pub struct AppConfig {
     #[serde(default)]
     pub multiagent: bool,
+    /// Model profile name (points to `[models.<name>]`) or raw model ID.
     pub model: Option<String>,
-    pub max_tokens: Option<u32>,
-    pub context_window: Option<u64>,
-    pub user_agent: Option<String>,
 
     #[serde(default)]
     pub no_mcp: bool,
@@ -110,7 +108,7 @@ pub struct AppConfig {
     pub models: std::collections::HashMap<String, ModelProfile>,
     pub search: Option<SearchConfig>,
 
-    // Runtime loaded active profile fields (not serialized from root)
+    // ── Runtime-only fields (injected from ModelProfile / ENV / CLI) ──
     #[serde(skip)]
     pub provider: Provider,
     #[serde(skip)]
@@ -123,7 +121,12 @@ pub struct AppConfig {
     pub include_stream_usage: bool,
     #[serde(skip, default = "default_true")]
     pub enable_cache: bool,
-
+    #[serde(skip)]
+    pub max_tokens: Option<u32>,
+    #[serde(skip)]
+    pub context_window: Option<u64>,
+    #[serde(skip)]
+    pub user_agent: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -177,10 +180,6 @@ impl AppConfig {
             match toml::from_str::<AppConfig>(&content) {
                 Ok(file_config) => {
                     config = file_config;
-                    // Ensure defaults for missing optional fields
-                    if config.max_tokens.is_none() {
-                        config.max_tokens = Some(DEFAULT_MAX_TOKENS);
-                    }
                 }
                 Err(e) => {
                     return Err(anyhow::anyhow!(
@@ -228,6 +227,8 @@ impl AppConfig {
         if let Ok(val) = std::env::var("KEZEN_MODEL") {
             config.model = Some(val);
         }
+        // KEZEN_MAX_TOKENS is deprecated; max_tokens now lives in ModelProfile.
+        // Kept for backward compat: override the runtime field.
         if let Ok(val) = std::env::var("KEZEN_MAX_TOKENS") {
             if let Ok(parsed) = val.parse::<u32>() {
                 config.max_tokens = Some(parsed);
@@ -314,11 +315,18 @@ impl AppConfig {
             if let Some(profile) = cluster.models.get(&m).or_else(|| self.models.get(&m)) {
                 self.provider = profile.provider;
                 self.model = Some(profile.model.clone());
+                self.max_tokens = Some(profile.max_tokens);
                 if let Some(ref key) = profile.api_key {
                     self.api_key = Some(key.clone());
                 }
                 if let Some(ref url) = profile.api_url {
                     self.api_url = Some(url.clone());
+                }
+                if let Some(cw) = profile.context_window {
+                    self.context_window = Some(cw);
+                }
+                if let Some(ref ua) = profile.user_agent {
+                    self.user_agent = Some(ua.clone());
                 }
             } else {
                 // Not a profile, treat as raw model name
@@ -378,6 +386,13 @@ impl AppConfig {
             self.thinking = profile.thinking;
             self.include_stream_usage = profile.include_stream_usage;
             self.enable_cache = profile.enable_cache;
+            self.max_tokens = Some(profile.max_tokens);
+            if let Some(cw) = profile.context_window {
+                self.context_window = Some(cw);
+            }
+            if let Some(ua) = profile.user_agent {
+                self.user_agent = Some(ua);
+            }
             if let Some(key) = profile.api_key {
                 self.api_key = Some(key);
             }
