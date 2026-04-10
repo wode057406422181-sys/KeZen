@@ -92,8 +92,8 @@ impl Default for SearchConfig {
 /// 1. CLI arguments (--model, --api-key, etc.)
 /// 2. KEZEN_* environment variables
 /// 3. ANTHROPIC_API_KEY / OPENAI_API_KEY (auto-detect provider)
-/// 4. Config file (~/.kezen/config/config.toml)
-/// 5. Defaults (only max_tokens = 8192; model has no default)
+/// 4. Config file (~/.kezen/config/kezen.toml)
+/// 5. Model dictionary (~/.kezen/config/model.toml)
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
@@ -109,6 +109,11 @@ pub struct AppConfig {
     pub search: Option<SearchConfig>,
 
     // ── Runtime-only fields (injected from ModelProfile / ENV / CLI) ──
+
+    /// The key of the currently active model profile in `self.models`.
+    /// Set by `resolve_model_profile()`. Used by accessor methods.
+    #[serde(skip)]
+    pub active_profile: Option<String>,
     #[serde(skip)]
     pub provider: Provider,
     #[serde(skip)]
@@ -121,12 +126,6 @@ pub struct AppConfig {
     pub include_stream_usage: bool,
     #[serde(skip, default = "default_true")]
     pub enable_cache: bool,
-    #[serde(skip)]
-    pub max_tokens: Option<u32>,
-    #[serde(skip)]
-    pub context_window: Option<u64>,
-    #[serde(skip)]
-    pub user_agent: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -134,13 +133,11 @@ impl Default for AppConfig {
         Self {
             provider: Provider::Anthropic,
             multiagent: false,
+            active_profile: None,
             api_url: None,
             api_key: None,
             model: None,
-            max_tokens: Some(DEFAULT_MAX_TOKENS),
-            context_window: None,
             thinking: false,
-            user_agent: None,
             no_mcp: false,
             include_stream_usage: true,
             enable_cache: true,
@@ -227,13 +224,6 @@ impl AppConfig {
         if let Ok(val) = std::env::var("KEZEN_MODEL") {
             config.model = Some(val);
         }
-        // KEZEN_MAX_TOKENS is deprecated; max_tokens now lives in ModelProfile.
-        // Kept for backward compat: override the runtime field.
-        if let Ok(val) = std::env::var("KEZEN_MAX_TOKENS") {
-            if let Ok(parsed) = val.parse::<u32>() {
-                config.max_tokens = Some(parsed);
-            }
-        }
 
         // Search-specific env overrides
         if let Ok(val) = std::env::var("KEZEN_SEARCH_MODE") {
@@ -313,44 +303,18 @@ impl AppConfig {
         if let Some(m) = model_str {
             // Try resolving as a profile from ClusterConfig first, then AppConfig
             if let Some(profile) = cluster.models.get(&m).or_else(|| self.models.get(&m)) {
+                self.active_profile = Some(m.clone());
                 self.provider = profile.provider;
                 self.model = Some(profile.model.clone());
-                self.max_tokens = Some(profile.max_tokens);
                 if let Some(ref key) = profile.api_key {
                     self.api_key = Some(key.clone());
                 }
                 if let Some(ref url) = profile.api_url {
                     self.api_url = Some(url.clone());
                 }
-                if let Some(cw) = profile.context_window {
-                    self.context_window = Some(cw);
-                }
-                if let Some(ref ua) = profile.user_agent {
-                    self.user_agent = Some(ua.clone());
-                }
             } else {
                 // Not a profile, treat as raw model name
                 self.model = Some(m);
-            }
-        }
-
-        // Max Tokens
-        if self.max_tokens.is_none()
-            || self.max_tokens == Some(crate::constants::api::DEFAULT_MAX_TOKENS)
-        {
-            if let Some(limits) = &agent.resource_limits {
-                if let Some(mt) = limits.max_tokens_per_turn {
-                    self.max_tokens = Some(mt as u32);
-                }
-            } else if let Some(mt) = cluster.defaults.max_tokens {
-                self.max_tokens = Some(mt as u32);
-            }
-        }
-
-        // Context Window
-        if self.context_window.is_none() {
-            if let Some(cw) = cluster.defaults.context_window {
-                self.context_window = Some(cw as u64);
             }
         }
 
@@ -372,27 +336,41 @@ impl AppConfig {
         })
     }
 
-    /// Get User-Agent string (configurable, defaults to kezen/<version>)
+    /// Get the active model profile (if resolved).
+    pub fn active_model_profile(&self) -> Option<&ModelProfile> {
+        self.active_profile.as_ref().and_then(|k| self.models.get(k))
+    }
+
+    /// Get max output tokens from the active model profile, or the built-in default.
+    pub fn max_tokens(&self) -> u32 {
+        self.active_model_profile()
+            .map(|p| p.max_tokens)
+            .unwrap_or(DEFAULT_MAX_TOKENS)
+    }
+
+    /// Get context window from the active model profile.
+    pub fn context_window(&self) -> Option<u64> {
+        self.active_model_profile()
+            .and_then(|p| p.context_window)
+    }
+
+    /// Get User-Agent string from the active model profile, or the built-in default.
     pub fn user_agent(&self) -> &str {
-        self.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT)
+        self.active_model_profile()
+            .and_then(|p| p.user_agent.as_deref())
+            .unwrap_or(DEFAULT_USER_AGENT)
     }
 
     /// Resolves a model name against the predefined model profiles (`[models]`).
     /// Updates the configuration (provider, model, API keys/URLs) if matched.
     pub fn resolve_model_profile(&mut self, profile_name: &str) {
         if let Some(profile) = self.models.get(profile_name).cloned() {
+            self.active_profile = Some(profile_name.to_string());
             self.provider = profile.provider;
             self.model = Some(profile.model);
             self.thinking = profile.thinking;
             self.include_stream_usage = profile.include_stream_usage;
             self.enable_cache = profile.enable_cache;
-            self.max_tokens = Some(profile.max_tokens);
-            if let Some(cw) = profile.context_window {
-                self.context_window = Some(cw);
-            }
-            if let Some(ua) = profile.user_agent {
-                self.user_agent = Some(ua);
-            }
             if let Some(key) = profile.api_key {
                 self.api_key = Some(key);
             }
@@ -408,14 +386,15 @@ impl AppConfig {
 impl fmt::Debug for AppConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AppConfig")
+            .field("active_profile", &self.active_profile)
             .field("provider", &self.provider)
             .field("api_url", &self.api_url)
             // Redact the API key — never print credentials to the terminal.
             .field("api_key", &self.api_key.as_deref().map(|_| "[REDACTED]"))
             .field("model", &self.model)
-            .field("max_tokens", &self.max_tokens)
+            .field("max_tokens", &self.max_tokens())
             .field("thinking", &self.thinking)
-            .field("user_agent", &self.user_agent)
+            .field("user_agent", &self.user_agent())
             .field("include_stream_usage", &self.include_stream_usage)
             .field("enable_cache", &self.enable_cache)
             .field("search", &self.search)
@@ -440,7 +419,7 @@ mod tests {
 
     #[test]
     fn default_max_tokens_is_correct() {
-        assert_eq!(default_config().max_tokens, Some(DEFAULT_MAX_TOKENS));
+        assert_eq!(default_config().max_tokens(), DEFAULT_MAX_TOKENS);
     }
 
     #[test]
@@ -487,20 +466,8 @@ mod tests {
 
     #[test]
     fn user_agent_falls_back_to_default() {
-        let config = AppConfig {
-            user_agent: None,
-            ..AppConfig::default()
-        };
+        let config = AppConfig::default();
         assert_eq!(config.user_agent(), DEFAULT_USER_AGENT);
-    }
-
-    #[test]
-    fn user_agent_returns_custom_value() {
-        let config = AppConfig {
-            user_agent: Some("my-bot/2.0".to_string()),
-            ..AppConfig::default()
-        };
-        assert_eq!(config.user_agent(), "my-bot/2.0");
     }
 
     // ── Debug redaction ───────────────────────────────────────────────────────
@@ -681,12 +648,10 @@ mod tests {
         // Simulate existing values from config.toml or env
         let mut config = AppConfig::default();
         config.model = Some("existing-model".to_string());
-        config.max_tokens = Some(2048);
 
         let cluster = crate::control::topology::ClusterConfig {
             defaults: crate::control::topology::DefaultsConfig {
                 model: Some("cluster-model".to_string()),
-                max_tokens: Some(4096),
                 ..Default::default()
             },
             ..Default::default()
@@ -696,8 +661,7 @@ mod tests {
 
         config.merge_with_toml(&agent, &cluster);
 
-        // config should retain the higher priority "existing-model" and 2048
+        // config should retain the higher priority "existing-model"
         assert_eq!(config.model.as_deref(), Some("existing-model"));
-        assert_eq!(config.max_tokens, Some(2048));
     }
 }
