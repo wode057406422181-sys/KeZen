@@ -1,6 +1,6 @@
 use crate::constants::prompts::{COMPACT_NO_TOOLS_PREAMBLE, COMPACT_PROMPT, COMPACT_NO_TOOLS_TRAILER};
 
-pub use crate::constants::defaults::COMPACT_MAX_OUTPUT_TOKENS;
+pub use crate::constants::api::COMPACT_MAX_OUTPUT_TOKENS;
 
 /// Returns the context window size for a given model.
 pub fn context_window_for_model(model: &str) -> u64 {

@@ -9,7 +9,7 @@ use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{BoxStream, CacheHints, LlmClient, StreamOptions};
 use crate::config::AppConfig;
 use crate::constants::api::CONTENT_TYPE_JSON;
-use crate::constants::defaults::DEFAULT_MAX_TOKENS;
+use crate::constants::api::DEFAULT_MAX_TOKENS;
 use crate::error::KezenError;
 
 /// OpenAI Chat Completions API streaming client.

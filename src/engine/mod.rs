@@ -10,7 +10,7 @@ use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{self, LlmClient, StreamOptions};
 use crate::audit::{AuditEvent, SessionAuditLogger};
-use crate::constants::defaults::SKILL_TOOL_NAME;
+use crate::constants::engine::SKILL_TOOL_NAME;
 use crate::config::AppConfig;
 use crate::prompts::{build_dynamic_context, build_static_system_prompt};
 use crate::tools::registry::ToolRegistry;
@@ -182,7 +182,7 @@ impl KezenEngine {
         });
 
         let mut iterations = 0;
-        let max_iterations = crate::constants::defaults::MAX_AGENTIC_LOOP_ITERATIONS;
+        let max_iterations = crate::constants::engine::MAX_AGENTIC_LOOP_ITERATIONS;
 
         // Agentic loop: keeps calling the LLM until it stops requesting tools
         // or we hit the safety cap.
@@ -590,7 +590,7 @@ impl KezenEngine {
                     let mut extraction_usage_total = Usage::default();
 
                     let budget_mgr = crate::context::budget::ContextBudgetManager::new(
-                        crate::constants::defaults::MAX_TOOL_RESULT_CONTEXT_TOKENS,
+                        crate::constants::limits::MAX_TOOL_RESULT_CONTEXT_TOKENS,
                     );
 
                     for (_idx, id, name, extracted_skill_name, mut result) in indexed_results {

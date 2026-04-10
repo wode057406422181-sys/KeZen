@@ -87,7 +87,7 @@ pub async fn build_static_system_prompt(
     if let Some(registry) = skill_registry {
         if !registry.all().is_empty() {
             let listing =
-                registry.format_listing(crate::constants::defaults::DEFAULT_SKILL_BUDGET_CHARS);
+                registry.format_listing(crate::constants::engine::DEFAULT_SKILL_BUDGET_CHARS);
 
             let first_skill = registry.all().keys().next().unwrap();
 
