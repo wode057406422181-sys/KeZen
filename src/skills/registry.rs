@@ -1,4 +1,4 @@
-use crate::constants::defaults::MAX_LISTING_DESC_CHARS;
+use crate::constants::limits::MAX_LISTING_DESC_CHARS;
 use crate::skills::types::SkillDefinition;
 use indexmap::IndexMap;
 
@@ -163,7 +163,7 @@ impl SkillRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::defaults::DEFAULT_SKILL_BUDGET_CHARS;
+    use crate::constants::engine::DEFAULT_SKILL_BUDGET_CHARS;
     use crate::skills::types::{SkillFrontmatter, SkillSource};
     use std::path::PathBuf;
 

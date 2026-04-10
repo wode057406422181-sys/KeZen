@@ -11,7 +11,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::config::AppConfig;
-use crate::constants::defaults::{ACTION_CHANNEL_BUFFER, EVENT_CHANNEL_BUFFER};
+use crate::constants::engine::{ACTION_CHANNEL_BUFFER, EVENT_CHANNEL_BUFFER};
 use crate::engine::KezenEngine;
 use crate::engine::events::{EngineEvent, UserAction};
 use crate::tools::registry::create_default_registry;

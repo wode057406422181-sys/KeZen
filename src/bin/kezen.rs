@@ -173,9 +173,9 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             });
             let (action_tx, action_rx) =
-                tokio::sync::mpsc::channel(kezen::constants::defaults::ACTION_CHANNEL_BUFFER);
+                tokio::sync::mpsc::channel(kezen::constants::engine::ACTION_CHANNEL_BUFFER);
             let (event_tx, _) =
-                tokio::sync::broadcast::channel(kezen::constants::defaults::EVENT_CHANNEL_BUFFER);
+                tokio::sync::broadcast::channel(kezen::constants::engine::EVENT_CHANNEL_BUFFER);
 
             let work_dir = std::env::current_dir()?;
             let registry =

@@ -3,6 +3,7 @@ use termimad::MadSkin;
 
 use crate::api::types::{ContentBlock, Message, Role, Usage};
 use crate::config::AppConfig;
+use crate::constants::limits::*;
 
 /// Print the welcome banner with provider and model info.
 pub fn print_welcome(config: &AppConfig) {
@@ -61,7 +62,7 @@ pub fn print_tool_use(name: &str, input: &serde_json::Value) {
 
 /// Print tool result preview
 pub fn print_tool_result(output: &str, is_error: bool) {
-    let limit = 100;
+    let limit = UI_MAX_TOOL_RESULT_HISTORY_CHARS;
     let single_line = output.replace('\n', " ");
     let preview = if single_line.chars().count() > limit {
         let byte_end = single_line
@@ -109,10 +110,10 @@ pub fn render_restored_messages(messages: &[Message]) {
             match block {
                 ContentBlock::Text { text } => {
                     // Truncate long messages in history view
-                    let display = if text.len() > 500 {
+                    let display = if text.chars().count() > UI_MAX_TEXT_CHARS {
                         let byte_end = text
                             .char_indices()
-                            .nth(500)
+                            .nth(UI_MAX_TEXT_CHARS)
                             .map(|(i, _)| i)
                             .unwrap_or(text.len());
                         format!("{}...", &text[..byte_end])
@@ -129,10 +130,10 @@ pub fn render_restored_messages(messages: &[Message]) {
                     }
                 }
                 ContentBlock::Thinking { thinking } => {
-                    let preview = if thinking.len() > 100 {
+                    let preview = if thinking.chars().count() > UI_MAX_THINKING_CHARS {
                         let byte_end = thinking
                             .char_indices()
-                            .nth(100)
+                            .nth(UI_MAX_THINKING_CHARS)
                             .map(|(i, _)| i)
                             .unwrap_or(thinking.len());
                         format!("{}...", &thinking[..byte_end])
@@ -143,18 +144,26 @@ pub fn render_restored_messages(messages: &[Message]) {
                 }
                 ContentBlock::ToolUse { name, input, .. } => {
                     let input_preview = serde_json::to_string(input).unwrap_or_default();
-                    let preview = if input_preview.len() > 80 {
-                        format!("{}...", &input_preview[..80])
+                    let preview = if input_preview.chars().count() > UI_MAX_TOOL_INPUT_CHARS {
+                        let byte_end = input_preview
+                            .char_indices()
+                            .nth(UI_MAX_TOOL_INPUT_CHARS)
+                            .map(|(i, _)| i)
+                            .unwrap_or(input_preview.len());
+                        format!("{}...", &input_preview[..byte_end])
                     } else {
                         input_preview
                     };
                     println!("  {} {} {}", "🔧".blue(), name.bold(), preview.dimmed());
                 }
-                ContentBlock::ToolResult {
-                    content, is_error, ..
-                } => {
-                    let preview = if content.len() > 100 {
-                        format!("{}...", &content[..100])
+                ContentBlock::ToolResult { content, is_error, .. } => {
+                    let preview = if content.chars().count() > UI_MAX_TOOL_RESULT_HISTORY_CHARS {
+                        let byte_end = content
+                            .char_indices()
+                            .nth(UI_MAX_TOOL_RESULT_HISTORY_CHARS)
+                            .map(|(i, _)| i)
+                            .unwrap_or(content.len());
+                        format!("{}...", &content[..byte_end])
                     } else {
                         content.clone()
                     };
