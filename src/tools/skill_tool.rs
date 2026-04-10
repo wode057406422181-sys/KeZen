@@ -2,7 +2,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::constants::defaults::SKILL_TOOL_NAME;
+use crate::constants::engine::SKILL_TOOL_NAME;
 use crate::permissions::PermissionResult;
 use crate::skills::registry::SkillRegistry;
 use crate::skills::loader::prepare_skill_content;

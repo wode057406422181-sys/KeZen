@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::constants::defaults::GIT_WATCHER_INTERVAL_SECS;
+use crate::constants::engine::GIT_WATCHER_INTERVAL_SECS;
 use crate::context::git::{collect_git_context, GitContext};
 
 pub struct GitWatcher {

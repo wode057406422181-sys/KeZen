@@ -2,6 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::process::Command;
 
+use crate::constants::limits::MAX_GIT_STATUS_CHARS;
+
 #[derive(Debug, Clone)]
 pub struct GitContext {
     pub branch: String,
@@ -59,8 +61,9 @@ async fn git_default_branch(cwd: &Path) -> String {
 
 async fn git_status(cwd: &Path) -> String {
     let mut st = git(cwd, &["status", "-s", "-b"]).await.unwrap_or_default();
-    if st.len() > 1000 {
-        st.truncate(1000);
+    if st.chars().count() > MAX_GIT_STATUS_CHARS {
+        let end = st.char_indices().nth(MAX_GIT_STATUS_CHARS).map_or(st.len(), |(i, _)| i);
+        st.truncate(end);
         st.push_str("\n... (truncated)");
     }
     st

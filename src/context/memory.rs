@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::constants::defaults::MAX_MEMORY_CHARACTER_COUNT;
+use crate::constants::limits::MAX_MEMORY_CHARACTER_COUNT;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MemoryType {
@@ -69,13 +69,9 @@ fn parse_frontmatter(text: &str) -> (Option<Vec<String>>, String) {
 
 async fn load_memory_file(path: PathBuf, memory_type: MemoryType) -> Option<MemoryFile> {
     if let Ok(mut text) = tokio::fs::read_to_string(&path).await {
-        if text.len() > MAX_MEMORY_CHARACTER_COUNT {
-            // Truncate to word boundary or just limit chars
-            let mut byte_idx = MAX_MEMORY_CHARACTER_COUNT.min(text.len());
-            while !text.is_char_boundary(byte_idx) && byte_idx > 0 {
-                byte_idx -= 1;
-            }
-            text.truncate(byte_idx);
+        if text.chars().count() > MAX_MEMORY_CHARACTER_COUNT {
+            let end = text.char_indices().nth(MAX_MEMORY_CHARACTER_COUNT).map_or(text.len(), |(i, _)| i);
+            text.truncate(end);
             text.push_str("\n\n[Warning: Memory file exceeded 40k characters and was truncated]");
         }
 

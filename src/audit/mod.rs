@@ -18,7 +18,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use tokio::io::AsyncWriteExt;
 
-use crate::constants::defaults::{AUDIT_MAX_OUTPUT_LENGTH, AUDIT_RETENTION_DAYS};
+use crate::constants::limits::{AUDIT_MAX_OUTPUT_LENGTH, AUDIT_RETENTION_DAYS};
 
 // ─── Event Types ─────────────────────────────────────────────────────────────
 
@@ -153,11 +153,7 @@ impl SessionAuditLogger {
         if output.len() <= AUDIT_MAX_OUTPUT_LENGTH {
             (output.to_string(), false)
         } else {
-            // Find a safe UTF-8 boundary
-            let mut end = AUDIT_MAX_OUTPUT_LENGTH;
-            while end > 0 && !output.is_char_boundary(end) {
-                end -= 1;
-            }
+            let end = output.floor_char_boundary(AUDIT_MAX_OUTPUT_LENGTH);
             (format!("{}...[truncated]", &output[..end]), true)
         }
     }

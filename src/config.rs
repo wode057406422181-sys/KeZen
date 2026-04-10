@@ -4,8 +4,9 @@ use std::path::PathBuf;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::constants::defaults::{
-    DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT,
+use crate::constants::api::DEFAULT_MAX_TOKENS;
+use crate::constants::api::{
+    DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT,
 };
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

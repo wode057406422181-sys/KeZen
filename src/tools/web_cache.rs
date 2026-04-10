@@ -4,7 +4,7 @@ use std::time::Instant;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 
-use crate::constants::defaults::{WEB_CACHE_TTL, WEB_CACHE_MAX_ENTRIES};
+use crate::constants::limits::{WEB_CACHE_MAX_ENTRIES, WEB_CACHE_TTL};
 
 
 
