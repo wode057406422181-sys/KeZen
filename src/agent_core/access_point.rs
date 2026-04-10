@@ -20,10 +20,7 @@ pub enum AccessPoint {
     Repl { can_approve: bool },
 
     /// gRPC 双向流接入点。
-    Grpc {
-        addr: SocketAddr,
-        can_approve: bool,
-    },
+    Grpc { addr: SocketAddr, can_approve: bool },
 
     /// 进程内 MPSC 通道（无网络开销）。
     /// 用于父子 Agent 之间的进程内通信。
@@ -82,9 +79,7 @@ pub struct AccessPointHandle {
 impl AccessPointHandle {
     /// 检查该接入点的 task 是否已终止。
     pub fn is_finished(&self) -> bool {
-        self.task_handle
-            .as_ref()
-            .map_or(true, |h| h.is_finished())
+        self.task_handle.as_ref().map_or(true, |h| h.is_finished())
     }
 
     /// 终止该接入点。
@@ -203,7 +198,10 @@ mod tests {
     #[test]
     fn kind_label() {
         assert_eq!(AccessPoint::Tui { can_approve: true }.kind_label(), "TUI");
-        assert_eq!(AccessPoint::Repl { can_approve: false }.kind_label(), "REPL");
+        assert_eq!(
+            AccessPoint::Repl { can_approve: false }.kind_label(),
+            "REPL"
+        );
         assert_eq!(
             AccessPoint::Grpc {
                 addr: "127.0.0.1:50052".parse().unwrap(),

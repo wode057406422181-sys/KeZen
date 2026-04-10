@@ -1,13 +1,12 @@
 use async_trait::async_trait;
 use std::path::PathBuf;
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 
 use super::access_point::AccessPoint;
 use super::agent::{AgentId, AgentNode, AgentStatus, AgentTask, AgentTaskResult};
-use super::bus::{self, ChannelPair};
+use super::bus;
 use super::worker::LlmWorkerNode;
 use crate::config::AppConfig;
-use crate::constants::defaults::{ACTION_CHANNEL_BUFFER, EVENT_CHANNEL_BUFFER};
 use crate::engine::events::{EngineEvent, UserAction};
 use crate::permissions::PermissionMode;
 
@@ -18,8 +17,6 @@ use crate::permissions::PermissionMode;
 pub struct ChildHandle {
     /// 子节点的 AgentNode 实现。
     pub node: Box<dyn AgentNode>,
-    /// 父子间通信 channel 对。
-    pub channels: ChannelPair,
 }
 
 /// PodNode — 容器节点，持有 Master Engine + 子节点集合。
@@ -50,6 +47,8 @@ pub struct PodNode {
 
     /// Master Engine 的 action channel（用于向 Master 发送指令）。
     master_action_tx: mpsc::Sender<UserAction>,
+    /// Master Engine 的 action_rx，init() 时取出。
+    master_action_rx: RwLock<Option<mpsc::Receiver<UserAction>>>,
     /// Master Engine 的 event broadcast（用于订阅 Master 事件）。
     master_event_tx: broadcast::Sender<EngineEvent>,
     /// Master Engine 的 tokio task handle。
@@ -75,6 +74,7 @@ impl PodNode {
 
         let master_channels = bus::create_default_channel_pair();
         let master_action_tx = master_channels.action_tx;
+        let master_action_rx = master_channels.action_rx;
         let master_event_tx = master_channels.event_tx;
 
         Self {
@@ -87,6 +87,7 @@ impl PodNode {
             work_dir,
             permission_mode,
             master_action_tx,
+            master_action_rx: RwLock::new(master_action_rx),
             master_event_tx,
             master_handle: RwLock::new(None),
         }
@@ -130,18 +131,20 @@ impl AgentNode for PodNode {
         drop(children);
 
         // Initialize the Master Engine.
-        let (_action_tx, action_rx) = mpsc::channel(ACTION_CHANNEL_BUFFER);
-        let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_BUFFER);
+        let action_rx = self.master_action_rx.write().await.take().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Pod {} already initialized (master_action_rx taken)",
+                self.id
+            )
+        })?;
 
-        let registry = crate::tools::registry::create_default_registry(
-            &self.config,
-            self.work_dir.clone(),
-        );
+        let registry =
+            crate::tools::registry::create_default_registry(&self.config, self.work_dir.clone());
 
         let engine = crate::engine::KezenEngine::new(
             self.config.clone(),
             action_rx,
-            event_tx.clone(),
+            self.master_event_tx.clone(),
             registry,
             self.permission_mode,
             self.work_dir.clone(),
@@ -272,11 +275,15 @@ impl AgentNode for PodNode {
         self
     }
 
-    fn action_sender(&self) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
+    fn action_sender(
+        &self,
+    ) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
         Some(self.master_action_tx.clone())
     }
 
-    fn subscribe_events(&self) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {
+    fn subscribe_events(
+        &self,
+    ) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {
         Some(self.master_event_tx.subscribe())
     }
 }
@@ -307,7 +314,14 @@ pub fn build_agent_tree(
         .first()
         .ok_or_else(|| anyhow::anyhow!("ClusterConfig has no agents defined"))?;
 
-    build_agent_node(root_agent, namespace, &cluster_work_dir, base_config, cluster, permission_mode)
+    build_agent_node(
+        root_agent,
+        namespace,
+        &cluster_work_dir,
+        base_config,
+        cluster,
+        permission_mode,
+    )
 }
 
 /// 递归构建单个 AgentNode。
@@ -344,11 +358,7 @@ pub fn build_agent_node(
                     cluster,
                     permission_mode,
                 )?;
-                let channels = bus::create_default_channel_pair();
-                child_handles.push(ChildHandle {
-                    node: child_node,
-                    channels,
-                });
+                child_handles.push(ChildHandle { node: child_node });
             }
 
             gw.set_children(child_handles);
@@ -362,7 +372,7 @@ pub fn build_agent_node(
                 .unwrap_or_else(|| parent_work_dir.to_path_buf());
 
             let mut agent_app_config = base_config.clone();
-            
+
             // Resolve model profile
             let mut model_str = None;
             if let Some(m) = &agent_config.model {
@@ -448,12 +458,7 @@ pub fn build_agent_node(
                     permission_mode,
                 )?;
 
-                let channels = bus::create_default_channel_pair();
-
-                child_handles.push(ChildHandle {
-                    node: child_node,
-                    channels,
-                });
+                child_handles.push(ChildHandle { node: child_node });
             }
 
             let id = AgentId(format!("{}/{}", namespace, name));
@@ -542,11 +547,8 @@ mod tests {
             PermissionMode::DontAsk,
         );
 
-        let channels = bus::create_default_channel_pair();
-
         let handle = ChildHandle {
             node: Box::new(child),
-            channels,
         };
 
         let pod = PodNode::new(
@@ -603,14 +605,12 @@ mod tests {
             agents: vec![crate::control::topology::AgentConfig {
                 kind: Some(crate::control::topology::AgentKind::Gateway),
                 name: Some("gateway".to_string()),
-                workers: vec![
-                    crate::control::topology::AgentConfig {
-                        kind: Some(crate::control::topology::AgentKind::Worker),
-                        name: Some("coder".to_string()),
-                        model: Some("claude-3-haiku".to_string()),
-                        ..Default::default()
-                    },
-                ],
+                workers: vec![crate::control::topology::AgentConfig {
+                    kind: Some(crate::control::topology::AgentKind::Worker),
+                    name: Some("coder".to_string()),
+                    model: Some("claude-3-haiku".to_string()),
+                    ..Default::default()
+                }],
                 ..Default::default()
             }],
         };
@@ -620,7 +620,8 @@ mod tests {
             ..AppConfig::default()
         };
 
-        let root = build_agent_tree(&cluster_config, &base_config, PermissionMode::DontAsk).unwrap();
+        let root =
+            build_agent_tree(&cluster_config, &base_config, PermissionMode::DontAsk).unwrap();
         assert!(root.is_gateway());
         assert_eq!(root.id().0, "test-ns/gateway");
         assert_eq!(root.children().len(), 1);
@@ -644,32 +645,30 @@ mod tests {
             agents: vec![crate::control::topology::AgentConfig {
                 kind: Some(crate::control::topology::AgentKind::Gateway),
                 name: Some("gateway".to_string()),
-                workers: vec![
-                    crate::control::topology::AgentConfig {
-                        kind: Some(crate::control::topology::AgentKind::Pod),
-                        name: Some("orchestrator".to_string()),
-                        master: Some(Box::new(crate::control::topology::AgentConfig {
-                            name: Some("architect".to_string()),
-                            model: Some("master-model".to_string()),
-                            ..Default::default()
-                        })),
-                        workers: vec![
-                            crate::control::topology::AgentConfig {
-                                kind: Some(crate::control::topology::AgentKind::Worker),
-                                name: Some("coder".to_string()),
-                                model: Some("worker-model".to_string()),
-                                work_dir: Some(PathBuf::from("/workspace/src")),
-                                ..Default::default()
-                            },
-                            crate::control::topology::AgentConfig {
-                                kind: Some(crate::control::topology::AgentKind::Worker),
-                                name: Some("reviewer".to_string()),
-                                ..Default::default()
-                            },
-                        ],
+                workers: vec![crate::control::topology::AgentConfig {
+                    kind: Some(crate::control::topology::AgentKind::Pod),
+                    name: Some("orchestrator".to_string()),
+                    master: Some(Box::new(crate::control::topology::AgentConfig {
+                        name: Some("architect".to_string()),
+                        model: Some("master-model".to_string()),
                         ..Default::default()
-                    },
-                ],
+                    })),
+                    workers: vec![
+                        crate::control::topology::AgentConfig {
+                            kind: Some(crate::control::topology::AgentKind::Worker),
+                            name: Some("coder".to_string()),
+                            model: Some("worker-model".to_string()),
+                            work_dir: Some(PathBuf::from("/workspace/src")),
+                            ..Default::default()
+                        },
+                        crate::control::topology::AgentConfig {
+                            kind: Some(crate::control::topology::AgentKind::Worker),
+                            name: Some("reviewer".to_string()),
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                }],
                 ..Default::default()
             }],
         };
@@ -679,7 +678,8 @@ mod tests {
             ..AppConfig::default()
         };
 
-        let root = build_agent_tree(&cluster_config, &base_config, PermissionMode::DontAsk).unwrap();
+        let root =
+            build_agent_tree(&cluster_config, &base_config, PermissionMode::DontAsk).unwrap();
 
         // Root is Gateway
         assert!(root.is_gateway());
@@ -704,7 +704,9 @@ mod tests {
         use crate::control::topology::AccessPointConfig;
 
         let configs = vec![
-            AccessPointConfig::Tui { can_approve: Some(true) },
+            AccessPointConfig::Tui {
+                can_approve: Some(true),
+            },
             AccessPointConfig::Grpc {
                 listen: "127.0.0.1:50052".to_string(),
                 auth: None,

@@ -136,7 +136,11 @@ impl LlmClient for OpenAiClient {
                             }
                         }));
                     }
-                    ContentBlock::ToolResult { tool_use_id, content: result_content, is_error } => {
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content: result_content,
+                        is_error,
+                    } => {
                         let prefixed = if *is_error {
                             format!("Error: {}", result_content)
                         } else {
@@ -180,8 +184,11 @@ impl LlmClient for OpenAiClient {
         });
 
         if let Some(t) = tools
-            && !t.is_empty() {
-                let functions: Vec<_> = t.iter().map(|s| {
+            && !t.is_empty()
+        {
+            let functions: Vec<_> = t
+                .iter()
+                .map(|s| {
                     json!({
                         "type": "function",
                         "function": {
@@ -190,9 +197,10 @@ impl LlmClient for OpenAiClient {
                             "parameters": s["input_schema"]
                         }
                     })
-                }).collect();
-                body["tools"] = json!(functions);
-            }
+                })
+                .collect();
+            body["tools"] = json!(functions);
+        }
 
         // `stream_options.include_usage` is an OpenAI extension not supported by
         // all compatible endpoints (DashScope, Ollama, vLLM, etc.). Only send it
@@ -290,13 +298,23 @@ impl LlmClient for OpenAiClient {
                             for t in tool_calls {
                                 if let Some(f) = t.get("function") {
                                     if let Some(name) = f.get("name").and_then(|n| n.as_str()) {
-                                        let id = t.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                                        out.push(Ok(StreamEvent::ToolUseStart { id, name: name.to_string() }));
+                                        let id = t
+                                            .get("id")
+                                            .and_then(|i| i.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        out.push(Ok(StreamEvent::ToolUseStart {
+                                            id,
+                                            name: name.to_string(),
+                                        }));
                                     }
                                     if let Some(args) = f.get("arguments").and_then(|a| a.as_str())
-                                        && !args.is_empty() {
-                                            out.push(Ok(StreamEvent::ToolUseInputDelta { text: args.to_string() }));
-                                        }
+                                        && !args.is_empty()
+                                    {
+                                        out.push(Ok(StreamEvent::ToolUseInputDelta {
+                                            text: args.to_string(),
+                                        }));
+                                    }
                                 }
                             }
                         }

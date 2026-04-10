@@ -1,6 +1,6 @@
-use kezen::*;
 use anyhow::Result;
 use clap::Parser;
+use kezen::*;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
@@ -36,9 +36,16 @@ async fn main() -> Result<()> {
         // Probe writability with a temp file
         let probe = dir.join(".write_probe");
         match std::fs::write(&probe, b"ok") {
-            Ok(_) => { let _ = std::fs::remove_file(&probe); }
+            Ok(_) => {
+                let _ = std::fs::remove_file(&probe);
+            }
             Err(e) => {
-                eprintln!("  ⚠ {} dir is not writable ({}): {}", label, dir.display(), e);
+                eprintln!(
+                    "  ⚠ {} dir is not writable ({}): {}",
+                    label,
+                    dir.display(),
+                    e
+                );
             }
         }
     }
@@ -77,7 +84,10 @@ async fn main() -> Result<()> {
             match kezen::control::topology::load_cluster_config(&config_file).await {
                 Ok(cluster) => {
                     eprintln!("  🚀 Multi-Agent Mode Detected!");
-                    eprintln!("     Cluster: {}", cluster.cluster.name.as_deref().unwrap_or("unnamed"));
+                    eprintln!(
+                        "     Cluster: {}",
+                        cluster.cluster.name.as_deref().unwrap_or("unnamed")
+                    );
                     eprintln!("     Agents : {}", cluster.agents.len());
                     if let Some(wd) = &cluster.cluster.work_dir {
                         eprintln!("     WorkDir: {}", wd.display());
@@ -116,7 +126,11 @@ async fn main() -> Result<()> {
                     .await;
                 }
                 Err(e) => {
-                    eprintln!("  ⚠ Failed to load cluster topology from {}: {}", config_file.display(), e);
+                    eprintln!(
+                        "  ⚠ Failed to load cluster topology from {}: {}",
+                        config_file.display(),
+                        e
+                    );
                     eprintln!("  ⚠ Falling back to single-agent mode");
                 }
             }
@@ -158,12 +172,23 @@ async fn main() -> Result<()> {
                 tracing::error!("Invalid address {}: {}", addr, e);
                 std::process::exit(1);
             });
-            let (action_tx, action_rx) = tokio::sync::mpsc::channel(kezen::constants::defaults::ACTION_CHANNEL_BUFFER);
-            let (event_tx, _) = tokio::sync::broadcast::channel(kezen::constants::defaults::EVENT_CHANNEL_BUFFER);
+            let (action_tx, action_rx) =
+                tokio::sync::mpsc::channel(kezen::constants::defaults::ACTION_CHANNEL_BUFFER);
+            let (event_tx, _) =
+                tokio::sync::broadcast::channel(kezen::constants::defaults::EVENT_CHANNEL_BUFFER);
 
             let work_dir = std::env::current_dir()?;
-            let registry = kezen::tools::registry::create_default_registry(&config, work_dir.clone());
-            let engine = engine::KezenEngine::new(config.clone(), action_rx, event_tx.clone(), registry, permission_mode, work_dir).await?;
+            let registry =
+                kezen::tools::registry::create_default_registry(&config, work_dir.clone());
+            let engine = engine::KezenEngine::new(
+                config.clone(),
+                action_rx,
+                event_tx.clone(),
+                registry,
+                permission_mode,
+                work_dir,
+            )
+            .await?;
 
             tokio::spawn(async move {
                 engine.run().await;

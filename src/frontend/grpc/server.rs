@@ -6,8 +6,8 @@ use crate::engine::events::{EngineEvent, UserAction};
 use super::kezen_proto;
 
 use super::kezen_proto::{
-    kezen_agent_server::{KezenAgent, KezenAgentServer},
     ClientMessage, ServerMessage,
+    kezen_agent_server::{KezenAgent, KezenAgentServer},
 };
 
 pub struct KezenAgentService {
@@ -17,7 +17,8 @@ pub struct KezenAgentService {
 
 #[tonic::async_trait]
 impl KezenAgent for KezenAgentService {
-    type StreamSessionStream = tokio_stream::wrappers::ReceiverStream<Result<ServerMessage, tonic::Status>>;
+    type StreamSessionStream =
+        tokio_stream::wrappers::ReceiverStream<Result<ServerMessage, tonic::Status>>;
 
     async fn stream_session(
         &self,
@@ -25,7 +26,7 @@ impl KezenAgent for KezenAgentService {
     ) -> Result<tonic::Response<Self::StreamSessionStream>, tonic::Status> {
         let mut in_stream = request.into_inner();
         let (out_tx, out_rx) = tokio::sync::mpsc::channel(100);
-        
+
         let action_tx = self.action_tx.clone();
         let mut event_rx = self.event_tx.subscribe();
 
@@ -33,10 +34,12 @@ impl KezenAgent for KezenAgentService {
         tokio::spawn(async move {
             // Send the ServerHello handshake (m-1)
             let hello = ServerMessage {
-                event: Some(kezen_proto::server_message::Event::ServerHello(kezen_proto::ServerHello {
-                    protocol_version: 1,
-                    server_version: env!("CARGO_PKG_VERSION").to_string(),
-                })),
+                event: Some(kezen_proto::server_message::Event::ServerHello(
+                    kezen_proto::ServerHello {
+                        protocol_version: 1,
+                        server_version: env!("CARGO_PKG_VERSION").to_string(),
+                    },
+                )),
             };
             if out_tx.send(Ok(hello)).await.is_err() {
                 return;
@@ -77,7 +80,9 @@ impl KezenAgent for KezenAgentService {
             }
         });
 
-        Ok(tonic::Response::new(tokio_stream::wrappers::ReceiverStream::new(out_rx)))
+        Ok(tonic::Response::new(
+            tokio_stream::wrappers::ReceiverStream::new(out_rx),
+        ))
     }
 }
 
@@ -87,14 +92,17 @@ pub async fn start_grpc_server(
     event_tx: broadcast::Sender<EngineEvent>,
 ) -> anyhow::Result<()> {
     tracing::info!(%addr, "Starting KeZen gRPC server");
-    
-    let service = KezenAgentService { action_tx, event_tx };
-    
+
+    let service = KezenAgentService {
+        action_tx,
+        event_tx,
+    };
+
     tonic::transport::Server::builder()
         .add_service(KezenAgentServer::new(service))
         .serve(addr)
         .await?;
-        
+
     Ok(())
 }
 
@@ -102,7 +110,9 @@ fn client_message_to_user_action(msg: ClientMessage) -> Option<UserAction> {
     use kezen_proto::client_message::Action;
     match msg.action? {
         Action::Hello(_) => None, // Engine doesn't process Hello currently
-        Action::SendMessage(sm) => Some(UserAction::SendMessage { content: sm.content }),
+        Action::SendMessage(sm) => Some(UserAction::SendMessage {
+            content: sm.content,
+        }),
         Action::Cancel(_) => Some(UserAction::Cancel),
         Action::PermissionResponse(pr) => {
             use kezen_proto::permission_response::Decision;
@@ -126,10 +136,12 @@ fn client_message_to_user_action(msg: ClientMessage) -> Option<UserAction> {
 
 fn engine_event_to_server_message(event: EngineEvent) -> ServerMessage {
     use kezen_proto::server_message::Event;
-    
+
     let ev = match event {
         EngineEvent::TextDelta { text } => Event::TextDelta(kezen_proto::TextDelta { text }),
-        EngineEvent::ThinkingDelta { text } => Event::ThinkingDelta(kezen_proto::ThinkingDelta { text }),
+        EngineEvent::ThinkingDelta { text } => {
+            Event::ThinkingDelta(kezen_proto::ThinkingDelta { text })
+        }
         EngineEvent::CostUpdate(usage) => Event::CostUpdate(kezen_proto::CostUpdate {
             usage: Some(kezen_proto::TokenUsage {
                 input_tokens: usage.input_tokens,
@@ -138,17 +150,29 @@ fn engine_event_to_server_message(event: EngineEvent) -> ServerMessage {
                 cache_read_input_tokens: usage.cache_read_input_tokens,
             }),
         }),
-        EngineEvent::ToolUseStart { id, name, input } => Event::ToolUseStart(kezen_proto::ToolUseStart {
-            tool_use_id: id,
-            name,
-            input_json: serde_json::to_string(&input).unwrap_or_default(),
-        }),
-        EngineEvent::ToolResult { id, output, is_error } => Event::ToolResult(kezen_proto::ToolResult {
+        EngineEvent::ToolUseStart { id, name, input } => {
+            Event::ToolUseStart(kezen_proto::ToolUseStart {
+                tool_use_id: id,
+                name,
+                input_json: serde_json::to_string(&input).unwrap_or_default(),
+            })
+        }
+        EngineEvent::ToolResult {
+            id,
+            output,
+            is_error,
+        } => Event::ToolResult(kezen_proto::ToolResult {
             tool_use_id: id,
             output,
             is_error,
         }),
-        EngineEvent::PermissionRequest { id, tool, description, risk_level, suggestion } => {
+        EngineEvent::PermissionRequest {
+            id,
+            tool,
+            description,
+            risk_level,
+            suggestion,
+        } => {
             // Convert domain RiskLevel to Proto RiskLevel
             let proto_risk = match risk_level {
                 crate::permissions::RiskLevel::Low => kezen_proto::RiskLevel::Low,
@@ -168,21 +192,24 @@ fn engine_event_to_server_message(event: EngineEvent) -> ServerMessage {
                 suggestions,
             })
         }
-        EngineEvent::SlashCommandResult { command, output } => Event::SlashCommandResult(kezen_proto::SlashCommandResult {
-            command,
-            output,
-        }),
-        EngineEvent::CompactProgress { message } => Event::CompactProgress(kezen_proto::CompactProgress { message }),
+        EngineEvent::SlashCommandResult { command, output } => {
+            Event::SlashCommandResult(kezen_proto::SlashCommandResult { command, output })
+        }
+        EngineEvent::CompactProgress { message } => {
+            Event::CompactProgress(kezen_proto::CompactProgress { message })
+        }
         EngineEvent::SkillLoaded { name } => Event::SkillLoaded(kezen_proto::SkillLoaded { name }),
         EngineEvent::SessionRestored { messages } => {
             let json = serde_json::to_string(&messages).unwrap_or_else(|_| "[]".to_string());
-            Event::SessionRestored(kezen_proto::SessionRestored { messages_json: json })
+            Event::SessionRestored(kezen_proto::SessionRestored {
+                messages_json: json,
+            })
         }
         EngineEvent::Done => Event::Done(kezen_proto::Done {}),
         EngineEvent::Error { message } => Event::Error(kezen_proto::Error { message }),
         EngineEvent::Warning(message) => Event::Warning(kezen_proto::Warning { message }),
     };
-    
+
     ServerMessage { event: Some(ev) }
 }
 
@@ -194,19 +221,25 @@ mod tests {
     fn test_client_message_to_user_action() {
         // SendMessage
         let msg = ClientMessage {
-            action: Some(kezen_proto::client_message::Action::SendMessage(kezen_proto::SendMessage {
-                content: "hello world".to_string(),
-            })),
+            action: Some(kezen_proto::client_message::Action::SendMessage(
+                kezen_proto::SendMessage {
+                    content: "hello world".to_string(),
+                },
+            )),
         };
         let action = client_message_to_user_action(msg).unwrap();
         assert_eq!(
             action,
-            UserAction::SendMessage { content: "hello world".to_string() }
+            UserAction::SendMessage {
+                content: "hello world".to_string()
+            }
         );
 
         // Cancel
         let msg = ClientMessage {
-            action: Some(kezen_proto::client_message::Action::Cancel(kezen_proto::Cancel {})),
+            action: Some(kezen_proto::client_message::Action::Cancel(
+                kezen_proto::Cancel {},
+            )),
         };
         let action = client_message_to_user_action(msg).unwrap();
         assert_eq!(action, UserAction::Cancel);
@@ -237,10 +270,12 @@ mod tests {
     fn test_client_message_extended() {
         // Hello
         let msg = ClientMessage {
-            action: Some(kezen_proto::client_message::Action::Hello(kezen_proto::Hello {
-                protocol_version: 1,
-                client_name: "test".to_string(),
-            })),
+            action: Some(kezen_proto::client_message::Action::Hello(
+                kezen_proto::Hello {
+                    protocol_version: 1,
+                    client_name: "test".to_string(),
+                },
+            )),
         };
         assert_eq!(client_message_to_user_action(msg), None);
 
@@ -271,7 +306,9 @@ mod tests {
                 kezen_proto::PermissionResponse {
                     request_id: "req-123".to_string(),
                     decision: Some(kezen_proto::permission_response::Decision::AlwaysAllow(
-                        kezen_proto::AlwaysAllow { suggestion_index: 0 },
+                        kezen_proto::AlwaysAllow {
+                            suggestion_index: 0,
+                        },
                     )),
                 },
             )),
@@ -290,18 +327,26 @@ mod tests {
     #[test]
     fn test_engine_event_to_server_message() {
         // TextDelta
-        let event = EngineEvent::TextDelta { text: "response delta".to_string() };
+        let event = EngineEvent::TextDelta {
+            text: "response delta".to_string(),
+        };
         let msg = engine_event_to_server_message(event);
         match msg.event {
-            Some(kezen_proto::server_message::Event::TextDelta(t)) => assert_eq!(t.text, "response delta"),
+            Some(kezen_proto::server_message::Event::TextDelta(t)) => {
+                assert_eq!(t.text, "response delta")
+            }
             _ => panic!("Expected TextDelta variant"),
         }
-        
+
         // ThinkingDelta
-        let event = EngineEvent::ThinkingDelta { text: "thinking".to_string() };
+        let event = EngineEvent::ThinkingDelta {
+            text: "thinking".to_string(),
+        };
         let msg = engine_event_to_server_message(event);
         match msg.event {
-            Some(kezen_proto::server_message::Event::ThinkingDelta(t)) => assert_eq!(t.text, "thinking"),
+            Some(kezen_proto::server_message::Event::ThinkingDelta(t)) => {
+                assert_eq!(t.text, "thinking")
+            }
             _ => panic!("Expected ThinkingDelta variant"),
         }
 
@@ -391,18 +436,26 @@ mod tests {
         }
 
         // CompactProgress
-        let event = EngineEvent::CompactProgress { message: "compressing...".to_string() };
+        let event = EngineEvent::CompactProgress {
+            message: "compressing...".to_string(),
+        };
         let msg = engine_event_to_server_message(event);
         match msg.event {
-            Some(kezen_proto::server_message::Event::CompactProgress(c)) => assert_eq!(c.message, "compressing..."),
+            Some(kezen_proto::server_message::Event::CompactProgress(c)) => {
+                assert_eq!(c.message, "compressing...")
+            }
             _ => panic!("Expected CompactProgress variant"),
         }
 
         // SkillLoaded
-        let event = EngineEvent::SkillLoaded { name: "my_skill".to_string() };
+        let event = EngineEvent::SkillLoaded {
+            name: "my_skill".to_string(),
+        };
         let msg = engine_event_to_server_message(event);
         match msg.event {
-            Some(kezen_proto::server_message::Event::SkillLoaded(s)) => assert_eq!(s.name, "my_skill"),
+            Some(kezen_proto::server_message::Event::SkillLoaded(s)) => {
+                assert_eq!(s.name, "my_skill")
+            }
             _ => panic!("Expected SkillLoaded variant"),
         }
 
@@ -415,10 +468,14 @@ mod tests {
         }
 
         // Error
-        let event = EngineEvent::Error { message: "system failure".to_string() };
+        let event = EngineEvent::Error {
+            message: "system failure".to_string(),
+        };
         let msg = engine_event_to_server_message(event);
         match msg.event {
-            Some(kezen_proto::server_message::Event::Error(e)) => assert_eq!(e.message, "system failure"),
+            Some(kezen_proto::server_message::Event::Error(e)) => {
+                assert_eq!(e.message, "system failure")
+            }
             _ => panic!("Expected Error variant"),
         }
 
@@ -426,7 +483,9 @@ mod tests {
         let event = EngineEvent::Warning("rate limit".to_string());
         let msg = engine_event_to_server_message(event);
         match msg.event {
-            Some(kezen_proto::server_message::Event::Warning(w)) => assert_eq!(w.message, "rate limit"),
+            Some(kezen_proto::server_message::Event::Warning(w)) => {
+                assert_eq!(w.message, "rate limit")
+            }
             _ => panic!("Expected Warning variant"),
         }
 
@@ -435,11 +494,15 @@ mod tests {
             messages: vec![
                 crate::api::types::Message {
                     role: crate::api::types::Role::User,
-                    content: vec![crate::api::types::ContentBlock::Text { text: "hello".into() }],
+                    content: vec![crate::api::types::ContentBlock::Text {
+                        text: "hello".into(),
+                    }],
                 },
                 crate::api::types::Message {
                     role: crate::api::types::Role::Assistant,
-                    content: vec![crate::api::types::ContentBlock::Text { text: "world".into() }],
+                    content: vec![crate::api::types::ContentBlock::Text {
+                        text: "world".into(),
+                    }],
                 },
             ],
         };
@@ -448,11 +511,11 @@ mod tests {
             Some(kezen_proto::server_message::Event::SessionRestored(sr)) => {
                 assert!(!sr.messages_json.is_empty());
                 // Verify it's valid JSON containing our messages
-                let parsed: Vec<serde_json::Value> = serde_json::from_str(&sr.messages_json).unwrap();
+                let parsed: Vec<serde_json::Value> =
+                    serde_json::from_str(&sr.messages_json).unwrap();
                 assert_eq!(parsed.len(), 2);
             }
             _ => panic!("Expected SessionRestored variant"),
         }
     }
 }
-

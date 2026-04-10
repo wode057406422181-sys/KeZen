@@ -33,8 +33,15 @@ pub async fn run_tui(
     // ── 2. Start Engine in background ──────────────────────────────────
     let work_dir = std::env::current_dir()?;
     let registry = create_default_registry(&config, work_dir.clone());
-    let engine =
-        KezenEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode, work_dir).await?;
+    let engine = KezenEngine::new(
+        config.clone(),
+        action_rx,
+        event_tx,
+        registry,
+        permission_mode,
+        work_dir,
+    )
+    .await?;
     tokio::spawn(async move {
         engine.run().await;
     });

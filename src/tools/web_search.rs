@@ -78,10 +78,7 @@ impl WebSearchTool {
             .get("https://api.search.brave.com/res/v1/web/search")
             .header("X-Subscription-Token", api_key)
             .header("Accept", "application/json")
-            .query(&[
-                ("q", query),
-                ("count", &max_results.to_string()),
-            ])
+            .query(&[("q", query), ("count", &max_results.to_string())])
             .timeout(std::time::Duration::from_secs(30))
             .send()
             .await
@@ -131,11 +128,7 @@ impl WebSearchTool {
         let resp = self
             .http
             .get(&url)
-            .query(&[
-                ("q", query),
-                ("format", "json"),
-                ("categories", "general"),
-            ])
+            .query(&[("q", query), ("format", "json"), ("categories", "general")])
             .timeout(std::time::Duration::from_secs(30))
             .send()
             .await
@@ -238,10 +231,7 @@ impl WebSearchTool {
             .http
             .get("https://api.bing.microsoft.com/v7.0/search")
             .header("Ocp-Apim-Subscription-Key", api_key)
-            .query(&[
-                ("q", query),
-                ("count", &max_results.to_string()),
-            ])
+            .query(&[("q", query), ("count", &max_results.to_string())])
             .timeout(std::time::Duration::from_secs(30))
             .send()
             .await
@@ -280,11 +270,7 @@ fn format_results(query: &str, results: &[SearchResult]) -> String {
         return format!("No results found for: \"{}\"\n", query);
     }
 
-    let mut out = format!(
-        "Search results for: \"{}\"\n{}\n\n",
-        query,
-        "─".repeat(40)
-    );
+    let mut out = format!("Search results for: \"{}\"\n{}\n\n", query, "─".repeat(40));
 
     for (i, r) in results.iter().enumerate() {
         out.push_str(&format!(
@@ -387,9 +373,7 @@ impl Tool for WebSearchTool {
     async fn call(&self, input: serde_json::Value) -> ToolResult {
         let query = match input.get("query").and_then(|v| v.as_str()) {
             Some(q) if !q.is_empty() => q,
-            _ => {
-                return ToolResult::err("Error: missing or empty 'query' parameter".to_string())
-            }
+            _ => return ToolResult::err("Error: missing or empty 'query' parameter".to_string()),
         };
 
         let max_results = input
@@ -619,7 +603,10 @@ mod tests {
         let tool = WebSearchTool::new(None);
         let result = tool.check_permissions(&json!({"query": "test"})).await;
         // Search queries go to third-party APIs, so defer to permission pipeline
-        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Passthrough
+        ));
     }
 
     #[test]

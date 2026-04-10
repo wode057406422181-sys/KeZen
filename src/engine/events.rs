@@ -41,18 +41,11 @@ pub enum EngineEvent {
         suggestion: Option<String>,
     },
     /// Result of a slash command execution
-    SlashCommandResult {
-        command: String,
-        output: String,
-    },
+    SlashCommandResult { command: String, output: String },
     /// Progress update during context compaction
-    CompactProgress {
-        message: String,
-    },
+    CompactProgress { message: String },
     /// A skill has been loaded (notifies frontend to display skill execution)
-    SkillLoaded {
-        name: String,
-    },
+    SkillLoaded { name: String },
     /// Session has been restored from a snapshot — contains full conversation history.
     /// Frontends should replay these messages to show the user what happened before.
     SessionRestored {

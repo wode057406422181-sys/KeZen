@@ -1,11 +1,11 @@
-use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::json;
+use std::sync::Arc;
 
 use crate::constants::defaults::SKILL_TOOL_NAME;
 use crate::permissions::PermissionResult;
-use crate::skills::registry::SkillRegistry;
 use crate::skills::loader::prepare_skill_content;
+use crate::skills::registry::SkillRegistry;
 use crate::tools::{Tool, ToolResult};
 
 pub struct SkillTool {
@@ -86,7 +86,10 @@ impl Tool for SkillTool {
         let raw_skill = match input.get("skill").and_then(|v| v.as_str()) {
             Some(name) => name,
             None => {
-                tracing::warn!(tool = SKILL_TOOL_NAME, "Missing or invalid 'skill' argument in input");
+                tracing::warn!(
+                    tool = SKILL_TOOL_NAME,
+                    "Missing or invalid 'skill' argument in input"
+                );
                 return ToolResult::err("Missing or invalid 'skill' argument".into());
             }
         };
@@ -147,27 +150,37 @@ impl Tool for SkillTool {
         };
 
         if let Some(skill) = self.registry.get(skill_name)
-            && !skill.frontmatter.allowed_tools.is_empty() {
-                tracing::debug!(
-                    tool = SKILL_TOOL_NAME,
-                    skill = %skill_name,
-                    allowed_tools = ?skill.frontmatter.allowed_tools,
-                    "Skill requires advanced permissions"
-                );
-                return PermissionResult::Ask {
-                    message: format!("Skill '{}' requests advanced permissions to run tools: {:?}", skill_name, skill.frontmatter.allowed_tools),
-                };
+            && !skill.frontmatter.allowed_tools.is_empty()
+        {
+            tracing::debug!(
+                tool = SKILL_TOOL_NAME,
+                skill = %skill_name,
+                allowed_tools = ?skill.frontmatter.allowed_tools,
+                "Skill requires advanced permissions"
+            );
+            return PermissionResult::Ask {
+                message: format!(
+                    "Skill '{}' requests advanced permissions to run tools: {:?}",
+                    skill_name, skill.frontmatter.allowed_tools
+                ),
+            };
         }
         PermissionResult::Passthrough
     }
 
     fn permission_description(&self, input: &serde_json::Value) -> String {
-        let raw = input.get("skill").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let raw = input
+            .get("skill")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         format!("Execute skill: {}", normalize_skill_name(raw))
     }
 
     fn permission_suggestion(&self, input: &serde_json::Value) -> Option<String> {
-        input.get("skill").and_then(|v| v.as_str()).map(|s| normalize_skill_name(s).to_string())
+        input
+            .get("skill")
+            .and_then(|v| v.as_str())
+            .map(|s| normalize_skill_name(s).to_string())
     }
 }
 
@@ -225,7 +238,6 @@ mod tests {
         });
         Arc::new(reg)
     }
-
 
     // ── normalize_skill_name ────────────────────────────────────────────────
 
@@ -329,7 +341,11 @@ mod tests {
         let tool = SkillTool::new(registry);
         // Invoke with leading slash — should still find "test-skill"
         let result = tool.call(json!({"skill": "/test-skill"})).await;
-        assert!(!result.is_error, "Leading slash should be stripped: {}", result.content);
+        assert!(
+            !result.is_error,
+            "Leading slash should be stripped: {}",
+            result.content
+        );
     }
 
     #[tokio::test]
@@ -357,7 +373,9 @@ mod tests {
 
         let registry = make_registry_with_skill(dir.path());
         let tool = SkillTool::new(registry);
-        let result = tool.call(json!({"skill": "test-skill", "args": "deploy staging"})).await;
+        let result = tool
+            .call(json!({"skill": "test-skill", "args": "deploy staging"}))
+            .await;
 
         assert!(!result.is_error);
         assert!(result.content.contains("Run deploy staging."));
@@ -375,7 +393,11 @@ mod tests {
     async fn test_call_non_invocable_model_can_call() {
         // Model invocations (via SkillTool) bypass user_invocable: false
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("SKILL.md"), "---\nname: internal\n---\nInternal only.\n").unwrap();
+        std::fs::write(
+            dir.path().join("SKILL.md"),
+            "---\nname: internal\n---\nInternal only.\n",
+        )
+        .unwrap();
 
         let mut reg = SkillRegistry::new();
         reg.register(SkillDefinition {
@@ -391,7 +413,11 @@ mod tests {
         });
         let tool = SkillTool::new(Arc::new(reg));
         let result = tool.call(json!({"skill": "internal"})).await;
-        assert!(!result.is_error, "Model should call non-user-invocable skill: {}", result.content);
+        assert!(
+            !result.is_error,
+            "Model should call non-user-invocable skill: {}",
+            result.content
+        );
         assert!(result.content.contains("<skill name=\"internal\""));
     }
 
@@ -422,7 +448,9 @@ mod tests {
         let registry = make_registry_with_skill(dir.path());
         let tool = SkillTool::new(registry);
 
-        let perm = tool.check_permissions(&json!({"skill": "test-skill"})).await;
+        let perm = tool
+            .check_permissions(&json!({"skill": "test-skill"}))
+            .await;
         assert!(matches!(perm, PermissionResult::Passthrough));
     }
 
@@ -432,7 +460,9 @@ mod tests {
         let registry = make_registry_with_restricted_skill(dir.path());
         let tool = SkillTool::new(registry);
 
-        let perm = tool.check_permissions(&json!({"skill": "restricted"})).await;
+        let perm = tool
+            .check_permissions(&json!({"skill": "restricted"}))
+            .await;
         match perm {
             PermissionResult::Ask { message } => {
                 assert!(message.contains("restricted"));
@@ -449,7 +479,9 @@ mod tests {
         let tool = SkillTool::new(registry);
 
         // Should find the skill even with leading /
-        let perm = tool.check_permissions(&json!({"skill": "/restricted"})).await;
+        let perm = tool
+            .check_permissions(&json!({"skill": "/restricted"}))
+            .await;
         assert!(matches!(perm, PermissionResult::Ask { .. }));
     }
 
@@ -472,31 +504,46 @@ mod tests {
     #[test]
     fn test_permission_description() {
         let tool = SkillTool::new(Arc::new(SkillRegistry::new()));
-        assert_eq!(tool.permission_description(&json!({"skill": "commit"})), "Execute skill: commit");
+        assert_eq!(
+            tool.permission_description(&json!({"skill": "commit"})),
+            "Execute skill: commit"
+        );
     }
 
     #[test]
     fn test_permission_description_strips_slash() {
         let tool = SkillTool::new(Arc::new(SkillRegistry::new()));
-        assert_eq!(tool.permission_description(&json!({"skill": "/commit"})), "Execute skill: commit");
+        assert_eq!(
+            tool.permission_description(&json!({"skill": "/commit"})),
+            "Execute skill: commit"
+        );
     }
 
     #[test]
     fn test_permission_description_missing_skill() {
         let tool = SkillTool::new(Arc::new(SkillRegistry::new()));
-        assert_eq!(tool.permission_description(&json!({})), "Execute skill: unknown");
+        assert_eq!(
+            tool.permission_description(&json!({})),
+            "Execute skill: unknown"
+        );
     }
 
     #[test]
     fn test_permission_suggestion() {
         let tool = SkillTool::new(Arc::new(SkillRegistry::new()));
-        assert_eq!(tool.permission_suggestion(&json!({"skill": "deploy"})), Some("deploy".to_string()));
+        assert_eq!(
+            tool.permission_suggestion(&json!({"skill": "deploy"})),
+            Some("deploy".to_string())
+        );
         assert_eq!(tool.permission_suggestion(&json!({})), None);
     }
 
     #[test]
     fn test_permission_suggestion_strips_slash() {
         let tool = SkillTool::new(Arc::new(SkillRegistry::new()));
-        assert_eq!(tool.permission_suggestion(&json!({"skill": "/deploy"})), Some("deploy".to_string()));
+        assert_eq!(
+            tool.permission_suggestion(&json!({"skill": "/deploy"})),
+            Some("deploy".to_string())
+        );
     }
 }

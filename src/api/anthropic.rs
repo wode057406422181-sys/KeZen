@@ -67,7 +67,6 @@ impl AnthropicClient {
     }
 }
 
-
 /// Normalise an Anthropic-compatible base URL to the messages endpoint.
 ///
 /// Accepts any of:
@@ -117,22 +116,22 @@ impl LlmClient for AnthropicClient {
                         ContentBlock::Text { text } => {
                             Some(serde_json::json!({"type": "text", "text": text}))
                         }
-                        ContentBlock::ToolUse { id, name, input } => {
-                            Some(serde_json::json!({
-                                "type": "tool_use",
-                                "id": id,
-                                "name": name,
-                                "input": input,
-                            }))
-                        }
-                        ContentBlock::ToolResult { tool_use_id, content: result_content, is_error } => {
-                            Some(serde_json::json!({
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": result_content,
-                                "is_error": is_error,
-                            }))
-                        }
+                        ContentBlock::ToolUse { id, name, input } => Some(serde_json::json!({
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": input,
+                        })),
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content: result_content,
+                            is_error,
+                        } => Some(serde_json::json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": result_content,
+                            "is_error": is_error,
+                        })),
                     })
                     .collect();
                 serde_json::json!({"role": role_str, "content": content})
@@ -171,10 +170,7 @@ impl LlmClient for AnthropicClient {
                 {
                     if let Some(last) = tools_vec.last_mut() {
                         if let serde_json::Value::Object(map) = last {
-                            map.insert(
-                                "cache_control".to_string(),
-                                json!({"type": "ephemeral"}),
-                            );
+                            map.insert("cache_control".to_string(), json!({"type": "ephemeral"}));
                         }
                     }
                 }
@@ -187,8 +183,6 @@ impl LlmClient for AnthropicClient {
             // Default to `auto` tool choice unless otherwise constrained
             body["tool_choice"] = json!({"type": "auto"});
         }
-
-
 
         // TODO: Anthropic native web search / web fetch support.
         // When `options.enable_server_search` is true, inject server-side tools:

@@ -1,6 +1,6 @@
-use std::sync::{OnceLock, RwLock};
-use std::collections::HashMap;
 use regex::Regex;
+use std::collections::HashMap;
+use std::sync::{OnceLock, RwLock};
 
 #[derive(Debug, Clone, Copy)]
 pub struct CostPricing {
@@ -31,64 +31,62 @@ impl PricingRule {
 pub fn get_model_pricing(model: &str) -> CostPricing {
     static RULES: OnceLock<Vec<PricingRule>> = OnceLock::new();
     static CACHE: OnceLock<RwLock<HashMap<String, CostPricing>>> = OnceLock::new();
-    
+
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
-    
+
     // Fast path: check cache for the model
     if let Ok(guard) = cache.read()
-        && let Some(&pricing) = guard.get(model) {
-            return pricing;
-        }
-    
+        && let Some(&pricing) = guard.get(model)
+    {
+        return pricing;
+    }
+
     let rules = RULES.get_or_init(|| {
         vec![
             // ==================== Anthropic Claude Models ====================
             PricingRule::new(r"claude.*opus", 15.00, 75.00),
             PricingRule::new(r"claude.*sonnet", 3.00, 15.00),
             PricingRule::new(r"claude.*haiku", 0.80, 4.00),
-            
             // ====================== OpenAI GPT Models ========================
             PricingRule::new(r"gpt-4o-mini", 0.15, 0.60),
             PricingRule::new(r"gpt-4o(?:-202\d-\d\d-\d\d)?", 2.50, 10.00),
             PricingRule::new(r"o1-mini", 1.10, 4.40),
             PricingRule::new(r"o3-mini", 1.10, 4.40),
             PricingRule::new(r"o1(?:-(preview)?.*)?", 15.00, 60.00),
-            
             // =================== Google Gemini Models ========================
             PricingRule::new(r"gemini.*pro", 1.25, 10.00),
             PricingRule::new(r"gemini.*flash-lite", 0.10, 0.40),
             PricingRule::new(r"gemini.*flash", 0.30, 2.50),
-            
             // ========== Alibaba Qwen Models (USD Approx: CNY / 7.0) =========
             PricingRule::new(r"qwen(?:3)?-max", 0.36, 1.43),
             PricingRule::new(r"qwen(?:3(?:\.[56])?)?-plus", 0.11, 0.29),
             PricingRule::new(r"qwen(?:3(?:\.5)?)?-flash", 0.02, 0.21),
             PricingRule::new(r"qwen(?:2\.5)?-coder", 0.15, 0.71),
-            
             // ========== Moonshot Kimi Models (USD Approx: CNY / 7.0) ========
             PricingRule::new(r"kimi.*k2\.5", 0.57, 3.00), // 4 / 21 CNY
             PricingRule::new(r"kimi", 0.57, 2.29),        // 4 / 16 CNY (k2 default)
-            
             // ========== Zhipu GLM Models (USD Approx: CNY / 7.0) ============
-            PricingRule::new(r"glm-5", 0.57, 2.57),       // 4 / 18 CNY
-            PricingRule::new(r"glm-4.*air", 0.11, 0.86),  // 0.8 / 6 CNY
-            PricingRule::new(r"glm", 0.43, 2.00),         // 3 / 14 CNY (glm-4 default)
-
+            PricingRule::new(r"glm-5", 0.57, 2.57), // 4 / 18 CNY
+            PricingRule::new(r"glm-4.*air", 0.11, 0.86), // 0.8 / 6 CNY
+            PricingRule::new(r"glm", 0.43, 2.00),   // 3 / 14 CNY (glm-4 default)
             // ========== MiniMax Models (USD Approx: CNY / 7.0) ==============
-            PricingRule::new(r"minimax", 0.30, 1.20),     // 2.1 / 8.4 CNY
+            PricingRule::new(r"minimax", 0.30, 1.20), // 2.1 / 8.4 CNY
         ]
     });
 
-    let result = rules.iter().find_map(|rule| {
-        if rule.pattern.is_match(model) {
-            Some(rule.costs)
-        } else {
-            None
-        }
-    }).unwrap_or(CostPricing {
-        input_cost_per_mtoken: 0.0,
-        output_cost_per_mtoken: 0.0,
-    });
+    let result = rules
+        .iter()
+        .find_map(|rule| {
+            if rule.pattern.is_match(model) {
+                Some(rule.costs)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(CostPricing {
+            input_cost_per_mtoken: 0.0,
+            output_cost_per_mtoken: 0.0,
+        });
 
     // Cache the result for future lookups in the same session
     if let Ok(mut guard) = cache.write() {
@@ -112,13 +110,15 @@ pub fn calculate_cost(
 ) -> f64 {
     let input_cost = (input_tokens as f64 / 1_000_000.0) * pricing.input_cost_per_mtoken;
     let output_cost = (output_tokens as f64 / 1_000_000.0) * pricing.output_cost_per_mtoken;
-    
+
     // Cache creation costs are a multiplier of the input price (typically 1.25x for Anthropic)
-    let cache_creation_cost = (cache_creation_tokens as f64 / 1_000_000.0) * (pricing.input_cost_per_mtoken * CACHE_CREATION_MULTIPLIER);
-    
+    let cache_creation_cost = (cache_creation_tokens as f64 / 1_000_000.0)
+        * (pricing.input_cost_per_mtoken * CACHE_CREATION_MULTIPLIER);
+
     // Cache read costs are a fraction of the input price (typically 0.10x for Anthropic)
-    let cache_read_cost = (cache_read_tokens as f64 / 1_000_000.0) * (pricing.input_cost_per_mtoken * CACHE_READ_MULTIPLIER);
-    
+    let cache_read_cost = (cache_read_tokens as f64 / 1_000_000.0)
+        * (pricing.input_cost_per_mtoken * CACHE_READ_MULTIPLIER);
+
     input_cost + output_cost + cache_creation_cost + cache_read_cost
 }
 
@@ -208,13 +208,19 @@ mod tests {
 
     #[test]
     fn test_calculate_cost_zero_tokens() {
-        let pricing = CostPricing { input_cost_per_mtoken: 3.0, output_cost_per_mtoken: 15.0 };
+        let pricing = CostPricing {
+            input_cost_per_mtoken: 3.0,
+            output_cost_per_mtoken: 15.0,
+        };
         assert_eq!(calculate_cost(0, 0, 0, 0, &pricing), 0.0);
     }
 
     #[test]
     fn test_calculate_cost_one_million_tokens() {
-        let pricing = CostPricing { input_cost_per_mtoken: 3.0, output_cost_per_mtoken: 15.0 };
+        let pricing = CostPricing {
+            input_cost_per_mtoken: 3.0,
+            output_cost_per_mtoken: 15.0,
+        };
         let cost = calculate_cost(1_000_000, 1_000_000, 0, 0, &pricing);
         assert!((cost - 18.0).abs() < 1e-10);
     }
@@ -222,7 +228,10 @@ mod tests {
     #[test]
     fn test_calculate_cost_realistic() {
         // 10k input, 2k output with Claude Sonnet pricing
-        let pricing = CostPricing { input_cost_per_mtoken: 3.0, output_cost_per_mtoken: 15.0 };
+        let pricing = CostPricing {
+            input_cost_per_mtoken: 3.0,
+            output_cost_per_mtoken: 15.0,
+        };
         let cost = calculate_cost(10_000, 2_000, 0, 0, &pricing);
         // 10k/1M * 3.0 + 2k/1M * 15.0 = 0.03 + 0.03 = 0.06
         assert!((cost - 0.06).abs() < 1e-10);
@@ -230,7 +239,10 @@ mod tests {
 
     #[test]
     fn test_calculate_cost_with_cache() {
-        let pricing = CostPricing { input_cost_per_mtoken: 3.0, output_cost_per_mtoken: 15.0 };
+        let pricing = CostPricing {
+            input_cost_per_mtoken: 3.0,
+            output_cost_per_mtoken: 15.0,
+        };
         let cost = calculate_cost(0, 0, 10_000, 100_000, &pricing);
         // creation: 10k * (3 * 1.25) / 1M = 0.0375
         // read: 100k * (3 * 0.1) / 1M = 0.03

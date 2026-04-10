@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::oneshot;
-use tokio::sync::mpsc;
 use tokio::sync::Mutex;
-use std::collections::HashMap;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 
 use super::config::McpServerConfig;
 
@@ -71,7 +71,12 @@ impl StdioTransport {
         self.request_tx.send((req, resp_tx)).await?;
 
         let result = resp_rx.await?;
-        tracing::debug!(method, id, success = result.is_ok(), "MCP request completed");
+        tracing::debug!(
+            method,
+            id,
+            success = result.is_ok(),
+            "MCP request completed"
+        );
         result
     }
 
@@ -85,9 +90,6 @@ impl StdioTransport {
         self.notify_tx.send(req).await?;
         Ok(())
     }
-
-
-
 
     async fn io_loop(
         mut stdin: ChildStdin,
@@ -124,7 +126,7 @@ impl StdioTransport {
                         }
                     }
                 }
-                
+
                 // Write requests
                 req_opt = request_rx.recv() => {
                     match req_opt {
@@ -132,7 +134,7 @@ impl StdioTransport {
                             if let Some(id) = req.get("id").and_then(|i| i.as_u64()) {
                                 pending_requests.insert(id, resp_tx);
                             }
-                            
+
                             if let Ok(mut bytes) = serde_json::to_vec(&req) {
                                 bytes.push(b'\n');
                                 if stdin.write_all(&bytes).await.is_err() {

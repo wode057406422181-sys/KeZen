@@ -328,19 +328,23 @@ mod tests {
             writer: tokio::io::BufWriter::new(file),
         };
 
-        logger.log(&AuditEvent::SessionStart {
-            session_id: session_id.to_string(),
-            timestamp: "2026-04-05T00:00:00Z".to_string(),
-            model: "test-model".to_string(),
-            cwd: "/tmp".to_string(),
-        }).await;
+        logger
+            .log(&AuditEvent::SessionStart {
+                session_id: session_id.to_string(),
+                timestamp: "2026-04-05T00:00:00Z".to_string(),
+                model: "test-model".to_string(),
+                cwd: "/tmp".to_string(),
+            })
+            .await;
 
-        logger.log(&AuditEvent::UserMessage {
-            session_id: session_id.to_string(),
-            uuid: "msg-001".to_string(),
-            timestamp: "2026-04-05T00:00:01Z".to_string(),
-            content: "hello".to_string(),
-        }).await;
+        logger
+            .log(&AuditEvent::UserMessage {
+                session_id: session_id.to_string(),
+                uuid: "msg-001".to_string(),
+                timestamp: "2026-04-05T00:00:01Z".to_string(),
+                content: "hello".to_string(),
+            })
+            .await;
 
         // Read back and verify
         let content = tokio::fs::read_to_string(&path).await.unwrap();

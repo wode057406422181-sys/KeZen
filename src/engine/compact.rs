@@ -1,4 +1,6 @@
-use crate::constants::prompts::{COMPACT_NO_TOOLS_PREAMBLE, COMPACT_PROMPT, COMPACT_NO_TOOLS_TRAILER};
+use crate::constants::prompts::{
+    COMPACT_NO_TOOLS_PREAMBLE, COMPACT_NO_TOOLS_TRAILER, COMPACT_PROMPT,
+};
 
 pub use crate::constants::defaults::COMPACT_MAX_OUTPUT_TOKENS;
 
@@ -29,14 +31,20 @@ pub fn should_auto_compact(last_input_tokens: u64, context_window: u64) -> bool 
 
 /// Build the full compact prompt: NO_TOOLS preamble + main prompt + NO_TOOLS trailer
 pub fn compact_prompt() -> String {
-    format!("{}{}{}", COMPACT_NO_TOOLS_PREAMBLE, COMPACT_PROMPT, COMPACT_NO_TOOLS_TRAILER)
+    format!(
+        "{}{}{}",
+        COMPACT_NO_TOOLS_PREAMBLE, COMPACT_PROMPT, COMPACT_NO_TOOLS_TRAILER
+    )
 }
 
 /// Validate raw LLM output and extract the summary.
 ///
 /// Returns `Ok((summary, warnings))` on success, `Err(reason)` on failure.
 /// Warnings are non-fatal issues (e.g. missing tags) that the caller can forward to the user.
-pub fn validate_and_extract(raw: &str, stream_errors: &[String]) -> Result<(String, Vec<String>), String> {
+pub fn validate_and_extract(
+    raw: &str,
+    stream_errors: &[String],
+) -> Result<(String, Vec<String>), String> {
     let mut warnings = Vec::new();
 
     // Guard: empty response
@@ -83,7 +91,9 @@ fn extract_summary(raw: &str) -> String {
     if let Some(start_idx) = without_analysis.find(start_tag) {
         let content_start = start_idx + start_tag.len();
         if let Some(end_idx) = without_analysis[content_start..].find(end_tag) {
-            return without_analysis[content_start..content_start + end_idx].trim().to_string();
+            return without_analysis[content_start..content_start + end_idx]
+                .trim()
+                .to_string();
         }
         return without_analysis[content_start..].trim().to_string();
     }

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use std::path::PathBuf;
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 
 use super::access_point::AccessPoint;
 use super::agent::{AgentId, AgentNode, AgentStatus, AgentTask, AgentTaskResult};
@@ -115,17 +115,12 @@ impl AgentNode for LlmWorkerNode {
         tracing::info!(agent = %self.id, work_dir = %self.work_dir.display(), "Worker node initializing");
 
         // Take the action_rx (one-shot: cannot re-init).
-        let action_rx = self
-            .action_rx
-            .write()
-            .await
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("Worker {} already initialized (action_rx taken)", self.id))?;
+        let action_rx = self.action_rx.write().await.take().ok_or_else(|| {
+            anyhow::anyhow!("Worker {} already initialized (action_rx taken)", self.id)
+        })?;
 
-        let registry = crate::tools::registry::create_default_registry(
-            &self.config,
-            self.work_dir.clone(),
-        );
+        let registry =
+            crate::tools::registry::create_default_registry(&self.config, self.work_dir.clone());
 
         let engine = crate::engine::KezenEngine::new(
             self.config.clone(),
@@ -255,11 +250,15 @@ impl AgentNode for LlmWorkerNode {
         self
     }
 
-    fn action_sender(&self) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
+    fn action_sender(
+        &self,
+    ) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
         Some(self.action_tx.clone())
     }
 
-    fn subscribe_events(&self) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {
+    fn subscribe_events(
+        &self,
+    ) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {
         Some(self.event_tx.subscribe())
     }
 }

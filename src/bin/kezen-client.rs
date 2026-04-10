@@ -43,7 +43,12 @@ async fn main() -> Result<()> {
     });
 
     if cli.tui {
-        use crossterm::{execute, terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode}};
+        use crossterm::{
+            execute,
+            terminal::{
+                EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+            },
+        };
         use ratatui::{Terminal, backend::CrosstermBackend};
         use std::io;
 
@@ -54,7 +59,14 @@ async fn main() -> Result<()> {
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
 
-        let result = kezen::frontend::tui::app::run_app(&mut terminal, config, action_tx, event_rx, cli.prompt).await;
+        let result = kezen::frontend::tui::app::run_app(
+            &mut terminal,
+            config,
+            action_tx,
+            event_rx,
+            cli.prompt,
+        )
+        .await;
 
         disable_raw_mode()?;
         execute!(terminal.backend_mut(), LeaveAlternateScreen)?;

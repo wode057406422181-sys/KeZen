@@ -55,9 +55,13 @@ pub struct Usage {
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     /// Incremental text content
-    TextDelta { text: String },
+    TextDelta {
+        text: String,
+    },
     /// Incremental thinking content (Anthropic extended thinking)
-    ThinkingDelta { text: String },
+    ThinkingDelta {
+        text: String,
+    },
     /// A content block started (index + type for routing)
     ContentBlockStart {
         index: usize,
@@ -81,7 +85,12 @@ pub enum StreamEvent {
     MessageStop,
 
     /// Tool use streaming events
-    ToolUseStart { id: String, name: String },
-    ToolUseInputDelta { text: String },
+    ToolUseStart {
+        id: String,
+        name: String,
+    },
+    ToolUseInputDelta {
+        text: String,
+    },
     ToolUseInputDone,
 }

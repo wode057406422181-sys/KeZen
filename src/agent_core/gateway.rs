@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 
 use super::access_point::{AccessPoint, AccessPointHandle, start_access_point};
 use super::agent::{AgentId, AgentNode, AgentStatus, AgentTask, AgentTaskResult};
@@ -188,7 +188,12 @@ impl AgentNode for GatewayNode {
         let children = self.children_handles.read().await;
         for child in children.iter() {
             child.node.init().await.map_err(|e| {
-                anyhow::anyhow!("Failed to init child {} of gateway {}: {}", child.node.id(), self.id, e)
+                anyhow::anyhow!(
+                    "Failed to init child {} of gateway {}: {}",
+                    child.node.id(),
+                    self.id,
+                    e
+                )
             })?;
             tracing::info!(agent = %self.id, child = %child.node.id(), "Child initialized");
         }
@@ -409,8 +414,7 @@ mod tests {
           name = "coder"
         "#;
 
-        let agent_config: crate::control::topology::AgentConfig =
-            toml::from_str(toml_str).unwrap();
+        let agent_config: crate::control::topology::AgentConfig = toml::from_str(toml_str).unwrap();
         let gw = GatewayNode::from_config(&agent_config, Some("test-ns")).unwrap();
 
         assert_eq!(gw.id().0, "test-ns/my-gateway");
@@ -452,13 +456,31 @@ mod tests {
         let tx1 = gw.action_sender();
         let tx2 = gw.action_sender();
 
-        tx1.send(UserAction::SendMessage { content: "a".to_string() }).await.unwrap();
-        tx2.send(UserAction::SendMessage { content: "b".to_string() }).await.unwrap();
+        tx1.send(UserAction::SendMessage {
+            content: "a".to_string(),
+        })
+        .await
+        .unwrap();
+        tx2.send(UserAction::SendMessage {
+            content: "b".to_string(),
+        })
+        .await
+        .unwrap();
 
         let a1 = rx.recv().await.unwrap();
         let a2 = rx.recv().await.unwrap();
-        assert_eq!(a1, UserAction::SendMessage { content: "a".to_string() });
-        assert_eq!(a2, UserAction::SendMessage { content: "b".to_string() });
+        assert_eq!(
+            a1,
+            UserAction::SendMessage {
+                content: "a".to_string()
+            }
+        );
+        assert_eq!(
+            a2,
+            UserAction::SendMessage {
+                content: "b".to_string()
+            }
+        );
     }
 
     #[tokio::test]
@@ -477,8 +499,7 @@ mod tests {
           can_approve = false
         "#;
 
-        let agent_config: crate::control::topology::AgentConfig =
-            toml::from_str(toml_str).unwrap();
+        let agent_config: crate::control::topology::AgentConfig = toml::from_str(toml_str).unwrap();
         let gw = GatewayNode::from_config(&agent_config, Some("ns")).unwrap();
 
         assert!(gw.access_points()[0].can_approve());

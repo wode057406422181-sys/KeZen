@@ -129,7 +129,10 @@ mod tests {
         drop(pair.action_tx);
 
         let result = rx.recv().await;
-        assert!(result.is_none(), "Receiver should get None when sender is dropped");
+        assert!(
+            result.is_none(),
+            "Receiver should get None when sender is dropped"
+        );
     }
 
     #[tokio::test]

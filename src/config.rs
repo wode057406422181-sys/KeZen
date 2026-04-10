@@ -206,7 +206,11 @@ impl AppConfig {
                     }
                 }
                 Err(e) => {
-                    return Err(anyhow::anyhow!("Failed to parse config file at {}: {}", path.display(), e));
+                    return Err(anyhow::anyhow!(
+                        "Failed to parse config file at {}: {}",
+                        path.display(),
+                        e
+                    ));
                 }
             }
         }
@@ -248,16 +252,28 @@ impl AppConfig {
 
         // Search-specific env overrides
         if let Ok(val) = std::env::var("KEZEN_SEARCH_MODE") {
-            config.search.get_or_insert_with(SearchConfig::default).search_mode = val;
+            config
+                .search
+                .get_or_insert_with(SearchConfig::default)
+                .search_mode = val;
         }
         if let Ok(val) = std::env::var("KEZEN_FETCH_MODE") {
-            config.search.get_or_insert_with(SearchConfig::default).fetch_mode = val;
+            config
+                .search
+                .get_or_insert_with(SearchConfig::default)
+                .fetch_mode = val;
         }
         if let Ok(val) = std::env::var("KEZEN_SEARCH_API_KEY") {
-            config.search.get_or_insert_with(SearchConfig::default).api_key = Some(val);
+            config
+                .search
+                .get_or_insert_with(SearchConfig::default)
+                .api_key = Some(val);
         }
         if let Ok(val) = std::env::var("KEZEN_SEARCH_STRATEGY") {
-            config.search.get_or_insert_with(SearchConfig::default).search_strategy = Some(val);
+            config
+                .search
+                .get_or_insert_with(SearchConfig::default)
+                .search_strategy = Some(val);
         }
 
         Ok(config)
@@ -284,12 +300,18 @@ impl AppConfig {
     pub fn config_path() -> Result<PathBuf> {
         let home =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        Ok(home.join(".kezen").join("config").join("kezen.toml"))
+        let new_path = home.join(".kezen").join("config").join("kezen.toml");
+        let old_path = home.join(".kezen").join("config").join("config.toml");
+        if !new_path.exists() && old_path.exists() {
+            eprintln!("  ⚠ Please rename ~/.kezen/config/config.toml → kezen.toml");
+            return Ok(old_path);
+        }
+        Ok(new_path)
     }
 
     /// Merge AppConfig with multi-agent topology configs.
     /// Priority: CLI > env > kezen.toml(AppConfig Root) > kezen.toml(Agent List) > kezen.toml([defaults])
-    /// Because AppConfig is already loaded with kezen.toml(AppConfig Root) + env, 
+    /// Because AppConfig is already loaded with kezen.toml(AppConfig Root) + env,
     /// we only applying Agent/Cluster fields if the AppConfig field is currently None or default.
     pub fn merge_with_toml(
         &mut self,
@@ -327,7 +349,9 @@ impl AppConfig {
         }
 
         // Max Tokens
-        if self.max_tokens.is_none() || self.max_tokens == Some(crate::constants::defaults::DEFAULT_MAX_TOKENS) {
+        if self.max_tokens.is_none()
+            || self.max_tokens == Some(crate::constants::defaults::DEFAULT_MAX_TOKENS)
+        {
             if let Some(limits) = &agent.resource_limits {
                 if let Some(mt) = limits.max_tokens_per_turn {
                     self.max_tokens = Some(mt as u32);
@@ -374,10 +398,7 @@ impl fmt::Debug for AppConfig {
             .field("provider", &self.provider)
             .field("api_url", &self.api_url)
             // Redact the API key — never print credentials to the terminal.
-            .field(
-                "api_key",
-                &self.api_key.as_deref().map(|_| "[REDACTED]"),
-            )
+            .field("api_key", &self.api_key.as_deref().map(|_| "[REDACTED]"))
             .field("model", &self.model)
             .field("max_tokens", &self.max_tokens)
             .field("thinking", &self.thinking)
@@ -521,8 +542,8 @@ mod tests {
             api_key = "test"
         "#;
         let sc: SearchConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(sc.search_mode, "off");     // default
-        assert_eq!(sc.fetch_mode, "client");   // default
+        assert_eq!(sc.search_mode, "off"); // default
+        assert_eq!(sc.fetch_mode, "client"); // default
     }
 
     #[test]
@@ -661,7 +682,7 @@ mod tests {
         let agent = crate::control::topology::AgentConfig::default();
 
         config.merge_with_toml(&agent, &cluster);
-        
+
         // config should retain the higher priority "existing-model" and 2048
         assert_eq!(config.model.as_deref(), Some("existing-model"));
         assert_eq!(config.max_tokens, Some(2048));

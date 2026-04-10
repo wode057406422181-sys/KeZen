@@ -142,12 +142,16 @@ pub trait AgentNode: Send + Sync {
     fn into_any(self: Box<Self>) -> Box<dyn std::any::Any>;
 
     /// 获取 action sender 返回一个克隆，如果此 Node 支持
-    fn action_sender(&self) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
+    fn action_sender(
+        &self,
+    ) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
         None
     }
 
     /// 获取事件广播的订阅 receiver，如果此 Node 支持
-    fn subscribe_events(&self) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {
+    fn subscribe_events(
+        &self,
+    ) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {
         None
     }
 }

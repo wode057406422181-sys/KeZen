@@ -1,6 +1,6 @@
-use indexmap::IndexMap;
 use crate::constants::defaults::MAX_LISTING_DESC_CHARS;
 use crate::skills::types::SkillDefinition;
+use indexmap::IndexMap;
 
 /// Central registry for all loaded skills.
 #[derive(Debug, Default)]
@@ -47,7 +47,11 @@ impl SkillRegistry {
     /// [`MAX_LISTING_DESC_CHARS`] to avoid wasting context-window tokens on
     /// verbose entries. Full content is loaded lazily on invocation.
     fn format_entry_description(skill: &SkillDefinition) -> String {
-        let desc = skill.frontmatter.description.as_deref().unwrap_or("No description provided");
+        let desc = skill
+            .frontmatter
+            .description
+            .as_deref()
+            .unwrap_or("No description provided");
         let combined = match &skill.frontmatter.when_to_use {
             Some(when) => format!("{} - {}", desc, when),
             None => desc.to_string(),
@@ -74,7 +78,9 @@ impl SkillRegistry {
         // disable_model_invocation are user-only (slash commands) and must
         // not appear in the system prompt to avoid wasted tokens and
         // confusing failed-invocation errors.
-        let callable: Vec<(&String, &SkillDefinition)> = self.skills.iter()
+        let callable: Vec<(&String, &SkillDefinition)> = self
+            .skills
+            .iter()
             .filter(|(_, skill)| !skill.frontmatter.disable_model_invocation)
             .collect();
 
@@ -83,7 +89,8 @@ impl SkillRegistry {
         }
 
         // First pass: build full entries
-        let full_entries: Vec<(String, String)> = callable.iter()
+        let full_entries: Vec<(String, String)> = callable
+            .iter()
             .map(|(name, skill)| {
                 let desc = Self::format_entry_description(skill);
                 let mut entry = format!("- {}: {}", name, desc);
@@ -98,11 +105,16 @@ impl SkillRegistry {
 
         // Happy path: everything fits
         if full_total <= budget_chars {
-            return full_entries.iter().map(|(_, e)| e.as_str()).collect::<Vec<_>>().join("\n");
+            return full_entries
+                .iter()
+                .map(|(_, e)| e.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
         }
 
         // Tier 1: truncate descriptions proportionally
-        let name_overhead: usize = full_entries.iter()
+        let name_overhead: usize = full_entries
+            .iter()
             .map(|(name, _)| name.len() + 4) // "- " + ": "
             .sum::<usize>()
             + full_entries.len(); // newlines
@@ -116,11 +128,13 @@ impl SkillRegistry {
                 max_desc_len,
                 "Skill listing: truncating descriptions to fit budget"
             );
-            let truncated: Vec<String> = callable.iter()
+            let truncated: Vec<String> = callable
+                .iter()
                 .map(|(name, skill)| {
                     let desc = Self::format_entry_description(skill);
                     if desc.chars().count() > max_desc_len {
-                        let short: String = desc.chars().take(max_desc_len.saturating_sub(1)).collect();
+                        let short: String =
+                            desc.chars().take(max_desc_len.saturating_sub(1)).collect();
                         format!("- {}: {}…", name, short)
                     } else {
                         format!("- {}: {}", name, desc)
@@ -136,7 +150,11 @@ impl SkillRegistry {
             budget = budget_chars,
             "Skill listing: extreme budget — names only"
         );
-        full_entries.iter().map(|(name, _)| format!("- {}", name)).collect::<Vec<_>>().join("\n")
+        full_entries
+            .iter()
+            .map(|(name, _)| format!("- {}", name))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
@@ -194,7 +212,10 @@ mod tests {
 
         let skill = reg.get("commit").unwrap();
         assert_eq!(skill.name, "commit");
-        assert_eq!(skill.frontmatter.description.as_deref(), Some("Generate a commit message"));
+        assert_eq!(
+            skill.frontmatter.description.as_deref(),
+            Some("Generate a commit message")
+        );
     }
 
     #[test]
@@ -210,7 +231,14 @@ mod tests {
         reg.register(make_skill("deploy", Some("v2")));
 
         assert_eq!(reg.len(), 1);
-        assert_eq!(reg.get("deploy").unwrap().frontmatter.description.as_deref(), Some("v2"));
+        assert_eq!(
+            reg.get("deploy")
+                .unwrap()
+                .frontmatter
+                .description
+                .as_deref(),
+            Some("v2")
+        );
     }
 
     #[test]
@@ -254,7 +282,12 @@ mod tests {
     #[test]
     fn test_format_listing_merges_when_to_use() {
         let mut reg = SkillRegistry::new();
-        reg.register(make_skill_with_hints("deploy", "Deploy app", "When deploying", "<env>"));
+        reg.register(make_skill_with_hints(
+            "deploy",
+            "Deploy app",
+            "When deploying",
+            "<env>",
+        ));
 
         let listing = reg.format_listing(DEFAULT_SKILL_BUDGET_CHARS);
         // description and when_to_use are now merged with " - "
@@ -278,7 +311,10 @@ mod tests {
         for i in 0..20 {
             reg.register(make_skill(
                 &format!("skill-{:03}", i),
-                Some(&format!("Description for skill {} that is moderately detailed", i)),
+                Some(&format!(
+                    "Description for skill {} that is moderately detailed",
+                    i
+                )),
             ));
         }
 
@@ -370,8 +406,14 @@ mod tests {
         });
 
         let listing = reg.format_listing(8000);
-        assert!(listing.contains("visible"), "Model-callable skill should appear");
-        assert!(!listing.contains("hidden"), "Model-disabled skill should NOT appear");
+        assert!(
+            listing.contains("visible"),
+            "Model-callable skill should appear"
+        );
+        assert!(
+            !listing.contains("hidden"),
+            "Model-disabled skill should NOT appear"
+        );
     }
 
     #[test]
@@ -390,6 +432,9 @@ mod tests {
         });
 
         let listing = reg.format_listing(8000);
-        assert!(listing.is_empty(), "Listing should be empty when all skills are model-disabled");
+        assert!(
+            listing.is_empty(),
+            "Listing should be empty when all skills are model-disabled"
+        );
     }
 }

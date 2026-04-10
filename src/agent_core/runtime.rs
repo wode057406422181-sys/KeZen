@@ -89,9 +89,16 @@ pub async fn run_multiagent(
                         "Routing message to child"
                     );
 
-                    if let (Some(action_tx), Some(mut event_rx)) = (child.node.action_sender(), child.node.subscribe_events()) {
+                    if let (Some(action_tx), Some(mut event_rx)) =
+                        (child.node.action_sender(), child.node.subscribe_events())
+                    {
                         // 支持流式：直接将指令发送给子节点的 channel
-                        if let Err(e) = action_tx.send(UserAction::SendMessage { content: content.clone() }).await {
+                        if let Err(e) = action_tx
+                            .send(UserAction::SendMessage {
+                                content: content.clone(),
+                            })
+                            .await
+                        {
                             tracing::error!(task_id = %task_id, error = %e, "Failed to send action to child");
                             let _ = event_tx_for_loop.send(EngineEvent::Error {
                                 message: format!("Failed to send action: {}", e),
@@ -99,25 +106,40 @@ pub async fn run_multiagent(
                             continue;
                         }
 
-                        // 循环读取子节点抛出的事件并原样转发到 Gateway
+                        // 循环读取子节点抛出的事件，同时监听并转发新的动作（如 Cancel）
                         loop {
-                            match event_rx.recv().await {
-                                Ok(event) => {
-                                    let is_terminal = matches!(event, EngineEvent::Done | EngineEvent::Error { .. });
-                                    let _ = event_tx_for_loop.send(event);
-                                    if is_terminal {
+                            tokio::select! {
+                                action_opt = action_rx.recv() => {
+                                    if let Some(action) = action_opt {
+                                        // 活跃期间收到新的 action，直接转发给当前子节点
+                                        if let Err(e) = action_tx.send(action).await {
+                                            tracing::warn!(task_id = %task_id, error = %e, "Failed to forward action to child");
+                                        }
+                                    } else {
+                                        // action_rx closed
                                         break;
                                     }
-                                }
-                                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                    tracing::warn!(task_id = %task_id, "Child event channel closed unexpectedly");
-                                    let _ = event_tx_for_loop.send(EngineEvent::Error {
-                                        message: "Child disconnected".to_string(),
-                                    });
-                                    break;
-                                }
-                                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                                    tracing::warn!(task_id = %task_id, skipped = n, "Gateway lagged behind child events");
+                                },
+                                event_res = event_rx.recv() => {
+                                    match event_res {
+                                        Ok(event) => {
+                                            let is_terminal = matches!(event, EngineEvent::Done | EngineEvent::Error { .. });
+                                            let _ = event_tx_for_loop.send(event);
+                                            if is_terminal {
+                                                break;
+                                            }
+                                        }
+                                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                            tracing::warn!(task_id = %task_id, "Child event channel closed unexpectedly");
+                                            let _ = event_tx_for_loop.send(EngineEvent::Error {
+                                                message: "Child disconnected".to_string(),
+                                            });
+                                            break;
+                                        }
+                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                            tracing::warn!(task_id = %task_id, skipped = n, "Gateway lagged behind child events");
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -155,11 +177,21 @@ pub async fn run_multiagent(
                         }
                     }
                 }
-                UserAction::PermissionResponse { id, allowed, always_allow } => {
+                UserAction::PermissionResponse {
+                    id,
+                    allowed,
+                    always_allow,
+                } => {
                     tracing::info!(agent = %gateway_id, id = %id, allowed, "Permission response received, forwarding");
                     if let Some(child) = children.first() {
                         if let Some(action_tx) = child.node.action_sender() {
-                            let _ = action_tx.send(UserAction::PermissionResponse { id, allowed, always_allow }).await;
+                            let _ = action_tx
+                                .send(UserAction::PermissionResponse {
+                                    id,
+                                    allowed,
+                                    always_allow,
+                                })
+                                .await;
                         }
                     }
                 }

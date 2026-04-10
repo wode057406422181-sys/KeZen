@@ -47,26 +47,23 @@ impl Tool for FileEditTool {
     async fn call(&self, input: serde_json::Value) -> ToolResult {
         let file_path = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(path) => path,
-            None => {
-                return ToolResult::err("Error: missing or invalid 'file_path'".to_string())
-            }
+            None => return ToolResult::err("Error: missing or invalid 'file_path'".to_string()),
         };
 
         let old_string = match input.get("old_string").and_then(|v| v.as_str()) {
             Some(s) => s,
-            None => {
-                return ToolResult::err("Error: missing or invalid 'old_string'".to_string())
-            }
+            None => return ToolResult::err("Error: missing or invalid 'old_string'".to_string()),
         };
 
         let new_string = match input.get("new_string").and_then(|v| v.as_str()) {
             Some(s) => s,
-            None => {
-                return ToolResult::err("Error: missing or invalid 'new_string'".to_string())
-            }
+            None => return ToolResult::err("Error: missing or invalid 'new_string'".to_string()),
         };
 
-        let replace_all = input.get("replace_all").and_then(|v| v.as_bool()).unwrap_or(false);
+        let replace_all = input
+            .get("replace_all")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let path = PathBuf::from(file_path);
         let file_exists = fs::metadata(&path).await.is_ok();
@@ -95,16 +92,25 @@ impl Tool for FileEditTool {
                 tracing::warn!(path = %file_path, error = %e, "FileEdit: failed to write new file");
                 return ToolResult::err(format!("Failed to write new file: {}", e));
             }
-            return ToolResult::ok(format!("The file {} has been created successfully.", file_path));
+            return ToolResult::ok(format!(
+                "The file {} has been created successfully.",
+                file_path
+            ));
         }
 
         if !content.contains(old_string) {
-            return ToolResult::err(format!("String to replace not found in file.\nString: {}", old_string));
+            return ToolResult::err(format!(
+                "String to replace not found in file.\nString: {}",
+                old_string
+            ));
         }
 
         let occurrences = content.matches(old_string).count();
         if occurrences > 1 && !replace_all {
-            return ToolResult::err(format!("Found {} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: {}", occurrences, old_string));
+            return ToolResult::err(format!(
+                "Found {} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: {}",
+                occurrences, old_string
+            ));
         }
 
         let updated_content = if replace_all {
@@ -119,14 +125,20 @@ impl Tool for FileEditTool {
         }
 
         ToolResult::ok(if replace_all {
-            format!("The file {} has been updated. All occurrences were successfully replaced.", file_path)
+            format!(
+                "The file {} has been updated. All occurrences were successfully replaced.",
+                file_path
+            )
         } else {
             format!("The file {} has been updated successfully.", file_path)
         })
     }
 
     fn permission_description(&self, input: &serde_json::Value) -> String {
-        let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let path = input
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         format!("Edit file: {}", path)
     }
 
@@ -138,18 +150,37 @@ impl Tool for FileEditTool {
         true
     }
 
-    async fn check_permissions(&self, input: &serde_json::Value) -> crate::permissions::PermissionResult {
-        let file_path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+    async fn check_permissions(
+        &self,
+        input: &serde_json::Value,
+    ) -> crate::permissions::PermissionResult {
+        let file_path = input
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         crate::permissions::safety::check_file_permissions(file_path, &self.work_dir).await
     }
 
-    fn permission_matcher(&self, input: &serde_json::Value) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
-        let path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        Some(crate::permissions::safety::file_permission_matcher(path, self.work_dir.clone()))
+    fn permission_matcher(
+        &self,
+        input: &serde_json::Value,
+    ) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
+        let path = input
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        Some(crate::permissions::safety::file_permission_matcher(
+            path,
+            self.work_dir.clone(),
+        ))
     }
 
     fn permission_suggestion(&self, input: &serde_json::Value) -> Option<String> {
-        let file_path = input.get("file_path").and_then(|v| v.as_str()).unwrap_or("");
+        let file_path = input
+            .get("file_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         crate::permissions::safety::extract_file_suggestion(
             file_path,
             &self.work_dir.to_string_lossy(),
@@ -169,13 +200,17 @@ mod tests {
         std::fs::write(&path, "hello world").unwrap();
         let path_str = path.to_str().unwrap().to_string();
 
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
-        let result = tool.call(json!({
-            "file_path": path_str,
-            "old_string": "world",
-            "new_string": "rust",
-            "replace_all": false
-        })).await;
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let result = tool
+            .call(json!({
+                "file_path": path_str,
+                "old_string": "world",
+                "new_string": "rust",
+                "replace_all": false
+            }))
+            .await;
 
         assert!(!result.is_error);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "hello rust");
@@ -188,13 +223,17 @@ mod tests {
         std::fs::write(&path, "apple apple banana").unwrap();
         let path_str = path.to_str().unwrap().to_string();
 
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
-        let result = tool.call(json!({
-            "file_path": path_str,
-            "old_string": "apple",
-            "new_string": "orange",
-            "replace_all": false
-        })).await;
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let result = tool
+            .call(json!({
+                "file_path": path_str,
+                "old_string": "apple",
+                "new_string": "orange",
+                "replace_all": false
+            }))
+            .await;
 
         assert!(result.is_error);
         assert!(result.content.contains("Found 2 matches"));
@@ -207,13 +246,17 @@ mod tests {
         std::fs::write(&path, "foo bar foo").unwrap();
         let path_str = path.to_str().unwrap().to_string();
 
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
-        let result = tool.call(json!({
-            "file_path": path_str,
-            "old_string": "foo",
-            "new_string": "baz",
-            "replace_all": true
-        })).await;
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let result = tool
+            .call(json!({
+                "file_path": path_str,
+                "old_string": "foo",
+                "new_string": "baz",
+                "replace_all": true
+            }))
+            .await;
 
         assert!(!result.is_error);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "baz bar baz");
@@ -226,12 +269,16 @@ mod tests {
         std::fs::write(&path, "hello").unwrap();
         let path_str = path.to_str().unwrap().to_string();
 
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
-        let result = tool.call(json!({
-            "file_path": path_str,
-            "old_string": "world",
-            "new_string": "rust"
-        })).await;
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let result = tool
+            .call(json!({
+                "file_path": path_str,
+                "old_string": "world",
+                "new_string": "rust"
+            }))
+            .await;
 
         assert!(result.is_error);
         assert!(result.content.contains("not found in file"));
@@ -241,49 +288,77 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_permissions_path_traversal_deny() {
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
-        let input = json!({"file_path": "/project/../etc/shadow", "old_string": "x", "new_string": "y"});
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let input =
+            json!({"file_path": "/project/../etc/shadow", "old_string": "x", "new_string": "y"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Deny { .. }));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Deny { .. }
+        ));
     }
 
     #[tokio::test]
     async fn test_check_permissions_dangerous_path_ask() {
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
-        let input = json!({"file_path": "/project/.git/config", "old_string": "x", "new_string": "y"});
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let input =
+            json!({"file_path": "/project/.git/config", "old_string": "x", "new_string": "y"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Ask { .. }
+        ));
     }
 
     #[tokio::test]
     async fn test_check_permissions_gitmodules_ask() {
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
-        let input = json!({"file_path": "/project/.gitmodules", "old_string": "x", "new_string": "y"});
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let input =
+            json!({"file_path": "/project/.gitmodules", "old_string": "x", "new_string": "y"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Ask { .. }
+        ));
     }
 
     #[tokio::test]
     async fn test_check_permissions_normal_path_passthrough() {
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
         let cwd = std::env::current_dir().unwrap();
         let file = cwd.join("src").join("main.rs");
-        let input = json!({"file_path": file.to_str().unwrap(), "old_string": "x", "new_string": "y"});
+        let input =
+            json!({"file_path": file.to_str().unwrap(), "old_string": "x", "new_string": "y"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Passthrough
+        ));
     }
 
     // ── trait method tests ───────────────────────────────────────────
 
     #[test]
     fn test_is_file_tool() {
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
         assert!(tool.is_file_tool());
     }
 
     #[test]
     fn test_is_not_read_only() {
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
         assert!(!tool.is_read_only(&json!({})));
     }
 
@@ -291,7 +366,9 @@ mod tests {
 
     #[test]
     fn test_matcher_glob() {
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
         let cwd = std::env::current_dir().unwrap();
         let file_path = format!("{}/src/lib.rs", cwd.display());
         let input = json!({"file_path": file_path});
@@ -302,7 +379,9 @@ mod tests {
 
     #[test]
     fn test_matcher_absolute_glob() {
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
         let input = json!({"file_path": "/tmp/project/src/lib.rs"});
         let matcher = tool.permission_matcher(&input).unwrap();
         assert!(matcher("/tmp/project/src/**")); // absolute prefix
@@ -311,7 +390,9 @@ mod tests {
 
     #[test]
     fn test_matcher_exact_path() {
-        let tool = FileEditTool { work_dir: std::env::current_dir().unwrap() };
+        let tool = FileEditTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
         let input = json!({"file_path": "/project/Cargo.toml"});
         let matcher = tool.permission_matcher(&input).unwrap();
         assert!(matcher("/project/Cargo.toml"));

@@ -26,8 +26,10 @@ impl ContextBudgetManager {
 
             let truncated_str: String = result.chars().take(safe_chars).collect();
 
-            format!("{}\n\n[Output truncated from {} to ~{} tokens. Use targeted queries for specific content.]",
-                    truncated_str, estimated_tokens, self.max_tool_result_tokens)
+            format!(
+                "{}\n\n[Output truncated from {} to ~{} tokens. Use targeted queries for specific content.]",
+                truncated_str, estimated_tokens, self.max_tool_result_tokens
+            )
         } else {
             result.to_string()
         }
