@@ -4,8 +4,6 @@ use crate::constants::prompts::{
 
 pub use crate::constants::api::COMPACT_MAX_OUTPUT_TOKENS;
 
-
-
 /// Helper to decide if auto-compaction should trigger.
 ///
 /// Uses the real `input_tokens` from the last API response (the actual context

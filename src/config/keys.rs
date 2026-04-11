@@ -1,6 +1,6 @@
 use secrecy::SecretString;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 /// Get the path to the credentials file (~/.kezen/.credentials)
 pub fn credentials_path() -> PathBuf {
@@ -19,14 +19,20 @@ pub fn resolve_key(raw_key: Option<String>) -> Option<SecretString> {
         let cred_path = credentials_path();
 
         if !cred_path.exists() {
-            eprintln!("  ⚠ [Keychain Error] No credentials file found. Please run `kezen keys set {} <API_KEY>`", identifier);
+            eprintln!(
+                "  ⚠ [Keychain Error] No credentials file found. Please run `kezen keys set {} <API_KEY>`",
+                identifier
+            );
             return None;
         }
 
         let content = match fs::read_to_string(&cred_path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("  ⚠ [Keychain Error] Failed to read credentials file: {}", e);
+                eprintln!(
+                    "  ⚠ [Keychain Error] Failed to read credentials file: {}",
+                    e
+                );
                 return None;
             }
         };
@@ -45,8 +51,11 @@ pub fn resolve_key(raw_key: Option<String>) -> Option<SecretString> {
                 }
             }
         }
-        
-        eprintln!("  ⚠ [Keychain Error] Key '{}' not found in secure storage", identifier);
+
+        eprintln!(
+            "  ⚠ [Keychain Error] Key '{}' not found in secure storage",
+            identifier
+        );
         None
     } else {
         Some(SecretString::from(key))
@@ -56,7 +65,7 @@ pub fn resolve_key(raw_key: Option<String>) -> Option<SecretString> {
 /// Save a key into the .credentials file
 pub fn set_key(profile: &str, key: &str) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    
+
     let cred_path = credentials_path();
     let mut keys = std::collections::HashMap::new();
 

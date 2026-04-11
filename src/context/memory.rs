@@ -70,7 +70,10 @@ fn parse_frontmatter(text: &str) -> (Option<Vec<String>>, String) {
 async fn load_memory_file(path: PathBuf, memory_type: MemoryType) -> Option<MemoryFile> {
     if let Ok(mut text) = tokio::fs::read_to_string(&path).await {
         if text.chars().count() > MAX_MEMORY_CHARACTER_COUNT {
-            let end = text.char_indices().nth(MAX_MEMORY_CHARACTER_COUNT).map_or(text.len(), |(i, _)| i);
+            let end = text
+                .char_indices()
+                .nth(MAX_MEMORY_CHARACTER_COUNT)
+                .map_or(text.len(), |(i, _)| i);
             text.truncate(end);
             text.push_str("\n\n[Warning: Memory file exceeded 40k characters and was truncated]");
         }

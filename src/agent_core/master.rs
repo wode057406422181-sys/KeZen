@@ -336,7 +336,9 @@ pub fn build_agent_node(
     use crate::control::topology::AgentKind;
 
     let kind = agent_config.kind.as_ref();
-    let name = agent_config.name.as_deref()
+    let name = agent_config
+        .name
+        .as_deref()
         .ok_or_else(|| anyhow::anyhow!("Every agent must have a 'name' field in kezen.toml"))?;
 
     match kind {

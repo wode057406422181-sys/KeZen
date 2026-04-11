@@ -340,7 +340,11 @@ mod tests {
             master_node_r.resolved_permissions.mode,
             Some(PermissionMode::DontAsk)
         );
-        let allow = master_node_r.resolved_permissions.allow_rules.as_ref().unwrap();
+        let allow = master_node_r
+            .resolved_permissions
+            .allow_rules
+            .as_ref()
+            .unwrap();
         assert_eq!(allow.len(), 2);
         assert!(allow.contains(&"read".into()));
         assert!(allow.contains(&"write".into()));

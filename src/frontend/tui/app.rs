@@ -146,8 +146,7 @@ impl App {
             session_cache_creation_tokens: 0,
             session_cache_read_tokens: 0,
             pricing,
-            context_window: config
-                .context_window(),
+            context_window: config.context_window(),
 
             should_quit: false,
         }
@@ -216,10 +215,12 @@ impl App {
                 }
                 self.flush_streaming();
 
-                let preview = serde_json::to_string(&input)
-                    .unwrap_or_else(|_| input.to_string());
+                let preview = serde_json::to_string(&input).unwrap_or_else(|_| input.to_string());
                 let preview_short = if preview.chars().count() > UI_MAX_TOOL_INPUT_CHARS {
-                    let truncated: String = preview.chars().take(UI_MAX_TOOL_INPUT_CHARS.saturating_sub(3)).collect();
+                    let truncated: String = preview
+                        .chars()
+                        .take(UI_MAX_TOOL_INPUT_CHARS.saturating_sub(3))
+                        .collect();
                     format!("{}…", truncated)
                 } else {
                     preview.clone()
@@ -252,7 +253,10 @@ impl App {
                     self.active_tools.remove(0);
                 }
                 let display = if output.chars().count() > UI_MAX_TOOL_RESULT_CHARS {
-                    let truncated: String = output.chars().take(UI_MAX_TOOL_RESULT_CHARS.saturating_sub(3)).collect();
+                    let truncated: String = output
+                        .chars()
+                        .take(UI_MAX_TOOL_RESULT_CHARS.saturating_sub(3))
+                        .collect();
                     format!("{}…", truncated)
                 } else {
                     output
@@ -363,7 +367,8 @@ impl App {
                         match block {
                             crate::api::types::ContentBlock::Text { text } => {
                                 let display = if text.chars().count() > UI_MAX_TEXT_CHARS {
-                                    let truncated: String = text.chars().take(UI_MAX_TEXT_CHARS).collect();
+                                    let truncated: String =
+                                        text.chars().take(UI_MAX_TEXT_CHARS).collect();
                                     format!("{}...", truncated)
                                 } else {
                                     text.clone()
@@ -372,7 +377,8 @@ impl App {
                             }
                             crate::api::types::ContentBlock::Thinking { thinking } => {
                                 let preview = if thinking.chars().count() > UI_MAX_THINKING_CHARS {
-                                    let truncated: String = thinking.chars().take(UI_MAX_THINKING_CHARS).collect();
+                                    let truncated: String =
+                                        thinking.chars().take(UI_MAX_THINKING_CHARS).collect();
                                     format!("💭 {}...", truncated)
                                 } else {
                                     format!("💭 {}", thinking)
@@ -381,8 +387,10 @@ impl App {
                             }
                             crate::api::types::ContentBlock::ToolUse { name, input, .. } => {
                                 let input_str = serde_json::to_string(input).unwrap_or_default();
-                                let preview = if input_str.chars().count() > UI_MAX_TOOL_INPUT_CHARS {
-                                    let truncated: String = input_str.chars().take(UI_MAX_TOOL_INPUT_CHARS).collect();
+                                let preview = if input_str.chars().count() > UI_MAX_TOOL_INPUT_CHARS
+                                {
+                                    let truncated: String =
+                                        input_str.chars().take(UI_MAX_TOOL_INPUT_CHARS).collect();
                                     format!("🔧 {} {}...", name, truncated)
                                 } else {
                                     format!("🔧 {} {}", name, input_str)
@@ -395,12 +403,16 @@ impl App {
                                 ..
                             } => {
                                 let symbol = if *is_error { "✖" } else { "✓" };
-                                let preview = if content.chars().count() > UI_MAX_TOOL_RESULT_HISTORY_CHARS {
-                                    let truncated: String = content.chars().take(UI_MAX_TOOL_RESULT_HISTORY_CHARS).collect();
-                                    format!("{} {}...", symbol, truncated)
-                                } else {
-                                    format!("{} {}", symbol, content)
-                                };
+                                let preview =
+                                    if content.chars().count() > UI_MAX_TOOL_RESULT_HISTORY_CHARS {
+                                        let truncated: String = content
+                                            .chars()
+                                            .take(UI_MAX_TOOL_RESULT_HISTORY_CHARS)
+                                            .collect();
+                                        format!("{} {}...", symbol, truncated)
+                                    } else {
+                                        format!("{} {}", symbol, content)
+                                    };
                                 text_parts.push(preview);
                             }
                         }

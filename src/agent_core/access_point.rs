@@ -127,18 +127,13 @@ pub async fn start_access_point(
                 task_handle: Some(handle),
             })
         }
-        AccessPoint::Tui { can_approve } => {
-            // TUI 接入点在多 Agent 模式下暂时仅做日志标记——
-            // 真正的 TUI 控制需要独占终端，未来会通过独立进程支持。
-            tracing::info!(can_approve, "TUI access point registered (passive mode)");
-            Ok(AccessPointHandle {
-                config: ap.clone(),
-                task_handle: None,
-            })
-        }
-        AccessPoint::Repl { can_approve } => {
-            // 与 TUI 类似，REPL 在多 Agent 模式下暂时被动注册。
-            tracing::info!(can_approve, "REPL access point registered (passive mode)");
+        AccessPoint::Tui { can_approve } | AccessPoint::Repl { can_approve } => {
+            // 前台接入点（TUI / REPL）由 GatewayNode::run_foreground() 管理，此处跳过启动逻辑。
+            tracing::info!(
+                can_approve,
+                kind = ap.kind_label(),
+                "Foreground access point registered (handled by run_foreground)"
+            );
             Ok(AccessPointHandle {
                 config: ap.clone(),
                 task_handle: None,

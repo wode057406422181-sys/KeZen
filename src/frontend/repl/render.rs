@@ -156,7 +156,9 @@ pub fn render_restored_messages(messages: &[Message]) {
                     };
                     println!("  {} {} {}", "🔧".blue(), name.bold(), preview.dimmed());
                 }
-                ContentBlock::ToolResult { content, is_error, .. } => {
+                ContentBlock::ToolResult {
+                    content, is_error, ..
+                } => {
                     let preview = if content.chars().count() > UI_MAX_TOOL_RESULT_HISTORY_CHARS {
                         let byte_end = content
                             .char_indices()

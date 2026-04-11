@@ -139,12 +139,12 @@ impl ModelsConfig {
     /// Save the models dictionary to model.toml
     pub fn save(&self) -> Result<()> {
         let path = Self::config_path()?;
-        
+
         let parent = path.parent().unwrap();
         if !parent.exists() {
             std::fs::create_dir_all(parent)?;
         }
-        
+
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&path, content)?;
         Ok(())
@@ -187,12 +187,14 @@ impl crate::config::AppConfig {
 
     /// Get the base URL for the configured provider.
     pub fn base_url(&self) -> &str {
-        self.runtime_profile.api_url.as_deref().unwrap_or(match self.runtime_profile.provider {
-            Provider::Anthropic => crate::constants::api::DEFAULT_ANTHROPIC_BASE_URL,
-            Provider::OpenAi => crate::constants::api::DEFAULT_OPENAI_BASE_URL,
-        })
+        self.runtime_profile
+            .api_url
+            .as_deref()
+            .unwrap_or(match self.runtime_profile.provider {
+                Provider::Anthropic => crate::constants::api::DEFAULT_ANTHROPIC_BASE_URL,
+                Provider::OpenAi => crate::constants::api::DEFAULT_OPENAI_BASE_URL,
+            })
     }
-
 
     /// Get max output tokens from the runtime profile.
     pub fn max_tokens(&self) -> u32 {

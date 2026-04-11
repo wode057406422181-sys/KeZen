@@ -55,6 +55,9 @@ pub struct AgentConfig {
     /// Memory: either inline string or a file path
     pub memory: Option<String>,
 
+    /// Target gRPC URL for proxy gateways (GatewayBackend::Proxy)
+    pub target: Option<String>,
+
     #[serde(default)]
     pub skills: Vec<String>,
 

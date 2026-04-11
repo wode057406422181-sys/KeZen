@@ -86,7 +86,6 @@ pub struct AppConfig {
     pub models: std::collections::HashMap<String, ModelProfile>,
     pub search: Option<SearchConfig>,
 
-
     /// Effective runtime model profile — the single source of truth for
     /// `provider`, `api_url`, `api_key`, `thinking`, `include_stream_usage`,
     /// `enable_cache`, `max_tokens`, `context_window`, and `user_agent`.
@@ -312,7 +311,9 @@ impl fmt::Debug for AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::api::{DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT};
+    use crate::constants::api::{
+        DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT,
+    };
     use secrecy::SecretString;
 
     fn default_config() -> AppConfig {

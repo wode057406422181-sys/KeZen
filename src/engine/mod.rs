@@ -10,8 +10,8 @@ use crate::api::debug_logger;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{self, LlmClient, StreamOptions};
 use crate::audit::{AuditEvent, SessionAuditLogger};
-use crate::constants::engine::SKILL_TOOL_NAME;
 use crate::config::AppConfig;
+use crate::constants::engine::SKILL_TOOL_NAME;
 use crate::prompts::{build_dynamic_context, build_static_system_prompt};
 use crate::skills::loader::{discover_all_skills, prepare_skill_content};
 use crate::skills::registry::SkillRegistry;
@@ -890,7 +890,9 @@ impl KezenEngine {
                     match api::create_client(&self.config) {
                         Ok(client) => {
                             self.client = client;
-                            let pricing = crate::cost::get_model_pricing(self.config.model.as_deref().unwrap_or(args));
+                            let pricing = crate::cost::get_model_pricing(
+                                self.config.model.as_deref().unwrap_or(args),
+                            );
                             self.session.pricing = pricing;
                             self.session.model_name = args.to_string();
                             let _ = self.event_tx.send(EngineEvent::SlashCommandResult {

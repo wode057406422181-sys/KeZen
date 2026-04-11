@@ -47,6 +47,25 @@ pub async fn run_tui(
     });
 
     // ── 3. Initialise terminal ─────────────────────────────────────────
+    run_tui_client(config, action_tx, event_rx, prompt).await
+}
+
+struct TerminalRestoreGuard;
+impl Drop for TerminalRestoreGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+    }
+}
+
+/// Start the TUI client loop interacting via provided channels.
+/// This acts as a downstream client for an already running Engine or Gateway.
+pub async fn run_tui_client(
+    config: AppConfig,
+    action_tx: mpsc::Sender<UserAction>,
+    event_rx: broadcast::Receiver<EngineEvent>,
+    prompt: Option<String>,
+) -> anyhow::Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -54,12 +73,13 @@ pub async fn run_tui(
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
+    // Use a custom Drop guard to ensure terminal is restored even if app panics
+    let _guard = TerminalRestoreGuard;
+
     // ── 4. Run TUI main loop ───────────────────────────────────────────
     let result = app::run_app(&mut terminal, config, action_tx, event_rx, prompt).await;
 
-    // ── 5. Restore terminal (always, even on error) ────────────────────
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    // 5. Normal terminal restore is handled by the scopeguard. We can just explicitly show cursor.
     terminal.show_cursor()?;
 
     result

@@ -12,7 +12,7 @@ use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::config::AppConfig;
 
 use crate::constants::limits::{
-    FETCH_MAX_MARKDOWN_LENGTH, FETCH_TIMEOUT, FETCH_MAX_CONTENT_LENGTH, FETCH_MAX_URL_LENGTH,
+    FETCH_MAX_CONTENT_LENGTH, FETCH_MAX_MARKDOWN_LENGTH, FETCH_MAX_URL_LENGTH, FETCH_TIMEOUT,
 };
 
 /// Web page fetch tool with HTML→Markdown conversion and optional
