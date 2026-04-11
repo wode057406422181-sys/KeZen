@@ -9,52 +9,52 @@ use crate::constants::engine::{ACTION_CHANNEL_BUFFER, EVENT_CHANNEL_BUFFER};
 use crate::engine::events::{EngineEvent, UserAction};
 use crate::permissions::PermissionMode;
 
-/// LlmWorkerNode — 叶子节点，复用 `KezenEngine` 进行 LLM 推理。
+/// LlmWorkerNode — Leaf node, reuses `KezenEngine` for LLM inference.
 ///
-/// Worker 没有子节点。收到 `assign()` 后，将任务指令通过 `action_tx`
-/// 发送到内部 KezenEngine，引擎在独立 tokio task 上运行 agentic loop。
+/// Worker has no child nodes. Upon receiving `assign()`, it passes task instructions
+/// via `action_tx` to the internal KezenEngine, which runs the agentic loop on an independent tokio task.
 ///
-/// ## Channel 架构
+/// ## Channel Architecture
 ///
 /// ```text
-///   action_tx ──►  action_rx (Engine.run 消费)
+///   action_tx ──►  action_rx (consumed by Engine.run)
 ///                       │
-///   event_tx  ◄──  Engine 产生事件
+///   event_tx  ◄──  Engine generates events
 ///       │
-///   subscribe() → 上级节点 / routing_loop 订阅
+///   subscribe() → Subscribed by upstream node / routing_loop
 /// ```
 ///
-/// `action_tx` / `action_rx` / `event_tx` 在 `new()` 时创建一次，
-/// `init()` 时从 `action_rx` take 出来传给 KezenEngine 构造函数。
-/// 整个生命周期只有一对 channel，不存在断线问题。
+/// `action_tx` / `action_rx` / `event_tx` are created once during `new()`,
+/// `init()` takes `action_rx` and passes it to KezenEngine constructor.
+/// The entire lifecycle only has one channel pair, no disconnect issues.
 pub struct LlmWorkerNode {
     id: AgentId,
     access_points: Vec<AccessPoint>,
     status: RwLock<AgentStatus>,
 
-    /// 用于向内部 KezenEngine 发送指令的 channel sender。
-    /// 上级节点通过 `action_sender()` 获取 clone。
+    /// Channel sender for sending instructions to the internal KezenEngine.
+    /// Upstream node gets a clone via `action_sender()`.
     action_tx: mpsc::Sender<UserAction>,
-    /// action_rx 存在 Option 中，init() 时 take() 出来传给 Engine。
-    /// 一旦 take 就不可再次初始化。
+    /// action_rx is kept in Option, taken out during init() to pass to Engine.
+    /// Once taken, cannot be initialized again.
     action_rx: RwLock<Option<mpsc::Receiver<UserAction>>>,
-    /// 用于上级订阅引擎事件的 broadcast sender。
-    /// Engine 直接持有此 sender 的 clone，产生事件时 send 到这里。
+    /// Broadcast sender for upstream to subscribe to engine events.
+    /// Engine directly holds a clone of this sender, and sends generated events here.
     event_tx: broadcast::Sender<EngineEvent>,
 
-    /// 构建 KezenEngine 所需的配置（在 `init()` 时使用）。
+    /// Configuration required to build KezenEngine (used during init()).
     config: AppConfig,
     work_dir: PathBuf,
     permission_mode: PermissionMode,
 
-    /// 引擎 tokio task handle（init 后填充）。
+    /// Engine tokio task handle (populated after init).
     engine_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl LlmWorkerNode {
-    /// 构造一个新的 LlmWorkerNode。
+    /// Constructs a new LlmWorkerNode.
     ///
-    /// channel pair 在此时创建一次。引擎不会立即启动——需要调用 `init()`。
+    /// Channel pair is created once at this point. Engine does not start immediately — `init()` must be called.
     pub fn new(
         id: AgentId,
         access_points: Vec<AccessPoint>,
@@ -79,19 +79,19 @@ impl LlmWorkerNode {
         }
     }
 
-    /// 获取事件广播的订阅 receiver。
-    /// 上级节点（Master/Gateway routing_loop）通过此方法订阅 Worker 的事件流。
+    /// Gets the subscription receiver for event broadcast.
+    /// Upstream node (Master/Gateway routing_loop) uses this method to subscribe to the Worker's event stream.
     pub fn subscribe_events(&self) -> broadcast::Receiver<EngineEvent> {
         self.event_tx.subscribe()
     }
 
-    /// 获取 action sender 的克隆，用于向此 Worker 发送指令。
-    /// routing_loop 通过此方法直接发送 UserAction 到 Worker 的 Engine。
+    /// Gets a clone of the action sender, used to send instructions to this Worker.
+    /// routing_loop uses this method to directly send UserAction to the Worker's Engine.
     pub fn action_sender(&self) -> mpsc::Sender<UserAction> {
         self.action_tx.clone()
     }
 
-    /// 获取 event broadcast sender 的克隆。
+    /// Gets a clone of the event broadcast sender.
     pub fn event_sender(&self) -> broadcast::Sender<EngineEvent> {
         self.event_tx.clone()
     }

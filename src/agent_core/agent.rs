@@ -4,10 +4,10 @@ use async_trait::async_trait;
 
 use super::access_point::AccessPoint;
 
-/// 每一个 Agent 树节点的唯一 ID。
+/// Unique ID for each Agent tree node.
 ///
-/// 格式约定：`<cluster_namespace>/<agent_name>`，
-/// 例如 `default/gateway`、`default/orchestrator/coder`。
+/// Convention format: `<cluster_namespace>/<agent_name>`,
+/// for example `default/gateway`, `default/orchestrator/coder`.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct AgentId(pub String);
 
@@ -23,18 +23,18 @@ impl From<&str> for AgentId {
     }
 }
 
-/// Agent 运行状态。
+/// Agent execution status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentStatus {
-    /// Agent 已创建但尚未初始化。
+    /// Agent is created but not yet initialized.
     Created,
-    /// Agent 已初始化，可以接收任务。
+    /// Agent is initialized and ready to receive tasks.
     Ready,
-    /// Agent 正在执行任务。
+    /// Agent is currently executing a task.
     Running,
-    /// Agent 已挂起（可恢复）。
+    /// Agent is suspended (can be resumed).
     Suspended,
-    /// Agent 已终止。
+    /// Agent is terminated.
     Stopped,
 }
 
@@ -50,105 +50,105 @@ impl fmt::Display for AgentStatus {
     }
 }
 
-/// 分配给 Agent 的任务。
+/// Task assigned to an Agent.
 ///
-/// 足够通用以适配不同类型的 Agent：
-/// - Worker：收到 `instruction` 后进入 LLM 推理循环。
-/// - Master：收到后拆解为子任务分发给 workers。
-/// - Gateway：收到后路由给下级 Agent。
+/// Generic enough to fit different types of Agents:
+/// - Worker: Enters LLM inference loop after receiving `instruction`.
+/// - Master: Decomposes into subtasks and distributes to workers upon receipt.
+/// - Gateway: Routes to child Agents upon receipt.
 #[derive(Debug, Clone)]
 pub struct AgentTask {
-    /// 唯一任务 ID。
+    /// Unique task ID.
     pub task_id: String,
-    /// 任务指令文本（自然语言描述）。
+    /// Task instruction text (natural language description).
     pub instruction: String,
-    /// 可选的发送方 Agent ID（用于结果回传）。
+    /// Optional Sender Agent ID (for returning results).
     pub sender: Option<AgentId>,
-    /// 可选的附加上下文（JSON 格式的结构化数据）。
+    /// Optional additional context (structured JSON data).
     pub context: Option<serde_json::Value>,
 }
 
-/// Agent 执行任务后的返回结果。
+/// Return result after Agent executes a task.
 #[derive(Debug, Clone)]
 pub struct AgentTaskResult {
-    /// 对应的任务 ID。
+    /// Corresponding task ID.
     pub task_id: String,
-    /// 任务是否成功完成。
+    /// Whether the task completed successfully.
     pub success: bool,
-    /// 结果摘要 / 输出文本。
+    /// Result summary / output text.
     pub output: String,
-    /// 可选的结构化结果数据。
+    /// Optional structured result data.
     pub data: Option<serde_json::Value>,
 }
 
-/// AgentNode Trait — 多 Agent 拓扑的核心抽象。
+/// AgentNode Trait — the core abstraction for multi-agent topology.
 ///
-/// 万物皆 Agent：LLM Worker、AI Master、Gateway 都是 `AgentNode` 的实现。
-/// 核心区别只在于 `assign()` 的行为：
-/// - `LlmWorker` — 调用 LLM API 推理
-/// - `GatewayNode` — 通过 AccessPoint 路由给外部输入源（人类或远端 Agent）
-/// - `Master` — Master 拆解后分发给子节点
+/// Everything is an Agent: LLM Worker, AI Master, Gateway are all `AgentNode` implementations.
+/// The core difference lies only in the behavior of `assign()`:
+/// - `LlmWorker` — Calls LLM API for inference
+/// - `GatewayNode` — Routes to external input sources (human or remote Agent) via AccessPoint
+/// - `Master` — Master decomposes and distributes to child nodes
 #[async_trait]
 pub trait AgentNode: Send + Sync {
-    /// 返回此节点的唯一 ID。
+    /// Returns this node's unique ID.
     fn id(&self) -> &AgentId;
 
-    /// 查询当前运行状态。
+    /// Queries current execution status.
     async fn status(&self) -> AgentStatus;
 
-    /// 该 Agent 的【附加】接入点列表（不含隐式默认接入点）。
+    /// This Agent's [additional] access point list (excluding implicit default access points).
     ///
-    /// 默认接入点规则（无需配置，框架自动处理）：
-    ///   - 非 Root Agent：父节点即默认接入点，通过进程内 MPSC 传输。
-    ///   - Root Agent：无父节点，事件只送达此列表中配置的接入点。
+    /// Default access point rules (no config needed, auto-handled by framework):
+    ///   - Non-Root Agent: Parent node is default access point, via in-process MPSC.
+    ///   - Root Agent: No parent, events only delivered to access points configured in this list.
     fn access_points(&self) -> &[AccessPoint];
 
-    /// 初始化 Agent（连接 LLM 端点、启动 TUI / gRPC 服务器、加载 Skill 等）。
+    /// Initializes Agent (connects LLM endpoint, starts TUI/gRPC server, loads Skills, etc.).
     async fn init(&self) -> anyhow::Result<()>;
 
-    /// 分配任务给此 Agent。
+    /// Assigns a task to this Agent.
     ///
-    /// - LlmWorker：直接进入 LLM 推理循环。
-    /// - GatewayNode：通过 AccessPoint 接收外部输入，路由给下级。
-    /// - Master：Master 拆解后分发给子节点。
+    /// - LlmWorker: Directly enters LLM inference loop.
+    /// - GatewayNode: Receives external input via AccessPoint, routes downstream.
+    /// - Master: Master decomposes and distributes to child nodes.
     async fn assign(&self, task: AgentTask) -> anyhow::Result<AgentTaskResult>;
 
-    /// 挂起 Agent（保留状态，暂停处理）。
+    /// Suspends Agent (retains state, pauses processing).
     async fn suspend(&self, reason: &str) -> anyhow::Result<()>;
 
-    /// 从挂起状态恢复。
+    /// Resumes from suspended state.
     async fn resume(&self) -> anyhow::Result<()>;
 
-    /// 终止 Agent，释放所有资源。
+    /// Terminates Agent, releasing all resources.
     async fn shutdown(&self) -> anyhow::Result<()>;
 
-    /// 返回子节点 ID 列表。
-    /// - LlmWorker：空列表。
-    /// - Master / Gateway：非空。
+    /// Returns list of child node IDs.
+    /// - LlmWorker: Empty list.
+    /// - Master / Gateway: Non-empty.
     fn children(&self) -> Vec<AgentId>;
 
-    /// 该节点是否为 Gateway（无 Engine 的纯接入点节点）。
+    /// Whether this node is a Gateway (pure access point node without an Engine).
     ///
-    /// 框架用此标记来决定「准入审批」请求应路由到哪个节点。
-    /// Gateway 节点拥有审批权，可以持有 `can_approve = true` 的接入点。
+    /// Framework uses this marker to determine which node "admission approval" requests should route to.
+    /// Gateway node has approval authority and can hold access points with `can_approve = true`.
     fn is_gateway(&self) -> bool {
         false
     }
 
-    /// 将 `Box<dyn AgentNode>` 转换为 `Box<dyn Any>`，用于安全向下转型。
+    /// Converts `Box<dyn AgentNode>` to `Box<dyn Any>` for safe downcasting.
     ///
-    /// runtime 模块需要将根节点 downcast 为 `GatewayNode` 以访问
-    /// `take_action_rx()` / `take_children()` 等具体方法。
+    /// The runtime module needs to downcast the root node to `GatewayNode` to access
+    /// specific methods like `take_action_rx()` / `take_children()`.
     fn into_any(self: Box<Self>) -> Box<dyn std::any::Any>;
 
-    /// 获取 action sender 返回一个克隆，如果此 Node 支持
+    /// Gets action sender, returning a clone if this Node supports it
     fn action_sender(
         &self,
     ) -> Option<tokio::sync::mpsc::Sender<crate::engine::events::UserAction>> {
         None
     }
 
-    /// 获取事件广播的订阅 receiver，如果此 Node 支持
+    /// Gets event broadcast subscription receiver, if this Node supports it
     fn subscribe_events(
         &self,
     ) -> Option<tokio::sync::broadcast::Receiver<crate::engine::events::EngineEvent>> {

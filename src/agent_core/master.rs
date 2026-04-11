@@ -10,55 +10,55 @@ use crate::config::AppConfig;
 use crate::engine::events::{EngineEvent, UserAction};
 use crate::permissions::PermissionMode;
 
-/// 子节点的运行时句柄。
+/// Runtime handle for a child node.
 ///
-/// 持有与子 Agent 通信所需的 `ChannelPair` 和 `AgentNode` trait object。
-/// Master 通过 ChildHandle 向子节点分发任务并接收事件。
+/// Holds the `ChannelPair` necessary for communication with the child Agent and the `AgentNode` trait object.
+/// Master distributes tasks and receives events from children via ChildHandle.
 pub struct ChildHandle {
-    /// 子节点的 AgentNode 实现。
+    /// The AgentNode implementation of the child node.
     pub node: Box<dyn AgentNode>,
 }
 
-/// MasterNode — 容器节点，持有 Master Engine + 子节点集合。
+/// MasterNode — Container node, holds Master Engine + collection of child nodes.
 ///
-/// Master 的 Engine 作为 "Master"，负责：
-///   1. 接收上级任务
-///   2. 拆解为子任务（通过 Master Engine 的 LLM 推理）
-///   3. 分发到 children（向子节点的 mpsc 发送 UserAction::SendMessage）
-///   4. 聚合子节点结果（监听子节点的 EngineEvent 事件流）
-///   5. 合并结果并向上报告
+/// The Master Engine as "Master", is responsible for:
+///   1. Receiving upstream tasks
+///   2. Decomposing into subtasks (via Master Engine's LLM inference)
+///   3. Distributing to children (sending UserAction::SendMessage to child node's mpsc)
+///   4. Aggregating child node results (listening to child node's EngineEvent stream)
+///   5. Merging results and reporting upwards
 ///
-/// 一期简化实现：Master 将任务直接下发到第一个 Worker，
-/// Master Engine 的调度逻辑在后续迭代中实现。
+/// Phase 1 simplified implementation: Master directly assigns the task to the first Worker.
+/// The Master Engine's scheduling logic will be implemented in future iterations.
 pub struct MasterNode {
     id: AgentId,
     access_points: Vec<AccessPoint>,
     status: RwLock<AgentStatus>,
 
-    /// 子节点句柄列表。
+    /// List of child node handles.
     children_handles: RwLock<Vec<ChildHandle>>,
-    /// 子节点 ID 列表（用于 AgentNode::children() 返回）。
+    /// List of child node IDs (used for AgentNode::children() return).
     children_ids: Vec<AgentId>,
 
-    /// Master Engine 的配置和通信通道。
+    /// Master Engine's configuration and communication channel.
     config: AppConfig,
     work_dir: PathBuf,
     permission_mode: PermissionMode,
 
-    /// Master Engine 的 action channel（用于向 Master 发送指令）。
+    /// Master Engine's action channel (used to send commands to Master).
     master_action_tx: mpsc::Sender<UserAction>,
-    /// Master Engine 的 action_rx，init() 时取出。
+    /// Master Engine's action_rx, taken out during init().
     master_action_rx: RwLock<Option<mpsc::Receiver<UserAction>>>,
-    /// Master Engine 的 event broadcast（用于订阅 Master 事件）。
+    /// Master Engine's event broadcast (used to subscribe to Master events).
     master_event_tx: broadcast::Sender<EngineEvent>,
-    /// Master Engine 的 tokio task handle。
+    /// tokio task handle for Master Engine.
     master_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl MasterNode {
-    /// 构造一个新的 MasterNode。
+    /// Constructs a new MasterNode.
     ///
-    /// 传入子节点的 ChildHandle 列表。Master Engine 在 `init()` 时构建。
+    /// Accepts a list of child ChildHandles. Master Engine is built during `init()`.
     pub fn new(
         id: AgentId,
         access_points: Vec<AccessPoint>,
@@ -93,7 +93,7 @@ impl MasterNode {
         }
     }
 
-    /// 获取 Master Engine 的事件订阅 receiver。
+    /// Gets the Master Engine's event subscription receiver.
     pub fn subscribe_master_events(&self) -> broadcast::Receiver<EngineEvent> {
         self.master_event_tx.subscribe()
     }
@@ -288,15 +288,15 @@ impl AgentNode for MasterNode {
     }
 }
 
-/// 从 `ClusterConfig` 递归构建 `AgentNode` 树。
+/// Recursively builds the `AgentNode` tree from `ClusterConfig`.
 ///
-/// 遍历配置中的 `[[agents]]`，根据 `kind` 递归构建：
+/// Iterates through `[[agents]]` in the config, recursively building based on `kind`:
 /// - `Gateway` → `GatewayNode`
 /// - `Worker` → `LlmWorkerNode`
-/// - `Master` → `MasterNode`（递归构建 `workers` + `master`）
+/// - `Master` → `MasterNode` (recursively builds `workers` + `master`)
 ///
-/// 返回根节点（通常是 Gateway）。如果配置中有多个顶层 agent，
-/// 只使用第一个作为根节点。
+/// Returns the root node (usually Gateway). If there are multiple top-level agents in the config,
+/// only the first one is used as the root node.
 pub fn build_agent_tree(
     cluster: &crate::control::topology::ClusterConfig,
     base_config: &AppConfig,
@@ -324,7 +324,7 @@ pub fn build_agent_tree(
     )
 }
 
-/// 递归构建单个 AgentNode。
+/// Recursively builds a single AgentNode.
 pub fn build_agent_node(
     agent_config: &crate::control::topology::AgentConfig,
     namespace: &str,
@@ -480,7 +480,7 @@ pub fn build_agent_node(
     }
 }
 
-/// 将 TOML AccessPointConfig 转换为运行时 AccessPoint。
+/// Converts TOML AccessPointConfig to runtime AccessPoint.
 fn convert_access_points(
     configs: &[crate::control::topology::AccessPointConfig],
 ) -> anyhow::Result<Vec<AccessPoint>> {

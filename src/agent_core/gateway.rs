@@ -7,18 +7,18 @@ use super::bus;
 use super::master::ChildHandle;
 use crate::engine::events::{EngineEvent, UserAction};
 
-/// GatewayNode — 统一的接入与代理桥接节点。
+/// GatewayNode — Unified access and proxy bridge node.
 ///
-/// Gateway 是 Access Point Only 的节点：**没有 Engine**，不做 LLM 推理。
-/// 它的全部职责是：
-///   1. 将上游外部输入（TUI / REPL / gRPC Client）路由到**下游后端**。
-///   2. 将下游后端产生的事件广播到所有上游接入点。
+/// Gateway is an Access Point Only node: **No Engine**, no LLM inference.
+/// Its sole responsibilities are:
+///   1. Route upstream external inputs (TUI / REPL / gRPC Client) to the **downstream backend**.
+///   2. Broadcast events from the downstream backend to all upstream access points.
 ///
-/// 下游后端 (`GatewayBackend`) 有两种：
-///   - `Children`: 路由到本地子节点。
-///   - `Proxy`: 代理转发到远端主机。
+/// Downstream backend (`GatewayBackend`) has two modes:
+///   - `Children`: Route to local child nodes.
+///   - `Proxy`: Proxy forward to a remote Host.
 ///
-/// ## 统一 Channel 架构
+/// ## Unified Channel Architecture
 ///
 /// ```text
 ///   Upstreams                                 Backend
@@ -32,46 +32,46 @@ use crate::engine::events::{EngineEvent, UserAction};
 ///   AccessPoint(gRPC) ◄──┘
 /// ```
 ///
-/// - 所有接入点共享同一个 `action_tx` 的 clone（汇入）
-/// - 所有接入点各自持有独立的 `event_tx.subscribe()` receiver（扇出）
-/// - Backend Loop 消费 `action_rx` 并产生 `event_tx`
+/// - All access points share a clone of the same `action_tx` (fan-in)
+/// - Each access point holds an independent `event_tx.subscribe()` receiver (fan-out)
+/// - Backend Loop consumes `action_rx` and produces `event_tx`
 
-/// Gateway 的下游后端——决定 action_rx 的消费者和 event_tx 的生产者。
+/// Gateway's downstream backend — Determines the consumer of action_rx and producer of event_tx.
 #[derive(Debug, Clone, PartialEq)]
 pub enum GatewayBackend {
-    /// 本地子节点路由。
+    /// Local child nodes routing.
     Children,
-    /// 远端 gRPC 代理。
+    /// Remote gRPC proxy.
     Proxy { target_url: String },
 }
 
 pub struct GatewayNode {
     id: AgentId,
-    /// Gateway 的后端模式：决定流量路由到本地子节点还是代理到远端。
+    /// Gateway backend mode: decides whether traffic is routed to local children or proxied to remote.
     backend: GatewayBackend,
-    /// 配置的接入点列表（用于启动时创建 handle）。
+    /// Configured access points list (used to create handles on start).
     access_points: Vec<AccessPoint>,
-    /// 已启动的接入点 handle（init 后填充）。
+    /// Launched access point handles (populated after init).
     active_handles: RwLock<Vec<AccessPointHandle>>,
-    /// 子节点 ID 列表（用于 AgentNode::children()）。
+    /// Child node IDs (used for AgentNode::children()).
     children_ids: Vec<AgentId>,
-    /// 子节点实例列表（init 时使用，routing_loop 时 take 走）。
+    /// Child node instances (used in init, taken by routing_loop).
     children_handles: RwLock<Vec<ChildHandle>>,
-    /// 运行状态。
+    /// Running status.
     status: RwLock<AgentStatus>,
-    /// 后端循环的 AbortHandle（shutdown 时中止）。
+    /// AbortHandle for the backend loop (aborted on shutdown).
     backend_abort_handle: RwLock<Option<tokio::task::AbortHandle>>,
 
-    /// 所有接入点的 UserAction 汇入此 sender。
+    /// UserAction from all access points converges to this sender.
     action_tx: mpsc::Sender<UserAction>,
-    /// Gateway 的 action receiver—— Backend Loop 消费。
+    /// Gateway action receiver — consumed by Backend Loop.
     action_rx: RwLock<Option<mpsc::Receiver<UserAction>>>,
-    /// 事件广播 sender——routing_loop 将子节点事件转发到此处。
+    /// Event broadcast sender — routing_loop forwards child events here.
     event_tx: broadcast::Sender<EngineEvent>,
 }
 
 impl GatewayNode {
-    /// 构造一个新的 GatewayNode。
+    /// Constructs a new GatewayNode.
     pub fn new(
         id: AgentId,
         access_points: Vec<AccessPoint>,
@@ -95,14 +95,14 @@ impl GatewayNode {
         }
     }
 
-    /// 设置子节点句柄列表。
-    /// 在 build_agent_tree() 中调用——Gateway 构建完成后注入子节点。
+    /// Sets the child node handles.
+    /// Called in build_agent_tree() — injects child nodes after Gateway construction.
     pub fn set_children(&mut self, children: Vec<ChildHandle>) {
         self.children_ids = children.iter().map(|ch| ch.node.id().clone()).collect();
         self.children_handles = RwLock::new(children);
     }
 
-    /// 从 TOML AgentConfig 构造 GatewayNode。
+    /// Constructs GatewayNode from TOML AgentConfig.
     pub fn from_config(
         config: &crate::control::topology::AgentConfig,
         namespace: Option<&str>,
@@ -168,7 +168,7 @@ impl GatewayNode {
         };
 
         if matches!(backend, GatewayBackend::Proxy { .. }) {
-            // Proxy Gateway 不允许 REPL/TUI
+            // Proxy Gateway does not allow REPL/TUI
             for ap in &access_points {
                 if matches!(ap, AccessPoint::Repl { .. } | AccessPoint::Tui { .. }) {
                     anyhow::bail!(
@@ -200,12 +200,12 @@ impl GatewayNode {
         Ok(Self::new(id, access_points, children_ids, backend))
     }
 
-    /// 获取 Gateway 的 event broadcast sender。
+    /// Gets the Gateway's event broadcast sender.
     pub fn event_sender(&self) -> broadcast::Sender<EngineEvent> {
         self.event_tx.clone()
     }
 
-    /// Take the action_rx (one-shot). routing_loop 使用此方法获取 receiver。
+    /// Take the action_rx (one-shot). routing_loop uses this method to get the receiver.
     pub async fn take_action_rx(&self) -> mpsc::Receiver<UserAction> {
         self.action_rx
             .write()
@@ -220,17 +220,17 @@ impl GatewayNode {
         std::mem::take(&mut *handles)
     }
 
-    /// 检查是否配置了某种接入点
+    /// Checks if a specific kind of access point is configured
     pub fn has_access_point_of_kind(&self, kind: &str) -> bool {
         self.access_points.iter().any(|ap| ap.kind_label() == kind)
     }
 
-    /// 启动 Gateway 的后端消费循环。
+    /// Starts the Gateway's backend consumption loop.
     ///
-    /// 此方法会 spawn 一个 tokio task 来消费 action_rx。
-    /// Children 模式下，将指令路由到子节点；Proxy 模式下，将指令代理到远端。
+    /// This method spawns a tokio task to consume action_rx.
+    /// In Children mode, routes commands to child nodes; in Proxy mode, proxies commands remotely.
     ///
-    /// 返回 JoinHandle，调用方可以 await 它等待路由循环退出。
+    /// Returns a JoinHandle, callers can await it to wait for the routing loop to exit.
     pub async fn spawn_backend(&self) -> tokio::task::JoinHandle<Vec<ChildHandle>> {
         let mut action_rx = self.take_action_rx().await;
         let event_tx_for_loop = self.event_tx.clone();
@@ -280,7 +280,7 @@ impl GatewayNode {
                                 if let (Some(action_tx), Some(mut event_rx)) =
                                     (child.node.action_sender(), child.node.subscribe_events())
                                 {
-                                    // 支持流式：直接将指令发送给子节点的 channel
+                                    // Support streaming: send instructions directly to child node channel
                                     if let Err(e) = action_tx
                                         .send(UserAction::SendMessage {
                                             content: content.clone(),
@@ -294,7 +294,7 @@ impl GatewayNode {
                                         continue;
                                     }
 
-                                    // 循环读取子节点抛出的事件，同时监听并转发新的动作（如 Cancel）
+                                    // Loop to read events emitted by child node, while listening and forwarding new actions (e.g. Cancel)
                                     loop {
                                         tokio::select! {
                                             action_opt = action_rx.recv() => {
@@ -339,7 +339,7 @@ impl GatewayNode {
                                         }
                                     }
                                 } else {
-                                    // 不支持流式的降级方案：使用 assign() 阻塞等待完毕
+                                    // Fallback for non-streaming: block and wait for completion using assign()
                                     let task = crate::agent_core::agent::AgentTask {
                                         task_id: task_id.clone(),
                                         instruction: content,
@@ -398,7 +398,7 @@ impl GatewayNode {
                     // Routing loop ends when action_tx is dropped (REPL exited).
                     tracing::info!(agent = %gateway_id, "Routing loop ended");
 
-                    // 返回 children 所有权供 gateway.shutdown() 使用
+                    // Return children ownership for gateway.shutdown() to use
                     children
                 })
             }
@@ -414,7 +414,7 @@ impl GatewayNode {
                     {
                         tracing::error!(error = %e, "Gateway proxy backend failed");
                     }
-                    Vec::new() // Proxy 模式无 children 可归还
+                    Vec::new() // Proxy mode has no children to return
                 })
             }
         };
@@ -423,11 +423,11 @@ impl GatewayNode {
         join_handle
     }
 
-    /// 运行前台接入点（阻塞主 task）。
+    /// Runs foreground access point (blocks main task).
     ///
-    /// - 如果配置了 REPL → 启动 REPL（阻塞直到用户退出）
-    /// - 如果配置了 TUI → 启动 TUI（阻塞直到用户退出）
-    /// - 如果都没有（纯 gRPC）→ tokio::signal::ctrl_c() 等待
+    /// - If REPL configured → Starts REPL (blocks until user exits)
+    /// - If TUI configured → Starts TUI (blocks until user exits)
+    /// - If neither (gRPC only) → Waits for tokio::signal::ctrl_c()
     pub async fn run_foreground(
         &self,
         config: &crate::config::AppConfig,
@@ -453,7 +453,7 @@ impl GatewayNode {
             )
             .await?;
         } else {
-            // gRPC-only 模式：等待 Ctrl+C
+            // gRPC-only mode: Wait for Ctrl+C
             eprintln!("Gateway running (gRPC only). Press Ctrl+C to stop.");
             tokio::signal::ctrl_c().await?;
         }
@@ -461,12 +461,12 @@ impl GatewayNode {
         Ok(())
     }
 
-    /// 返回已激活的接入点数量。
+    /// Returns the number of active access points.
     pub async fn active_access_point_count(&self) -> usize {
         self.active_handles.read().await.len()
     }
 
-    /// 检查是否有任何接入点拥有审批权。
+    /// Checks if any access point has approval authority.
     pub fn has_approval_authority(&self) -> bool {
         self.access_points.iter().any(|ap| ap.can_approve())
     }
@@ -494,7 +494,7 @@ impl AgentNode for GatewayNode {
             "Gateway node initializing"
         );
 
-        // 1. 初始化后端依赖
+        // 1. Initialize backend dependencies
         match &self.backend {
             GatewayBackend::Children => {
                 let children = self.children_handles.read().await;
@@ -511,7 +511,7 @@ impl AgentNode for GatewayNode {
                 }
             }
             GatewayBackend::Proxy { .. } => {
-                // Proxy 模式没有本地 children 需要初始化
+                // Proxy mode has no local children to initialize
             }
         }
 
@@ -544,16 +544,16 @@ impl AgentNode for GatewayNode {
     }
 
     async fn assign(&self, task: AgentTask) -> anyhow::Result<AgentTaskResult> {
-        // 无论哪种 backend，都通过 channel 发送任务。
-        // 注意：当前实现假定单任务串行。如果有并发 assign() 调用，
-        // 多个 subscriber 会各自收到所有 broadcast 事件，导致输出交叉污染。
+        // Regardless of backend, send task via channel.
+        // Note: Current implementation assumes serial single task. If there are concurrent assign() calls,
+        // multiple subscribers will receive all broadcast events, causing output cross-contamination.
         self.action_tx
             .send(UserAction::SendMessage {
                 content: task.instruction,
             })
             .await?;
 
-        // 收集结果直到 Done/Error
+        // Collect results until Done/Error
         let mut event_rx = self.event_tx.subscribe();
         let mut output = String::new();
         loop {
@@ -561,7 +561,7 @@ impl AgentNode for GatewayNode {
                 Ok(EngineEvent::TextDelta { text }) => output.push_str(&text),
                 Ok(EngineEvent::Done) => break,
                 Ok(EngineEvent::Error { message }) => anyhow::bail!("Task failed: {}", message),
-                Ok(_) => {} // 忽略其他事件类型（如 ToolUse 等）
+                Ok(_) => {} // Ignore other event types (such as ToolUse, etc.)
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     anyhow::bail!("Event channel closed unexpectedly during assign");
                 }
@@ -596,7 +596,7 @@ impl AgentNode for GatewayNode {
     async fn shutdown(&self) -> anyhow::Result<()> {
         tracing::info!(agent = %self.id, "Gateway shutting down");
 
-        // 1. 中止后端循环
+        // 1. Abort backend loop
         if let Some(handle) = self.backend_abort_handle.write().await.take() {
             handle.abort();
         }
@@ -919,9 +919,12 @@ mod tests {
         assert_eq!(gw.id().0, "ns/remote-proxy");
         assert_eq!(gw.access_points().len(), 1);
         assert_eq!(gw.children().len(), 0);
-        assert_eq!(gw.backend, GatewayBackend::Proxy {
-            target_url: "http://192.168.1.100:50052".to_string(),
-        });
+        assert_eq!(
+            gw.backend,
+            GatewayBackend::Proxy {
+                target_url: "http://192.168.1.100:50052".to_string(),
+            }
+        );
     }
 
     #[test]

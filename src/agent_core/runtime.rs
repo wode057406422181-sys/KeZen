@@ -1,9 +1,9 @@
-//! 多 Agent 运行时入口。
+//! Multi-Agent execution entry point.
 //!
-//! 负责从 `ClusterConfig` 构建完整的 AgentNode 树、初始化所有节点、
-//! 启动 Gateway 路由循环，并启动 REPL 作为薄客户端。
+//! Responsible for building the full AgentNode tree from `ClusterConfig`, initializing all nodes,
+//! starting the Gateway routing loop, and launching the REPL as a thin client.
 //!
-//! 这是多 Agent 模式的 top-level 入口，由 `main.rs` 在 `multiagent=true` 时调用。
+//! This is the top-level entry point for Multi-Agent mode, called by `main.rs` when `multiagent=true`.
 
 use crate::agent_core::agent::AgentNode;
 use crate::agent_core::gateway::GatewayNode;
@@ -12,16 +12,16 @@ use crate::config::AppConfig;
 use crate::control::topology::ClusterConfig;
 use crate::permissions::PermissionMode;
 
-/// 多 Agent 模式的完整启动入口。
+/// The complete startup entry point for Multi-Agent mode.
 ///
-/// ## 执行流程
+/// ## Execution Flow
 ///
 /// ```text
-///   1. build_agent_tree() ─► Gateway(子节点已注入)
-///   2. gateway.init()     ─► 递归 init 子节点 → 启动接入点
-///   3. spawn_backend()    ─► 独立 task: 根据 backend 类型路由到子节点或代理到远端
-///   4. run_foreground()   ─► 主线程: REPL / TUI / Ctrl+C 阻塞
-///   5. gateway.shutdown() ─► 前台退出后清理 backend + 子节点 + 接入点
+///   1. build_agent_tree() ─► Gateway(Child nodes injected)
+///   2. gateway.init()     ─► Recursively init child nodes → Start access points
+///   3. spawn_backend()    ─► Background task: Route to child nodes or proxy to remote depending on backend type
+///   4. run_foreground()   ─► Main thread: REPL / TUI / Ctrl+C blocking
+///   5. gateway.shutdown() ─► Clean up backend + child nodes + access points upon foreground exit
 /// ```
 pub async fn run_multiagent(
     config: AppConfig,
