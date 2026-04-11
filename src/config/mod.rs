@@ -2,19 +2,16 @@ use std::fmt;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use secrecy::SecretString;
+use serde::{Deserialize, Serialize};
 
+pub mod keys;
 pub mod mcp;
 pub mod model;
-pub mod keys;
 
 pub use self::model::ModelProfile;
 
-use crate::constants::api::DEFAULT_MAX_TOKENS;
-use crate::constants::api::{
-    DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT,
-};
+
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -86,8 +83,6 @@ impl Default for SearchConfig {
     }
 }
 
-
-
 /// Application configuration
 ///
 /// Loading priority (high → low):
@@ -111,7 +106,6 @@ pub struct AppConfig {
     pub search: Option<SearchConfig>,
 
     // ── Runtime-only fields (injected from ModelProfile / ENV / CLI) ──
-
     /// The key of the currently active model profile in `self.models`.
     /// Set by `resolve_model_profile()`. Used by accessor methods.
     #[serde(skip)]
@@ -327,60 +321,6 @@ impl AppConfig {
                     self.no_mcp = true;
                 }
             }
-        }
-    }
-
-    /// Get the base URL for the configured provider
-    pub fn base_url(&self) -> &str {
-        self.api_url.as_deref().unwrap_or(match self.provider {
-            Provider::Anthropic => DEFAULT_ANTHROPIC_BASE_URL,
-            Provider::OpenAi => DEFAULT_OPENAI_BASE_URL,
-        })
-    }
-
-    /// Get the active model profile (if resolved).
-    pub fn active_model_profile(&self) -> Option<&ModelProfile> {
-        self.active_profile.as_ref().and_then(|k| self.models.get(k))
-    }
-
-    /// Get max output tokens from the active model profile, or the built-in default.
-    pub fn max_tokens(&self) -> u32 {
-        self.active_model_profile()
-            .map(|p| p.max_tokens)
-            .unwrap_or(DEFAULT_MAX_TOKENS)
-    }
-
-    /// Get context window from the active model profile.
-    pub fn context_window(&self) -> Option<u64> {
-        self.active_model_profile()
-            .and_then(|p| p.context_window)
-    }
-
-    /// Get User-Agent string from the active model profile, or the built-in default.
-    pub fn user_agent(&self) -> &str {
-        self.active_model_profile()
-            .and_then(|p| p.user_agent.as_deref())
-            .unwrap_or(DEFAULT_USER_AGENT)
-    }
-
-    /// Resolves a model name against the predefined model profiles (`[models]`).
-    /// Updates the configuration (provider, model, API keys/URLs) if matched.
-    pub fn resolve_model_profile(&mut self, profile_name: &str) {
-        if let Some(profile) = self.models.get(profile_name).cloned() {
-            self.active_profile = Some(profile_name.to_string());
-            self.provider = profile.provider;
-            self.model = Some(profile.model);
-            self.thinking = profile.thinking;
-            self.include_stream_usage = profile.include_stream_usage;
-            self.enable_cache = profile.enable_cache;
-            if let Some(key) = profile.api_key {
-                self.api_key = keys::resolve_key(Some(key));
-            }
-            if let Some(url) = profile.api_url {
-                self.api_url = Some(url);
-            }
-        } else {
-            self.model = Some(profile_name.to_string());
         }
     }
 }

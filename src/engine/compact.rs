@@ -4,18 +4,7 @@ use crate::constants::prompts::{
 
 pub use crate::constants::api::COMPACT_MAX_OUTPUT_TOKENS;
 
-/// Returns the context window size for a given model.
-pub fn context_window_for_model(model: &str) -> u64 {
-    if model.contains("opus") || model.contains("sonnet") || model.contains("haiku") {
-        200_000
-    } else if model.contains("gpt-4o") {
-        128_000
-    } else if model.contains("gemini") && model.contains("pro") {
-        1_000_000
-    } else {
-        128_000 // Default safe value
-    }
-}
+
 
 /// Helper to decide if auto-compaction should trigger.
 ///
@@ -105,11 +94,6 @@ fn extract_summary(raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn context_window_unknown_model_defaults() {
-        assert_eq!(context_window_for_model("llama-3.1-70b"), 128_000);
-    }
 
     // ── should_auto_compact ──────────────────────────────────────────
 

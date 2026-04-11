@@ -202,7 +202,7 @@ impl KezenEngine {
             // Auto-compact: use the real input_tokens from the last API response
             // to decide if context is too full. Skip for short conversations.
             if self.session.message_count() >= 4 {
-                let window_size = self.config.context_window().unwrap_or(200_000);
+                let window_size = self.config.context_window();
                 if crate::engine::compact::should_auto_compact(
                     self.session.last_turn_input_tokens,
                     window_size,
@@ -929,7 +929,7 @@ impl KezenEngine {
             }
             "context" => {
                 let git_ctx = self.git_watcher.cache.read().await.clone();
-                let window_size = self.config.context_window().unwrap_or(200_000);
+                let window_size = self.config.context_window();
                 let last_input = self.session.last_turn_input_tokens;
                 let percent = if window_size > 0 {
                     (last_input as f64 / window_size as f64) * 100.0

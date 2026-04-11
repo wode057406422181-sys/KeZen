@@ -70,6 +70,34 @@ async fn main() -> Result<()> {
 
     // _guard must live until main() returns; dropping it flushes buffered logs.
 
+    // ── Handle generic utility commands first ───────────────────────
+    // These commands do not need full engine configuration or API key resolution.
+    if let Some(Command::Keys { ref command }) = cli.command {
+        match command {
+            KeysCommand::Set { profile, key } => {
+                kezen::config::keys::set_key(profile, key)?;
+                println!("Successfully stored API key for profile '{}' in secure credentials file.", profile);
+                
+                // For keys set, we explicitly load JUST the model profiles to avoid full engine crash 
+                // on missing API keys that we are currently resolving!
+                let mut models_config = kezen::config::model::ModelsConfig::load().unwrap_or_default();
+                if !models_config.models.contains_key(profile) {
+                    models_config.models.insert(profile.clone(), kezen::config::ModelProfile {
+                        provider: kezen::config::Provider::Anthropic,
+                        model: format!("{}-model", profile),
+                        api_key: Some(format!("keystore://{}", profile)),
+                        ..Default::default()
+                    });
+                } else if let Some(p) = models_config.models.get_mut(profile) {
+                    p.api_key = Some(format!("keystore://{}", profile));
+                }
+                models_config.save()?;
+                println!("Updated ~/.kezen/config/model.toml to use keystore://{}", profile);
+            }
+        }
+        return Ok(());
+    }
+
     // Load config (file + env vars)
     let mut config = config::AppConfig::load()?;
 
@@ -221,32 +249,8 @@ async fn main() -> Result<()> {
             }
             Ok(())
         }
-        Some(Command::Keys { command }) => {
-            match command {
-                KeysCommand::Set { profile, key } => {
-                    let entry = keyring::Entry::new("kezen", &profile)?;
-                    entry.set_password(&key)?;
-                    println!("Successfully stored API key for profile '{}' in OS keychain.", profile);
-                    
-                    let mut models_config = kezen::config::model::ModelsConfig::load()?;
-                    if !models_config.models.contains_key(&profile) {
-                        models_config.models.insert(profile.clone(), kezen::config::ModelProfile {
-                            provider: kezen::config::Provider::Anthropic, // Defaulting, better to just edit API key and leave alone or create new
-                            model: format!("{}-model", profile),
-                            api_key: Some(format!("keystore://{}", profile)),
-                            api_url: None,
-                            thinking: false,
-                            include_stream_usage: false,
-                            enable_cache: false,
-                        });
-                    } else if let Some(p) = models_config.models.get_mut(&profile) {
-                        p.api_key = Some(format!("keystore://{}", profile));
-                    }
-                    models_config.save()?;
-                    println!("Updated ~/.kezen/config/model.toml to use keystore://{}", profile);
-                }
-            }
-            Ok(())
+        Some(Command::Keys { .. }) => {
+            unreachable!("Keys command handled early");
         }
         None => {
             // Default: REPL mode unless --tui is given
