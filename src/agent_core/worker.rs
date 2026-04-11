@@ -80,7 +80,7 @@ impl LlmWorkerNode {
     }
 
     /// 获取事件广播的订阅 receiver。
-    /// 上级节点（Pod/Gateway routing_loop）通过此方法订阅 Worker 的事件流。
+    /// 上级节点（Master/Gateway routing_loop）通过此方法订阅 Worker 的事件流。
     pub fn subscribe_events(&self) -> broadcast::Receiver<EngineEvent> {
         self.event_tx.subscribe()
     }
@@ -270,7 +270,10 @@ mod tests {
     fn make_worker_config() -> AppConfig {
         AppConfig {
             model: Some("test-model".to_string()),
-            api_key: Some(secrecy::SecretString::from("test-key")),
+            runtime_profile: crate::config::ModelProfile {
+                api_key: Some(secrecy::SecretString::from("test-key")),
+                ..Default::default()
+            },
             ..AppConfig::default()
         }
     }

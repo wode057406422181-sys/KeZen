@@ -29,7 +29,7 @@ pub struct OpenAiClient {
 
 impl OpenAiClient {
     pub fn new(config: &AppConfig) -> Result<Self, KezenError> {
-        let api_key = config.api_key.as_ref().map(|s| s.expose_secret().to_string()).ok_or(KezenError::NoApiKey)?;
+        let api_key = config.api_key().map(|s| s.expose_secret().to_string()).ok_or(KezenError::NoApiKey)?;
         let model = config
             .model
             .as_deref()
@@ -65,7 +65,7 @@ impl OpenAiClient {
             model,
             max_tokens: config.max_tokens(),
             base_url,
-            include_stream_usage: config.include_stream_usage,
+            include_stream_usage: config.include_stream_usage(),
         })
     }
 }

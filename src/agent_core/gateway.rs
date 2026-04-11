@@ -4,7 +4,7 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 use super::access_point::{AccessPoint, AccessPointHandle, start_access_point};
 use super::agent::{AgentId, AgentNode, AgentStatus, AgentTask, AgentTaskResult};
 use super::bus;
-use super::pod::ChildHandle;
+use super::master::ChildHandle;
 use crate::engine::events::{EngineEvent, UserAction};
 
 /// GatewayNode — 拓扑树的根节点。
@@ -82,7 +82,8 @@ impl GatewayNode {
         namespace: Option<&str>,
     ) -> anyhow::Result<Self> {
         let ns = namespace.unwrap_or("default");
-        let name = config.name.as_deref().unwrap_or("gateway");
+        let name = config.name.as_deref()
+            .ok_or_else(|| anyhow::anyhow!("Gateway agent must have a 'name' field in kezen.toml"))?;
         let id = AgentId(format!("{}/{}", ns, name));
 
         let mut access_points = Vec::new();
@@ -119,10 +120,11 @@ impl GatewayNode {
             .workers
             .iter()
             .map(|w| {
-                let wname = w.name.as_deref().unwrap_or("unnamed");
-                AgentId(format!("{}/{}", ns, wname))
+                let wname = w.name.as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("Worker agent under Gateway must have a 'name' field in kezen.toml"))?;
+                Ok(AgentId(format!("{}/{}", ns, wname)))
             })
-            .collect();
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         Ok(Self::new(id, access_points, children_ids))
     }
@@ -184,7 +186,7 @@ impl AgentNode for GatewayNode {
             "Gateway node initializing"
         );
 
-        // 1. Init all children first (Workers spawn engines, Pods recurse).
+        // 1. Init all children first (Workers spawn engines, Masters recurse).
         let children = self.children_handles.read().await;
         for child in children.iter() {
             child.node.init().await.map_err(|e| {
@@ -406,7 +408,7 @@ mod tests {
           can_approve = false
 
           [[workers]]
-          kind = "Pod"
+          kind = "Master"
           name = "orchestrator"
 
           [[workers]]

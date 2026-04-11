@@ -54,7 +54,7 @@ impl fmt::Display for AgentStatus {
 ///
 /// 足够通用以适配不同类型的 Agent：
 /// - Worker：收到 `instruction` 后进入 LLM 推理循环。
-/// - Pod Master：收到后拆解为子任务分发给 workers。
+/// - Master：收到后拆解为子任务分发给 workers。
 /// - Gateway：收到后路由给下级 Agent。
 #[derive(Debug, Clone)]
 pub struct AgentTask {
@@ -83,11 +83,11 @@ pub struct AgentTaskResult {
 
 /// AgentNode Trait — 多 Agent 拓扑的核心抽象。
 ///
-/// 万物皆 Agent：LLM Worker、AI Pod、Gateway 都是 `AgentNode` 的实现。
+/// 万物皆 Agent：LLM Worker、AI Master、Gateway 都是 `AgentNode` 的实现。
 /// 核心区别只在于 `assign()` 的行为：
 /// - `LlmWorker` — 调用 LLM API 推理
 /// - `GatewayNode` — 通过 AccessPoint 路由给外部输入源（人类或远端 Agent）
-/// - `Pod` — Master 拆解后分发给子节点
+/// - `Master` — Master 拆解后分发给子节点
 #[async_trait]
 pub trait AgentNode: Send + Sync {
     /// 返回此节点的唯一 ID。
@@ -110,7 +110,7 @@ pub trait AgentNode: Send + Sync {
     ///
     /// - LlmWorker：直接进入 LLM 推理循环。
     /// - GatewayNode：通过 AccessPoint 接收外部输入，路由给下级。
-    /// - Pod：Master 拆解后分发给子节点。
+    /// - Master：Master 拆解后分发给子节点。
     async fn assign(&self, task: AgentTask) -> anyhow::Result<AgentTaskResult>;
 
     /// 挂起 Agent（保留状态，暂停处理）。
@@ -124,7 +124,7 @@ pub trait AgentNode: Send + Sync {
 
     /// 返回子节点 ID 列表。
     /// - LlmWorker：空列表。
-    /// - Pod / Gateway：非空。
+    /// - Master / Gateway：非空。
     fn children(&self) -> Vec<AgentId>;
 
     /// 该节点是否为 Gateway（无 Engine 的纯接入点节点）。

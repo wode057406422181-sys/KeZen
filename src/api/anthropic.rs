@@ -22,7 +22,7 @@ pub struct AnthropicClient {
 
 impl AnthropicClient {
     pub fn new(config: &AppConfig) -> Result<Self, KezenError> {
-        let api_key = config.api_key.as_ref().map(|s| s.expose_secret().to_string()).ok_or(KezenError::NoApiKey)?;
+        let api_key = config.api_key().map(|s| s.expose_secret().to_string()).ok_or(KezenError::NoApiKey)?;
         let model = config
             .model
             .as_deref()

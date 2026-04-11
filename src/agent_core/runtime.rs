@@ -7,7 +7,7 @@
 
 use crate::agent_core::agent::AgentNode;
 use crate::agent_core::gateway::GatewayNode;
-use crate::agent_core::pod::build_agent_tree;
+use crate::agent_core::master::build_agent_tree;
 use crate::config::AppConfig;
 use crate::control::topology::ClusterConfig;
 use crate::engine::events::{EngineEvent, UserAction};

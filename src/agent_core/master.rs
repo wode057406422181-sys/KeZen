@@ -13,24 +13,24 @@ use crate::permissions::PermissionMode;
 /// 子节点的运行时句柄。
 ///
 /// 持有与子 Agent 通信所需的 `ChannelPair` 和 `AgentNode` trait object。
-/// Pod 通过 ChildHandle 向子节点分发任务并接收事件。
+/// Master 通过 ChildHandle 向子节点分发任务并接收事件。
 pub struct ChildHandle {
     /// 子节点的 AgentNode 实现。
     pub node: Box<dyn AgentNode>,
 }
 
-/// PodNode — 容器节点，持有 Master Engine + 子节点集合。
+/// MasterNode — 容器节点，持有 Master Engine + 子节点集合。
 ///
-/// Pod 的 Engine 作为 "Master"，负责：
+/// Master 的 Engine 作为 "Master"，负责：
 ///   1. 接收上级任务
 ///   2. 拆解为子任务（通过 Master Engine 的 LLM 推理）
 ///   3. 分发到 children（向子节点的 mpsc 发送 UserAction::SendMessage）
 ///   4. 聚合子节点结果（监听子节点的 EngineEvent 事件流）
 ///   5. 合并结果并向上报告
 ///
-/// 一期简化实现：Pod 将任务直接下发到第一个 Worker，
+/// 一期简化实现：Master 将任务直接下发到第一个 Worker，
 /// Master Engine 的调度逻辑在后续迭代中实现。
-pub struct PodNode {
+pub struct MasterNode {
     id: AgentId,
     access_points: Vec<AccessPoint>,
     status: RwLock<AgentStatus>,
@@ -55,8 +55,8 @@ pub struct PodNode {
     master_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
 }
 
-impl PodNode {
-    /// 构造一个新的 PodNode。
+impl MasterNode {
+    /// 构造一个新的 MasterNode。
     ///
     /// 传入子节点的 ChildHandle 列表。Master Engine 在 `init()` 时构建。
     pub fn new(
@@ -100,7 +100,7 @@ impl PodNode {
 }
 
 #[async_trait]
-impl AgentNode for PodNode {
+impl AgentNode for MasterNode {
     fn id(&self) -> &AgentId {
         &self.id
     }
@@ -114,14 +114,14 @@ impl AgentNode for PodNode {
     }
 
     async fn init(&self) -> anyhow::Result<()> {
-        tracing::info!(agent = %self.id, children = self.children_ids.len(), "Pod node initializing");
+        tracing::info!(agent = %self.id, children = self.children_ids.len(), "Master node initializing");
 
         // Initialize all child nodes first.
         let children = self.children_handles.read().await;
         for child in children.iter() {
             child.node.init().await.map_err(|e| {
                 anyhow::anyhow!(
-                    "Failed to init child {} of pod {}: {}",
+                    "Failed to init child {} of master {}: {}",
                     child.node.id(),
                     self.id,
                     e
@@ -133,7 +133,7 @@ impl AgentNode for PodNode {
         // Initialize the Master Engine.
         let action_rx = self.master_action_rx.write().await.take().ok_or_else(|| {
             anyhow::anyhow!(
-                "Pod {} already initialized (master_action_rx taken)",
+                "Master {} already initialized (master_action_rx taken)",
                 self.id
             )
         })?;
@@ -152,7 +152,7 @@ impl AgentNode for PodNode {
         .await
         .map_err(|e| {
             anyhow::anyhow!(
-                "Failed to initialize Master KezenEngine for pod {}: {}",
+                "Failed to initialize Master KezenEngine for master {}: {}",
                 self.id,
                 e
             )
@@ -160,9 +160,9 @@ impl AgentNode for PodNode {
 
         let agent_id = self.id.clone();
         let handle = tokio::spawn(async move {
-            tracing::info!(agent = %agent_id, "Pod master engine task started");
+            tracing::info!(agent = %agent_id, "Master master engine task started");
             engine.run().await;
-            tracing::info!(agent = %agent_id, "Pod master engine task finished");
+            tracing::info!(agent = %agent_id, "Master master engine task finished");
         });
 
         // Store the master channel handle and task handle.
@@ -174,7 +174,7 @@ impl AgentNode for PodNode {
 
         let mut status = self.status.write().await;
         *status = AgentStatus::Ready;
-        tracing::info!(agent = %self.id, "Pod node ready");
+        tracing::info!(agent = %self.id, "Master node ready");
         Ok(())
     }
 
@@ -183,7 +183,7 @@ impl AgentNode for PodNode {
             agent = %self.id,
             task_id = %task.task_id,
             children = self.children_ids.len(),
-            "Pod received task — routing to first child (simplified one-shot)"
+            "Master received task — routing to first child (simplified one-shot)"
         );
 
         {
@@ -201,7 +201,7 @@ impl AgentNode for PodNode {
             AgentTaskResult {
                 task_id: task.task_id,
                 success: false,
-                output: "Pod has no children to route task to".to_string(),
+                output: "Master has no children to route task to".to_string(),
                 data: None,
             }
         };
@@ -215,7 +215,7 @@ impl AgentNode for PodNode {
     }
 
     async fn suspend(&self, reason: &str) -> anyhow::Result<()> {
-        tracing::info!(agent = %self.id, reason = %reason, "Pod suspending");
+        tracing::info!(agent = %self.id, reason = %reason, "Master suspending");
 
         // Suspend all children first.
         let children = self.children_handles.read().await;
@@ -229,7 +229,7 @@ impl AgentNode for PodNode {
     }
 
     async fn resume(&self) -> anyhow::Result<()> {
-        tracing::info!(agent = %self.id, "Pod resuming");
+        tracing::info!(agent = %self.id, "Master resuming");
 
         let children = self.children_handles.read().await;
         for child in children.iter() {
@@ -242,7 +242,7 @@ impl AgentNode for PodNode {
     }
 
     async fn shutdown(&self) -> anyhow::Result<()> {
-        tracing::info!(agent = %self.id, "Pod shutting down");
+        tracing::info!(agent = %self.id, "Master shutting down");
 
         // Shutdown all children.
         let children = self.children_handles.read().await;
@@ -293,7 +293,7 @@ impl AgentNode for PodNode {
 /// 遍历配置中的 `[[agents]]`，根据 `kind` 递归构建：
 /// - `Gateway` → `GatewayNode`
 /// - `Worker` → `LlmWorkerNode`
-/// - `Pod` → `PodNode`（递归构建 `workers` + `master`）
+/// - `Master` → `MasterNode`（递归构建 `workers` + `master`）
 ///
 /// 返回根节点（通常是 Gateway）。如果配置中有多个顶层 agent，
 /// 只使用第一个作为根节点。
@@ -336,7 +336,8 @@ pub fn build_agent_node(
     use crate::control::topology::AgentKind;
 
     let kind = agent_config.kind.as_ref();
-    let name = agent_config.name.as_deref().unwrap_or("unnamed");
+    let name = agent_config.name.as_deref()
+        .ok_or_else(|| anyhow::anyhow!("Every agent must have a 'name' field in kezen.toml"))?;
 
     match kind {
         Some(AgentKind::Gateway) => {
@@ -347,7 +348,7 @@ pub fn build_agent_node(
                 .clone()
                 .unwrap_or_else(|| parent_work_dir.to_path_buf());
 
-            // Recursively build child nodes for the Gateway (same as Pod).
+            // Recursively build child nodes for the Gateway (same as Master).
             let mut child_handles = Vec::new();
             for worker_config in &agent_config.workers {
                 let child_node = build_agent_node(
@@ -383,14 +384,13 @@ pub fn build_agent_node(
 
             if let Some(ref m) = model_str {
                 if let Some(profile) = cluster.models.get(m).or_else(|| base_config.models.get(m)) {
-                    agent_app_config.active_profile = Some(m.clone());
-                    agent_app_config.provider = profile.provider;
+                    agent_app_config.runtime_profile.provider = profile.provider;
                     agent_app_config.model = Some(profile.model.clone());
                     if let Some(ref key) = profile.api_key {
-                        agent_app_config.api_key = crate::config::keys::resolve_key(Some(key.clone()));
+                        agent_app_config.runtime_profile.api_key = Some(key.clone());
                     }
                     if let Some(ref url) = profile.api_url {
-                        agent_app_config.api_url = Some(url.clone());
+                        agent_app_config.runtime_profile.api_url = Some(url.clone());
                     }
                 } else {
                     agent_app_config.model = Some(m.clone());
@@ -411,7 +411,7 @@ pub fn build_agent_node(
             );
             Ok(Box::new(worker))
         }
-        Some(AgentKind::Pod) => {
+        Some(AgentKind::Master) => {
             let work_dir = agent_config
                 .work_dir
                 .clone()
@@ -434,14 +434,13 @@ pub fn build_agent_node(
 
             if let Some(ref m) = model_str {
                 if let Some(profile) = cluster.models.get(m).or_else(|| base_config.models.get(m)) {
-                    agent_app_config.active_profile = Some(m.clone());
-                    agent_app_config.provider = profile.provider;
+                    agent_app_config.runtime_profile.provider = profile.provider;
                     agent_app_config.model = Some(profile.model.clone());
                     if let Some(ref key) = profile.api_key {
-                        agent_app_config.api_key = crate::config::keys::resolve_key(Some(key.clone()));
+                        agent_app_config.runtime_profile.api_key = Some(key.clone());
                     }
                     if let Some(ref url) = profile.api_url {
-                        agent_app_config.api_url = Some(url.clone());
+                        agent_app_config.runtime_profile.api_url = Some(url.clone());
                     }
                 } else {
                     agent_app_config.model = Some(m.clone());
@@ -466,7 +465,7 @@ pub fn build_agent_node(
             let id = AgentId(format!("{}/{}", namespace, name));
             let access_points = convert_access_points(&agent_config.access_points)?;
 
-            let pod = PodNode::new(
+            let master = MasterNode::new(
                 id,
                 access_points,
                 child_handles,
@@ -474,7 +473,7 @@ pub fn build_agent_node(
                 work_dir,
                 permission_mode,
             );
-            Ok(Box::new(pod))
+            Ok(Box::new(master))
         }
     }
 }
@@ -518,33 +517,36 @@ fn convert_access_points(
 mod tests {
     use super::*;
 
-    fn make_pod_config() -> AppConfig {
+    fn make_master_config() -> AppConfig {
         AppConfig {
             model: Some("test-model".to_string()),
-            api_key: Some(secrecy::SecretString::from("test-key")),
+            runtime_profile: crate::config::ModelProfile {
+                api_key: Some(secrecy::SecretString::from("test-key")),
+                ..Default::default()
+            },
             ..AppConfig::default()
         }
     }
 
     #[test]
-    fn pod_is_not_gateway() {
-        let pod = PodNode::new(
+    fn master_is_not_gateway() {
+        let master = MasterNode::new(
             AgentId::from("default/orchestrator"),
             vec![],
             vec![],
-            make_pod_config(),
+            make_master_config(),
             PathBuf::from("/tmp/test"),
             PermissionMode::DontAsk,
         );
-        assert!(!pod.is_gateway());
+        assert!(!master.is_gateway());
     }
 
     #[test]
-    fn pod_children_ids() {
+    fn master_children_ids() {
         let child = LlmWorkerNode::new(
             AgentId::from("default/coder"),
             vec![],
-            make_pod_config(),
+            make_master_config(),
             PathBuf::from("/tmp/test"),
             PermissionMode::DontAsk,
         );
@@ -553,41 +555,41 @@ mod tests {
             node: Box::new(child),
         };
 
-        let pod = PodNode::new(
+        let master = MasterNode::new(
             AgentId::from("default/orchestrator"),
             vec![],
             vec![handle],
-            make_pod_config(),
+            make_master_config(),
             PathBuf::from("/tmp/test"),
             PermissionMode::DontAsk,
         );
 
-        let children = pod.children();
+        let children = master.children();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].0, "default/coder");
     }
 
     #[tokio::test]
-    async fn pod_lifecycle() {
-        let pod = PodNode::new(
+    async fn master_lifecycle() {
+        let master = MasterNode::new(
             AgentId::from("default/orchestrator"),
             vec![],
             vec![],
-            make_pod_config(),
+            make_master_config(),
             PathBuf::from("/tmp/test"),
             PermissionMode::DontAsk,
         );
 
-        assert_eq!(pod.status().await, AgentStatus::Created);
+        assert_eq!(master.status().await, AgentStatus::Created);
 
-        pod.suspend("test").await.unwrap();
-        assert_eq!(pod.status().await, AgentStatus::Suspended);
+        master.suspend("test").await.unwrap();
+        assert_eq!(master.status().await, AgentStatus::Suspended);
 
-        pod.resume().await.unwrap();
-        assert_eq!(pod.status().await, AgentStatus::Ready);
+        master.resume().await.unwrap();
+        assert_eq!(master.status().await, AgentStatus::Ready);
 
-        pod.shutdown().await.unwrap();
-        assert_eq!(pod.status().await, AgentStatus::Stopped);
+        master.shutdown().await.unwrap();
+        assert_eq!(master.status().await, AgentStatus::Stopped);
     }
 
     #[test]
@@ -601,7 +603,6 @@ mod tests {
             },
             defaults: crate::control::topology::DefaultsConfig {
                 model: Some("claude-3-5-sonnet-latest".to_string()),
-                ..Default::default()
             },
             models: std::collections::HashMap::new(),
             agents: vec![crate::control::topology::AgentConfig {
@@ -618,7 +619,10 @@ mod tests {
         };
 
         let base_config = AppConfig {
-            api_key: Some(secrecy::SecretString::from("test-key")),
+            runtime_profile: crate::config::ModelProfile {
+                api_key: Some(secrecy::SecretString::from("test-key")),
+                ..Default::default()
+            },
             ..AppConfig::default()
         };
 
@@ -631,7 +635,7 @@ mod tests {
 
     #[test]
     fn build_tree_three_level_nesting() {
-        // Gateway -> Pod (orchestrator) -> Worker (coder)
+        // Gateway -> Master (orchestrator) -> Worker (coder)
         let cluster_config = crate::control::topology::ClusterConfig {
             cluster: crate::control::topology::ClusterContext {
                 name: Some("nested-cluster".to_string()),
@@ -641,14 +645,13 @@ mod tests {
             },
             defaults: crate::control::topology::DefaultsConfig {
                 model: Some("default-model".to_string()),
-                ..Default::default()
             },
             models: std::collections::HashMap::new(),
             agents: vec![crate::control::topology::AgentConfig {
                 kind: Some(crate::control::topology::AgentKind::Gateway),
                 name: Some("gateway".to_string()),
                 workers: vec![crate::control::topology::AgentConfig {
-                    kind: Some(crate::control::topology::AgentKind::Pod),
+                    kind: Some(crate::control::topology::AgentKind::Master),
                     name: Some("orchestrator".to_string()),
                     master: Some(Box::new(crate::control::topology::AgentConfig {
                         name: Some("architect".to_string()),
@@ -676,7 +679,10 @@ mod tests {
         };
 
         let base_config = AppConfig {
-            api_key: Some(secrecy::SecretString::from("test-key")),
+            runtime_profile: crate::config::ModelProfile {
+                api_key: Some(secrecy::SecretString::from("test-key")),
+                ..Default::default()
+            },
             ..AppConfig::default()
         };
 
@@ -687,7 +693,7 @@ mod tests {
         assert!(root.is_gateway());
         assert_eq!(root.id().0, "ns/gateway");
 
-        // Gateway has 1 child (the Pod)
+        // Gateway has 1 child (the Master)
         let gw_children = root.children();
         assert_eq!(gw_children.len(), 1);
         assert_eq!(gw_children[0].0, "ns/orchestrator");

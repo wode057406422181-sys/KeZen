@@ -7,6 +7,7 @@ use tracing_subscriber::{EnvFilter, Layer};
 
 use kezen::cli::{Cli, Command, KeysCommand};
 use kezen::config::Provider;
+use secrecy::SecretString;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,35 +18,28 @@ async fn main() -> Result<()> {
     // No stderr layer: it would corrupt TUI rendering and interleave with REPL output.
     // For startup diagnostics, use eprintln! directly (before TUI/REPL takes over).
     let kezen_home = dirs::home_dir()
-        .expect("Cannot determine home directory")
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
         .join(".kezen");
     let log_dir = kezen_home.join("logs");
 
     // Validate log directories are writable before anything else.
-    // This catches permission issues, full disks, etc. early — if we can't write
-    // logs, we warn the user while we still have access to stderr (before TUI/REPL).
+    // This catches permission issues, full disks, etc. early.
     for (label, dir) in [
         ("logs", kezen_home.join("logs")),
         ("sessions", kezen_home.join("sessions")),
         ("api_logs", kezen_home.join("api_logs")),
     ] {
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            eprintln!("  ⚠ Cannot create {} dir ({}): {}", label, dir.display(), e);
-            continue;
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            anyhow::bail!("Cannot create {} dir ({}): {}", label, dir.display(), e);
         }
         // Probe writability with a temp file
         let probe = dir.join(".write_probe");
-        match std::fs::write(&probe, b"ok") {
+        match tokio::fs::write(&probe, b"ok").await {
             Ok(_) => {
-                let _ = std::fs::remove_file(&probe);
+                let _ = tokio::fs::remove_file(&probe).await;
             }
             Err(e) => {
-                eprintln!(
-                    "  ⚠ {} dir is not writable ({}): {}",
-                    label,
-                    dir.display(),
-                    e
-                );
+                anyhow::bail!("{} dir is not writable ({}): {}", label, dir.display(), e);
             }
         }
     }
@@ -76,23 +70,33 @@ async fn main() -> Result<()> {
         match command {
             KeysCommand::Set { profile, key } => {
                 kezen::config::keys::set_key(profile, key)?;
-                println!("Successfully stored API key for profile '{}' in secure credentials file.", profile);
-                
-                // For keys set, we explicitly load JUST the model profiles to avoid full engine crash 
+                println!(
+                    "Successfully stored API key for profile '{}' in secure credentials file.",
+                    profile
+                );
+
+                // For keys set, we explicitly load JUST the model profiles to avoid full engine crash
                 // on missing API keys that we are currently resolving!
-                let mut models_config = kezen::config::model::ModelsConfig::load().unwrap_or_default();
+                let mut models_config =
+                    kezen::config::model::ModelsConfig::load().unwrap_or_default();
                 if !models_config.models.contains_key(profile) {
-                    models_config.models.insert(profile.clone(), kezen::config::ModelProfile {
-                        provider: kezen::config::Provider::Anthropic,
-                        model: format!("{}-model", profile),
-                        api_key: Some(format!("keystore://{}", profile)),
-                        ..Default::default()
-                    });
+                    models_config.models.insert(
+                        profile.clone(),
+                        kezen::config::ModelProfile {
+                            provider: kezen::config::Provider::Anthropic,
+                            model: format!("{}-model", profile),
+                            api_key: Some(SecretString::from(format!("keystore://{}", profile))),
+                            ..Default::default()
+                        },
+                    );
                 } else if let Some(p) = models_config.models.get_mut(profile) {
-                    p.api_key = Some(format!("keystore://{}", profile));
+                    p.api_key = Some(SecretString::from(format!("keystore://{}", profile)));
                 }
                 models_config.save()?;
-                println!("Updated ~/.kezen/config/model.toml to use keystore://{}", profile);
+                println!(
+                    "Updated ~/.kezen/config/model.toml to use keystore://{}",
+                    profile
+                );
             }
         }
         return Ok(());
@@ -106,6 +110,25 @@ async fn main() -> Result<()> {
     } else {
         kezen::permissions::PermissionMode::Default
     };
+
+    // Layer 1: CLI argument overrides (highest priority)
+    if let Some(ref m) = cli.model {
+        config.resolve_model_profile(m);
+    } else if let Some(m) = config.model.clone() {
+        config.resolve_model_profile(&m);
+    }
+    if let Some(ref p) = cli.provider {
+        config.runtime_profile.provider = match p.to_lowercase().as_str() {
+            "openai" => Provider::OpenAi,
+            _ => Provider::Anthropic,
+        };
+    }
+    if let Some(ref k) = cli.api_key {
+        config.runtime_profile.api_key = kezen::config::keys::resolve_key(Some(k.clone()));
+    }
+    if cli.no_mcp {
+        config.no_mcp = true;
+    }
 
     if config.multiagent {
         if let Ok(config_file) = config::AppConfig::config_path() {
@@ -121,28 +144,13 @@ async fn main() -> Result<()> {
                         eprintln!("     WorkDir: {}", wd.display());
                     }
 
-                    if let Some(gateway) = cluster.agents.first() {
-                        config.merge_with_toml(gateway, &cluster);
-                    }
+                    let gateway = cluster
+                        .agents
+                        .iter()
+                        .find(|a| a.kind.as_ref() == Some(&kezen::control::topology::AgentKind::Gateway))
+                        .ok_or_else(|| anyhow::anyhow!("CRITICAL ERROR: No agent with 'kind = \"Gateway\"' defined in kezen.toml. Multi-agent mode requires a Gateway node."))?;
 
-                    // CLI argument overrides (highest priority) — apply before runtime.
-                    if let Some(ref m) = cli.model {
-                        config.resolve_model_profile(m);
-                    } else if let Some(m) = config.model.clone() {
-                        config.resolve_model_profile(&m);
-                    }
-                    if let Some(ref p) = cli.provider {
-                        config.provider = match p.to_lowercase().as_str() {
-                            "openai" => Provider::OpenAi,
-                            _ => Provider::Anthropic,
-                        };
-                    }
-                    if let Some(ref k) = cli.api_key {
-                        config.api_key = kezen::config::keys::resolve_key(Some(k.clone()));
-                    }
-                    if cli.no_mcp {
-                        config.no_mcp = true;
-                    }
+                    config.merge_with_toml(gateway, &cluster);
 
                     return kezen::agent_core::runtime::run_multiagent(
                         config,
@@ -153,34 +161,14 @@ async fn main() -> Result<()> {
                     .await;
                 }
                 Err(e) => {
-                    eprintln!(
-                        "  ⚠ Failed to load cluster topology from {}: {}",
+                    anyhow::bail!(
+                        "Failed to load cluster topology from {}: {}",
                         config_file.display(),
                         e
                     );
-                    eprintln!("  ⚠ Falling back to single-agent mode");
                 }
             }
         }
-    }
-
-    // Layer 1: CLI argument overrides (highest priority)
-    if let Some(ref m) = cli.model {
-        config.resolve_model_profile(m);
-    } else if let Some(m) = config.model.clone() {
-        config.resolve_model_profile(&m);
-    }
-    if let Some(ref p) = cli.provider {
-        config.provider = match p.to_lowercase().as_str() {
-            "openai" => Provider::OpenAi,
-            _ => Provider::Anthropic,
-        };
-    }
-    if let Some(ref k) = cli.api_key {
-        config.api_key = kezen::config::keys::resolve_key(Some(k.clone()));
-    }
-    if cli.no_mcp {
-        config.no_mcp = true;
     }
 
     // Enable API debug logging if --verbose
@@ -194,10 +182,9 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Some(Command::ServeGrpc { addr }) => {
-            let socket_addr = addr.parse().unwrap_or_else(|e| {
-                tracing::error!("Invalid address {}: {}", addr, e);
-                std::process::exit(1);
-            });
+            let socket_addr = addr
+                .parse()
+                .map_err(|e| anyhow::anyhow!("Invalid address {}: {}", addr, e))?;
             let (action_tx, action_rx) =
                 tokio::sync::mpsc::channel(kezen::constants::engine::ACTION_CHANNEL_BUFFER);
             let (event_tx, _) =

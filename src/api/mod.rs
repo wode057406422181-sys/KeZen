@@ -67,7 +67,7 @@ pub trait LlmClient: Send + Sync {
 
 /// Factory function: create the appropriate LLM client based on config.
 pub fn create_client(config: &AppConfig) -> Result<Box<dyn LlmClient>, KezenError> {
-    match config.provider {
+    match config.provider() {
         Provider::Anthropic => Ok(Box::new(anthropic::AnthropicClient::new(config)?)),
         Provider::OpenAi => Ok(Box::new(openai::OpenAiClient::new(config)?)),
     }

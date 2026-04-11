@@ -148,7 +148,7 @@ impl KezenEngine {
             audit,
             skill_registry,
             git_watcher: crate::context::git_watcher::GitWatcher::start(work_dir).await,
-            runtime_cache_enabled: config.enable_cache,
+            runtime_cache_enabled: config.enable_cache(),
         })
     }
 
@@ -365,7 +365,7 @@ impl KezenEngine {
 
                     self.session.update_usage(&turn_usage);
                     debug_logger::log_stream_end(
-                        &self.config.provider.to_string(),
+                        &self.config.provider().to_string(),
                         turn_usage.input_tokens,
                         turn_usage.output_tokens,
                     );

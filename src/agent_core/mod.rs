@@ -9,7 +9,7 @@ pub mod bus;
 #[allow(dead_code)]
 pub mod gateway;
 #[allow(dead_code)]
-pub mod pod;
+pub mod master;
 pub mod runtime;
 #[allow(dead_code)]
 pub mod worker;

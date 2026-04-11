@@ -49,15 +49,27 @@ pub async fn run_grpc_client(
     let res = match response {
         Ok(res) => {
             let mut inbound_stream = res.into_inner();
-            while let Ok(Some(server_msg)) = inbound_stream.message().await {
-                if let Some(event) = server_message_to_engine_event(server_msg) {
-                    let _ = event_tx.send(event);
+            loop {
+                match inbound_stream.message().await {
+                    Ok(Some(server_msg)) => {
+                        if let Some(event) = server_message_to_engine_event(server_msg) {
+                            let _ = event_tx.send(event);
+                        }
+                    }
+                    Ok(None) => {
+                        let _ = event_tx.send(EngineEvent::Error {
+                            message: "Server disconnected gracefully".to_string(),
+                        });
+                        break Ok(());
+                    }
+                    Err(e) => {
+                        let _ = event_tx.send(EngineEvent::Error {
+                            message: format!("Stream interrupted: {}", e),
+                        });
+                        break Err(anyhow::anyhow!("gRPC stream error: {}", e));
+                    }
                 }
             }
-            let _ = event_tx.send(EngineEvent::Error {
-                message: "Server disconnected gracefully".to_string(),
-            });
-            Ok(())
         }
         Err(e) => {
             let _ = event_tx.send(EngineEvent::Error {

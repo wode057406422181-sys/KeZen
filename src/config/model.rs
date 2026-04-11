@@ -1,19 +1,64 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 
-use super::{Provider, default_true};
+use super::default_true;
+
+/// Serde helpers for `Option<SecretString>`: deserialize from plain string,
+/// serialize by exposing the secret (needed for `model.toml` round-tripping).
+mod secret_string_serde {
+    use secrecy::{ExposeSecret, SecretString};
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(value: &Option<SecretString>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match value {
+            Some(s) => serializer.serialize_some(s.expose_secret()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<SecretString>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let opt: Option<String> = Option::deserialize(deserializer)?;
+        Ok(opt.map(SecretString::from))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    #[default]
+    Anthropic,
+    OpenAi,
+}
+
+impl fmt::Display for Provider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Provider::Anthropic => write!(f, "anthropic"),
+            Provider::OpenAi => write!(f, "openai"),
+        }
+    }
+}
 
 use crate::constants::api::{DEFAULT_MAX_TOKENS, DEFAULT_USER_AGENT};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelProfile {
     #[serde(default)]
     pub provider: Provider,
     pub model: String,
-    pub api_key: Option<String>,
+    #[serde(default, with = "secret_string_serde")]
+    pub api_key: Option<SecretString>,
     pub api_url: Option<String>,
     #[serde(default)]
     pub thinking: bool,
@@ -120,63 +165,81 @@ pub fn context_window_for_model(model: &str) -> u64 {
 }
 
 impl crate::config::AppConfig {
-    /// Get the base URL for the configured provider
+    /// Get the effective provider from the runtime profile.
+    pub fn provider(&self) -> Provider {
+        self.runtime_profile.provider
+    }
+
+    /// Get whether extended thinking is enabled.
+    pub fn thinking(&self) -> bool {
+        self.runtime_profile.thinking
+    }
+
+    /// Get whether stream usage reporting is enabled (OpenAI).
+    pub fn include_stream_usage(&self) -> bool {
+        self.runtime_profile.include_stream_usage
+    }
+
+    /// Get whether prompt caching is enabled.
+    pub fn enable_cache(&self) -> bool {
+        self.runtime_profile.enable_cache
+    }
+
+    /// Get the base URL for the configured provider.
     pub fn base_url(&self) -> &str {
-        self.api_url.as_deref().unwrap_or(match self.provider {
+        self.runtime_profile.api_url.as_deref().unwrap_or(match self.runtime_profile.provider {
             Provider::Anthropic => crate::constants::api::DEFAULT_ANTHROPIC_BASE_URL,
             Provider::OpenAi => crate::constants::api::DEFAULT_OPENAI_BASE_URL,
         })
     }
 
-    /// Get the active model profile (if resolved).
-    pub fn active_model_profile(&self) -> Option<&ModelProfile> {
-        self.active_profile
-            .as_ref()
-            .and_then(|k| self.models.get(k))
-    }
 
-    /// Get max output tokens from the active model profile, or the built-in default.
+    /// Get max output tokens from the runtime profile.
     pub fn max_tokens(&self) -> u32 {
-        self.active_model_profile()
-            .map(|p| p.max_tokens)
-            .unwrap_or(DEFAULT_MAX_TOKENS)
+        self.runtime_profile.max_tokens
     }
 
-    /// Get context window from the active model profile.
+    /// Get context window from the runtime profile.
     pub fn context_window(&self) -> u64 {
-        self.active_model_profile()
-            .map(|p| p.context_window)
-            .unwrap_or_else(|| {
-                if let Some(m) = &self.model {
-                    context_window_for_model(m)
-                } else {
-                    200_000
-                }
-            })
+        self.runtime_profile.context_window
     }
 
-    /// Get User-Agent string from the active model profile, or the built-in default.
+    /// Get User-Agent string from the runtime profile.
     pub fn user_agent(&self) -> &str {
-        self.active_model_profile()
-            .map(|p| p.user_agent.as_str())
-            .unwrap_or(DEFAULT_USER_AGENT)
+        &self.runtime_profile.user_agent
+    }
+
+    /// Get the resolved API key from the runtime profile.
+    pub fn api_key(&self) -> Option<&SecretString> {
+        self.runtime_profile.api_key.as_ref()
     }
 
     /// Resolves a model name against the predefined model profiles (`[models]`).
-    /// Updates the configuration (provider, model, API keys/URLs) if matched.
+    ///
+    /// Copies the matched profile into `runtime_profile`, preserving any
+    /// previously-set values (e.g. `api_url` from ENV) when the profile
+    /// field is `None`.
     pub fn resolve_model_profile(&mut self, profile_name: &str) {
         if let Some(profile) = self.models.get(profile_name).cloned() {
-            self.active_profile = Some(profile_name.to_string());
-            self.provider = profile.provider;
-            self.model = Some(profile.model);
-            self.thinking = profile.thinking;
-            self.include_stream_usage = profile.include_stream_usage;
-            self.enable_cache = profile.enable_cache;
-            if let Some(key) = profile.api_key {
-                self.api_key = crate::config::keys::resolve_key(Some(key));
+            self.model = Some(profile.model.clone());
+
+            // Preserve ENV-set api_url/api_key if profile doesn't specify one.
+            let prev_api_url = self.runtime_profile.api_url.take();
+            let prev_api_key = self.runtime_profile.api_key.take();
+            self.runtime_profile = profile;
+            if self.runtime_profile.api_url.is_none() {
+                self.runtime_profile.api_url = prev_api_url;
             }
-            if let Some(url) = profile.api_url {
-                self.api_url = Some(url);
+            if self.runtime_profile.api_key.is_none() {
+                self.runtime_profile.api_key = prev_api_key;
+            }
+
+            // Resolve keystore:// references in-place.
+            if let Some(ref key) = self.runtime_profile.api_key {
+                if key.expose_secret().starts_with("keystore://") {
+                    self.runtime_profile.api_key =
+                        crate::config::keys::resolve_key(Some(key.expose_secret().to_string()));
+                }
             }
         } else {
             self.model = Some(profile_name.to_string());

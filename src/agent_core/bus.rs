@@ -10,11 +10,11 @@ use crate::engine::events::{EngineEvent, UserAction};
 ///   - 子→父：`broadcast<EngineEvent>` — 子节点产生的事件广播给父节点及其他订阅者
 ///
 /// ```text
-///   Parent (Pod/Gateway)
+///   Parent (Master/Gateway)
 ///     │                     ▲
 ///     │ action_tx ──────►   │ event_tx.subscribe()
 ///     ▼                     │
-///   Child (Worker/Pod)
+///   Child (Worker/Master)
 ///     action_rx             event_tx
 /// ```
 pub struct ChannelPair {

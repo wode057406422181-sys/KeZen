@@ -2,33 +2,14 @@ use std::fmt;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use secrecy::SecretString;
+
 use serde::{Deserialize, Serialize};
 
 pub mod keys;
 pub mod mcp;
 pub mod model;
 
-pub use self::model::ModelProfile;
-
-
-
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Provider {
-    #[default]
-    Anthropic,
-    OpenAi,
-}
-
-impl fmt::Display for Provider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Provider::Anthropic => write!(f, "anthropic"),
-            Provider::OpenAi => write!(f, "openai"),
-        }
-    }
-}
+pub use self::model::{ModelProfile, Provider};
 
 /// Configuration for web search and fetch capabilities.
 ///
@@ -105,40 +86,26 @@ pub struct AppConfig {
     pub models: std::collections::HashMap<String, ModelProfile>,
     pub search: Option<SearchConfig>,
 
-    // ── Runtime-only fields (injected from ModelProfile / ENV / CLI) ──
-    /// The key of the currently active model profile in `self.models`.
-    /// Set by `resolve_model_profile()`. Used by accessor methods.
+
+    /// Effective runtime model profile — the single source of truth for
+    /// `provider`, `api_url`, `api_key`, `thinking`, `include_stream_usage`,
+    /// `enable_cache`, `max_tokens`, `context_window`, and `user_agent`.
+    ///
+    /// Populated by `resolve_model_profile()`, ENV overrides, and CLI
+    /// overrides. Consumers read through accessor methods.
     #[serde(skip)]
-    pub active_profile: Option<String>,
-    #[serde(skip)]
-    pub provider: Provider,
-    #[serde(skip)]
-    pub api_url: Option<String>,
-    #[serde(skip)]
-    pub api_key: Option<SecretString>,
-    #[serde(skip)]
-    pub thinking: bool,
-    #[serde(skip, default = "default_true")]
-    pub include_stream_usage: bool,
-    #[serde(skip, default = "default_true")]
-    pub enable_cache: bool,
+    pub runtime_profile: ModelProfile,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            provider: Provider::Anthropic,
             multiagent: false,
-            active_profile: None,
-            api_url: None,
-            api_key: None,
             model: None,
-            thinking: false,
             no_mcp: false,
-            include_stream_usage: true,
-            enable_cache: true,
             models: std::collections::HashMap::new(),
             search: None,
+            runtime_profile: ModelProfile::default(),
         }
     }
 }
@@ -193,29 +160,29 @@ impl AppConfig {
 
         // Layer 3: fallback provider-specific env vars (lower priority)
         if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            if config.api_key.is_none() {
-                config.api_key = keys::resolve_key(Some(key));
-                config.provider = Provider::Anthropic;
+            if config.runtime_profile.api_key.is_none() {
+                config.runtime_profile.api_key = keys::resolve_key(Some(key));
+                config.runtime_profile.provider = Provider::Anthropic;
             }
         } else if let Ok(key) = std::env::var("OPENAI_API_KEY")
-            && config.api_key.is_none()
+            && config.runtime_profile.api_key.is_none()
         {
-            config.api_key = keys::resolve_key(Some(key));
-            config.provider = Provider::OpenAi;
+            config.runtime_profile.api_key = keys::resolve_key(Some(key));
+            config.runtime_profile.provider = Provider::OpenAi;
         }
 
         // Layer 2: KEZEN_* env vars (higher priority, override everything above)
         if let Ok(val) = std::env::var("KEZEN_PROVIDER") {
-            config.provider = match val.to_lowercase().as_str() {
+            config.runtime_profile.provider = match val.to_lowercase().as_str() {
                 "openai" => Provider::OpenAi,
                 _ => Provider::Anthropic,
             };
         }
         if let Ok(val) = std::env::var("KEZEN_API_KEY") {
-            config.api_key = keys::resolve_key(Some(val));
+            config.runtime_profile.api_key = keys::resolve_key(Some(val));
         }
         if let Ok(val) = std::env::var("KEZEN_BASE_URL") {
-            config.api_url = Some(val);
+            config.runtime_profile.api_url = Some(val);
         }
         if let Ok(val) = std::env::var("KEZEN_MODEL") {
             config.model = Some(val);
@@ -299,14 +266,13 @@ impl AppConfig {
         if let Some(m) = model_str {
             // Try resolving as a profile from ClusterConfig first, then AppConfig
             if let Some(profile) = cluster.models.get(&m).or_else(|| self.models.get(&m)) {
-                self.active_profile = Some(m.clone());
-                self.provider = profile.provider;
+                self.runtime_profile.provider = profile.provider;
                 self.model = Some(profile.model.clone());
-                if let Some(ref key) = profile.api_key {
-                    self.api_key = Some(SecretString::from(key.clone()));
+                if profile.api_key.is_some() {
+                    self.runtime_profile.api_key = profile.api_key.clone();
                 }
                 if let Some(ref url) = profile.api_url {
-                    self.api_url = Some(url.clone());
+                    self.runtime_profile.api_url = Some(url.clone());
                 }
             } else {
                 // Not a profile, treat as raw model name
@@ -328,17 +294,16 @@ impl AppConfig {
 impl fmt::Debug for AppConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AppConfig")
-            .field("active_profile", &self.active_profile)
-            .field("provider", &self.provider)
-            .field("api_url", &self.api_url)
+            .field("provider", &self.provider())
+            .field("api_url", &self.runtime_profile.api_url)
             // Redact the API key — never print credentials to the terminal.
-            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field("api_key", &self.api_key().map(|_| "[REDACTED]"))
             .field("model", &self.model)
             .field("max_tokens", &self.max_tokens())
-            .field("thinking", &self.thinking)
+            .field("thinking", &self.thinking())
             .field("user_agent", &self.user_agent())
-            .field("include_stream_usage", &self.include_stream_usage)
-            .field("enable_cache", &self.enable_cache)
+            .field("include_stream_usage", &self.include_stream_usage())
+            .field("enable_cache", &self.enable_cache())
             .field("search", &self.search)
             .finish()
     }
@@ -347,6 +312,8 @@ impl fmt::Debug for AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::api::{DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT};
+    use secrecy::SecretString;
 
     fn default_config() -> AppConfig {
         AppConfig::default()
@@ -356,7 +323,7 @@ mod tests {
 
     #[test]
     fn default_provider_is_anthropic() {
-        assert_eq!(default_config().provider, Provider::Anthropic);
+        assert_eq!(default_config().provider(), Provider::Anthropic);
     }
 
     #[test]
@@ -366,12 +333,12 @@ mod tests {
 
     #[test]
     fn default_thinking_is_false() {
-        assert!(!default_config().thinking);
+        assert!(!default_config().thinking());
     }
 
     #[test]
     fn default_include_stream_usage_is_true() {
-        assert!(default_config().include_stream_usage);
+        assert!(default_config().include_stream_usage());
     }
 
     // ── base_url resolution ───────────────────────────────────────────────────
@@ -379,7 +346,10 @@ mod tests {
     #[test]
     fn base_url_returns_anthropic_default_when_no_override() {
         let config = AppConfig {
-            provider: Provider::Anthropic,
+            runtime_profile: ModelProfile {
+                provider: Provider::Anthropic,
+                ..ModelProfile::default()
+            },
             ..AppConfig::default()
         };
         assert_eq!(config.base_url(), DEFAULT_ANTHROPIC_BASE_URL);
@@ -388,7 +358,10 @@ mod tests {
     #[test]
     fn base_url_returns_openai_default_for_openai_provider() {
         let config = AppConfig {
-            provider: Provider::OpenAi,
+            runtime_profile: ModelProfile {
+                provider: Provider::OpenAi,
+                ..ModelProfile::default()
+            },
             ..AppConfig::default()
         };
         assert_eq!(config.base_url(), DEFAULT_OPENAI_BASE_URL);
@@ -397,8 +370,11 @@ mod tests {
     #[test]
     fn base_url_returns_custom_override_regardless_of_provider() {
         let config = AppConfig {
-            provider: Provider::Anthropic,
-            api_url: Some("https://my-proxy.example.com".to_string()),
+            runtime_profile: ModelProfile {
+                provider: Provider::Anthropic,
+                api_url: Some("https://my-proxy.example.com".to_string()),
+                ..ModelProfile::default()
+            },
             ..AppConfig::default()
         };
         assert_eq!(config.base_url(), "https://my-proxy.example.com");
@@ -417,7 +393,10 @@ mod tests {
     #[test]
     fn debug_output_redacts_api_key() {
         let config = AppConfig {
-            api_key: Some(SecretString::from("sk-secret-key-1234")),
+            runtime_profile: ModelProfile {
+                api_key: Some(SecretString::from("sk-secret-key-1234")),
+                ..ModelProfile::default()
+            },
             ..AppConfig::default()
         };
         let debug_str = format!("{:?}", config);
@@ -433,10 +412,7 @@ mod tests {
 
     #[test]
     fn debug_output_shows_none_for_missing_key() {
-        let config = AppConfig {
-            api_key: None,
-            ..AppConfig::default()
-        };
+        let config = AppConfig::default();
         let debug_str = format!("{:?}", config);
         // None api_key → map(|_| "[REDACTED]") → None, shown as "None"
         assert!(debug_str.contains("api_key: None"));
@@ -571,7 +547,6 @@ mod tests {
         let cluster = crate::control::topology::ClusterConfig {
             defaults: crate::control::topology::DefaultsConfig {
                 model: Some("cluster-model".to_string()),
-                ..Default::default()
             },
             ..Default::default()
         };
@@ -594,7 +569,6 @@ mod tests {
         let cluster = crate::control::topology::ClusterConfig {
             defaults: crate::control::topology::DefaultsConfig {
                 model: Some("cluster-model".to_string()),
-                ..Default::default()
             },
             ..Default::default()
         };

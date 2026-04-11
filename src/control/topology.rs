@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Cluster top-level configuration.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ClusterConfig {
     #[serde(default)]
     pub cluster: ClusterContext,
@@ -17,6 +17,12 @@ pub struct ClusterConfig {
     pub agents: Vec<AgentConfig>,
 }
 
+/// Cluster-level defaults applied to agents that don't specify their own.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct DefaultsConfig {
+    pub model: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ClusterContext {
     pub name: Option<String>,
@@ -25,41 +31,23 @@ pub struct ClusterContext {
     #[serde(default)]
     pub permissions: Option<PermissionConfig>,
     #[serde(default)]
-    pub mcp_servers: HashMap<String, McpServerConfig>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct DefaultsConfig {
-    pub model: Option<String>,
-    pub context_window: Option<usize>,
-    pub max_tokens: Option<usize>,
-    pub timeout_seconds: Option<u64>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct McpServerConfig {
-    pub command: Option<String>,
-    #[serde(default)]
-    pub args: Vec<String>,
+    pub mcp_servers: HashMap<String, crate::config::mcp::McpServerConfig>,
 }
 
 /// Agent Kind definition
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AgentKind {
     Gateway,
-    Pod,
+    Master,
     Worker,
 }
 
-/// Agent Configuration node. Can be Gateway, Pod, or Worker.
+/// Agent Configuration node. Can be Gateway, Master, or Worker.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct AgentConfig {
     pub kind: Option<AgentKind>,
     pub name: Option<String>,
     pub model: Option<String>,
-
-    /// Scope logic (e.g. "global", "testing")
-    pub scope: Option<String>,
 
     /// Work dir for this agent
     pub work_dir: Option<PathBuf>,
@@ -178,10 +166,7 @@ namespace = "default"
 work_dir  = "/workspace"
 
 [defaults]
-model           = "claude-3-5-sonnet-latest"
-context_window  = 200_000
-max_tokens      = 16_384
-timeout_seconds = 300
+model = "claude-3-5-sonnet-latest"
 
 [cluster.permissions]
 mode             = "default"
@@ -209,9 +194,8 @@ name  = "gateway"
   can_approve = true
 
   [[agents.workers]]
-  kind  = "Pod"
+  kind  = "Master"
   name  = "orchestrator"
-  scope = "global"
 
     [agents.workers.master]
     name  = "architect"
@@ -250,9 +234,8 @@ You break down requirements into tasks.
       can_approve = false
 
     [[agents.workers.workers]]
-    kind     = "Pod"
+    kind     = "Master"
     name     = "test-crew"
-    scope    = "testing"
     work_dir = "/workspace"
 
       [agents.workers.workers.master]
@@ -296,33 +279,33 @@ You break down requirements into tasks.
             _ => panic!("Expected REPL AP"),
         }
 
-        // Pod
-        let pod = &gateway.workers[0];
-        assert_eq!(pod.kind, Some(AgentKind::Pod));
-        let master = pod.master.as_ref().unwrap();
-        assert_eq!(master.name, Some("architect".to_string()));
+        // MasterNode
+        let master_node = &gateway.workers[0];
+        assert_eq!(master_node.kind, Some(AgentKind::Master));
+        let inner_master = master_node.master.as_ref().unwrap();
+        assert_eq!(inner_master.name, Some("architect".to_string()));
         assert!(
-            master
+            inner_master
                 .memory
                 .as_ref()
                 .unwrap()
                 .contains("You break down requirements")
         );
-        assert_eq!(master.skills.len(), 2);
-        assert_eq!(master.max_concurrent_tasks, Some(5));
+        assert_eq!(inner_master.skills.len(), 2);
+        assert_eq!(inner_master.max_concurrent_tasks, Some(5));
 
         // Worker: coder
-        let coder = &pod.workers[0];
+        let coder = &master_node.workers[0];
         assert_eq!(coder.name, Some("coder".to_string()));
         assert_eq!(
             coder.permissions.as_ref().unwrap().mode,
             Some(PermissionMode::AcceptEdits)
         );
 
-        // Nested Pod: test-crew
-        let test_crew = &pod.workers[1];
+        // Nested Master: test-crew
+        let test_crew = &master_node.workers[1];
         assert_eq!(test_crew.name, Some("test-crew".to_string()));
-        assert_eq!(test_crew.kind, Some(AgentKind::Pod));
+        assert_eq!(test_crew.kind, Some(AgentKind::Master));
 
         let lead = test_crew.master.as_ref().unwrap();
         assert_eq!(lead.name, Some("test-lead".to_string()));

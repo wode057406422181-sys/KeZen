@@ -32,11 +32,10 @@ async fn main() -> Result<()> {
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(64);
 
     let url_clone = cli.url.clone();
-    let event_tx_clone = event_tx.clone();
 
     // Spawn the gRPC client adapter task
     tokio::spawn(async move {
-        if let Err(e) = run_grpc_client(url_clone, action_rx, event_tx_clone).await {
+        if let Err(e) = run_grpc_client(url_clone, action_rx, event_tx).await {
             tracing::error!("gRPC client error: {}", e);
             eprintln!("Lost connection to server: {}", e);
         }

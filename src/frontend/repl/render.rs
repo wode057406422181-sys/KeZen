@@ -14,7 +14,7 @@ pub fn print_welcome(config: &AppConfig) {
     );
     println!(
         "  Provider: {} | Model: {}",
-        config.provider,
+        config.provider(),
         config.model.as_deref().unwrap_or("(not set)")
     );
     println!();
