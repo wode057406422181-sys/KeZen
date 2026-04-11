@@ -14,7 +14,7 @@ pub fn print_welcome(config: &AppConfig) {
     );
     println!(
         "  Provider: {} | Model: {}",
-        config.provider,
+        config.provider(),
         config.model.as_deref().unwrap_or("(not set)")
     );
     println!();
@@ -84,7 +84,11 @@ pub fn print_tool_result(output: &str, is_error: bool) {
 
 /// Print permission request
 pub fn print_permission_request(tool: &str, desc: &str) {
-    println!("\n  {} {} wants to execute:", "⚠".yellow().bold(), tool.bold());
+    println!(
+        "\n  {} {} wants to execute:",
+        "⚠".yellow().bold(),
+        tool.bold()
+    );
     println!("     {}", desc);
 }
 

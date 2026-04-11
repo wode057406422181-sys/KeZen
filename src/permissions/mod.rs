@@ -52,7 +52,9 @@ pub struct PermissionRuleValue {
 #[derive(Debug, Clone)]
 pub enum PermissionDecision {
     Allow,
-    Deny { message: String },
+    Deny {
+        message: String,
+    },
     NeedsApproval {
         tool_name: String,
         description: String,
@@ -257,8 +259,8 @@ mod tests {
             false, // is_read_only
             false, // is_file_tool
             format!("{} wants to execute", tool),
-            None,  // no matcher
-            None,  // no suggestion
+            None, // no matcher
+            None, // no suggestion
         )
     }
 
@@ -288,8 +290,14 @@ mod tests {
         };
 
         let decision = ps.check(
-            "Bash", &json!({}), &PermissionResult::Passthrough,
-            false, false, "desc".into(), Some(&matcher), None,
+            "Bash",
+            &json!({}),
+            &PermissionResult::Passthrough,
+            false,
+            false,
+            "desc".into(),
+            Some(&matcher),
+            None,
         );
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
     }
@@ -308,8 +316,14 @@ mod tests {
         };
 
         let decision = ps.check(
-            "Bash", &json!({}), &PermissionResult::Passthrough,
-            false, false, "desc".into(), Some(&matcher), None,
+            "Bash",
+            &json!({}),
+            &PermissionResult::Passthrough,
+            false,
+            false,
+            "desc".into(),
+            Some(&matcher),
+            None,
         );
         // Should NOT be denied — rule doesn't match
         assert!(!matches!(decision, PermissionDecision::Deny { .. }));
@@ -327,7 +341,9 @@ mod tests {
     #[test]
     fn tool_check_deny_is_honoured() {
         let ps = state(PermissionMode::Default);
-        let deny = PermissionResult::Deny { message: "path traversal".into() };
+        let deny = PermissionResult::Deny {
+            message: "path traversal".into(),
+        };
         let decision = check_simple(&ps, "FileWrite", &deny);
         assert!(matches!(decision, PermissionDecision::Deny { .. }));
     }
@@ -335,7 +351,9 @@ mod tests {
     #[test]
     fn tool_check_ask_prompts_user() {
         let ps = state(PermissionMode::Default);
-        let ask = PermissionResult::Ask { message: "dangerous file".into() };
+        let ask = PermissionResult::Ask {
+            message: "dangerous file".into(),
+        };
         let decision = check_simple(&ps, "FileWrite", &ask);
         match decision {
             PermissionDecision::NeedsApproval { risk_level, .. } => {
@@ -348,7 +366,9 @@ mod tests {
     #[test]
     fn tool_check_ask_overridden_by_dontask() {
         let ps = state(PermissionMode::DontAsk);
-        let ask = PermissionResult::Ask { message: "dangerous file".into() };
+        let ask = PermissionResult::Ask {
+            message: "dangerous file".into(),
+        };
         let decision = check_simple(&ps, "FileWrite", &ask);
         assert!(matches!(decision, PermissionDecision::Allow));
     }
@@ -357,7 +377,9 @@ mod tests {
     fn tool_check_ask_overridden_by_allow_rule() {
         let mut ps = state(PermissionMode::Default);
         ps.add_allow_rule("FileWrite", None);
-        let ask = PermissionResult::Ask { message: "dangerous file".into() };
+        let ask = PermissionResult::Ask {
+            message: "dangerous file".into(),
+        };
         let decision = check_simple(&ps, "FileWrite", &ask);
         assert!(matches!(decision, PermissionDecision::Allow));
     }
@@ -377,9 +399,14 @@ mod tests {
     fn accept_edits_allows_file_tools() {
         let ps = state(PermissionMode::AcceptEdits);
         let decision = ps.check(
-            "FileWrite", &json!({}), &PermissionResult::Passthrough,
-            false, true, // is_file_tool = true
-            "write file".into(), None, None,
+            "FileWrite",
+            &json!({}),
+            &PermissionResult::Passthrough,
+            false,
+            true, // is_file_tool = true
+            "write file".into(),
+            None,
+            None,
         );
         assert!(matches!(decision, PermissionDecision::Allow));
     }
@@ -388,9 +415,14 @@ mod tests {
     fn accept_edits_does_not_allow_bash() {
         let ps = state(PermissionMode::AcceptEdits);
         let decision = ps.check(
-            "Bash", &json!({}), &PermissionResult::Passthrough,
-            false, false, // is_file_tool = false
-            "run cmd".into(), None, None,
+            "Bash",
+            &json!({}),
+            &PermissionResult::Passthrough,
+            false,
+            false, // is_file_tool = false
+            "run cmd".into(),
+            None,
+            None,
         );
         assert!(matches!(decision, PermissionDecision::NeedsApproval { .. }));
     }
@@ -419,8 +451,14 @@ mod tests {
         };
 
         let decision = ps.check(
-            "Bash", &json!({}), &PermissionResult::Passthrough,
-            false, false, "desc".into(), Some(&matcher), None,
+            "Bash",
+            &json!({}),
+            &PermissionResult::Passthrough,
+            false,
+            false,
+            "desc".into(),
+            Some(&matcher),
+            None,
         );
         assert!(matches!(decision, PermissionDecision::Allow));
     }
@@ -439,8 +477,14 @@ mod tests {
         };
 
         let decision = ps.check(
-            "Bash", &json!({}), &PermissionResult::Passthrough,
-            false, false, "desc".into(), Some(&matcher), None,
+            "Bash",
+            &json!({}),
+            &PermissionResult::Passthrough,
+            false,
+            false,
+            "desc".into(),
+            Some(&matcher),
+            None,
         );
         // Not matched by rule, falls through to default ask
         assert!(matches!(decision, PermissionDecision::NeedsApproval { .. }));
@@ -461,9 +505,14 @@ mod tests {
     fn read_only_tool_auto_allowed() {
         let ps = state(PermissionMode::Default);
         let decision = ps.check(
-            "FileRead", &json!({}), &PermissionResult::Passthrough,
-            true, false, // is_read_only = true
-            "read file".into(), None, None,
+            "FileRead",
+            &json!({}),
+            &PermissionResult::Passthrough,
+            true,
+            false, // is_read_only = true
+            "read file".into(),
+            None,
+            None,
         );
         assert!(matches!(decision, PermissionDecision::Allow));
     }
@@ -486,8 +535,14 @@ mod tests {
     fn default_ask_carries_suggestion() {
         let ps = state(PermissionMode::Default);
         let decision = ps.check(
-            "Bash", &json!({}), &PermissionResult::Passthrough,
-            false, false, "desc".into(), None, Some("git commit:*".into()),
+            "Bash",
+            &json!({}),
+            &PermissionResult::Passthrough,
+            false,
+            false,
+            "desc".into(),
+            None,
+            Some("git commit:*".into()),
         );
         match decision {
             PermissionDecision::NeedsApproval { suggestion, .. } => {
@@ -531,7 +586,9 @@ mod tests {
     #[test]
     fn tool_deny_beats_dontask_mode() {
         let ps = state(PermissionMode::DontAsk);
-        let deny = PermissionResult::Deny { message: "blocked".into() };
+        let deny = PermissionResult::Deny {
+            message: "blocked".into(),
+        };
         let decision = check_simple(&ps, "Bash", &deny);
         // Tool deny (step 2) happens before DontAsk (step 3)
         assert!(matches!(decision, PermissionDecision::Deny { .. }));

@@ -38,7 +38,8 @@ RUN useradd -m -s /bin/sh kezen
 USER kezen
 RUN mkdir -p /home/kezen/.kezen/logs \
              /home/kezen/.kezen/sessions \
-             /home/kezen/.kezen/api_logs
+             /home/kezen/.kezen/api_logs \
+             /home/kezen/.kezen/config
 
 COPY --from=builder-kezen /build/target/release/kezen /usr/local/bin/kezen
 COPY --from=builder-mock  /build/target/release/mock-llm-server /usr/local/bin/mock-llm-server

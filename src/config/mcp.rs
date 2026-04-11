@@ -18,7 +18,7 @@ pub struct McpConfig {
     pub denied_servers: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct McpServerConfig {
     pub command: String,
     #[serde(default)]

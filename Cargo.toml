@@ -12,7 +12,11 @@ categories = ["command-line-utilities"]
 
 [[bin]]
 name = "kezen"
-path = "src/main.rs"
+path = "src/bin/kezen.rs"
+
+[[bin]]
+name = "kezen-client"
+path = "src/bin/kezen-client.rs"
 
 [dependencies]
 # CLI framework
@@ -70,6 +74,7 @@ htmd = "0.1"
 lru = "0.13"
 url = "2"
 indexmap = { version = "2.13.1", features = ["serde"] }
+secrecy = { version = "0.10.3", features = ["serde"] }
 
 [profile.release]
 opt-level = 3

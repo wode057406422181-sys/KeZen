@@ -21,7 +21,15 @@ pub async fn run_cli(
 
     let work_dir = std::env::current_dir()?;
     let registry = create_default_registry(&config, work_dir.clone());
-    let engine = KezenEngine::new(config.clone(), action_rx, event_tx, registry, permission_mode, work_dir).await?;
+    let engine = KezenEngine::new(
+        config.clone(),
+        action_rx,
+        event_tx,
+        registry,
+        permission_mode,
+        work_dir,
+    )
+    .await?;
 
     // Spawn the engine loop in a background task
     tokio::spawn(async move {

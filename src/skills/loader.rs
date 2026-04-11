@@ -1,5 +1,5 @@
-use std::path::Path;
 use crate::skills::types::{SkillDefinition, SkillFrontmatter, SkillSource};
+use std::path::Path;
 
 /// Discover skills from all configured paths (global + project-local).
 ///
@@ -15,13 +15,19 @@ pub async fn discover_all_skills(work_dir: &Path) -> Vec<SkillDefinition> {
     // 1. User Global Skills: ~/.kezen/skills/
     if let Some(home) = dirs::home_dir() {
         let global_skills_path = home.join(".kezen").join("skills");
-        if tokio::fs::metadata(&global_skills_path).await.map(|m| m.is_dir()).unwrap_or(false) {
+        if tokio::fs::metadata(&global_skills_path)
+            .await
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+        {
             tracing::debug!(path = %global_skills_path.display(), "Scanning global skills directory");
-            let global_skills = load_skills_from_dir(&global_skills_path, SkillSource::UserGlobal).await;
+            let global_skills =
+                load_skills_from_dir(&global_skills_path, SkillSource::UserGlobal).await;
             for skill in global_skills {
                 if let Ok(canon) = tokio::fs::canonicalize(&skill.base_dir).await
-                    && seen_canonical_paths.insert(canon) {
-                        skills.push(skill);
+                    && seen_canonical_paths.insert(canon)
+                {
+                    skills.push(skill);
                 }
             }
         }
@@ -31,13 +37,18 @@ pub async fn discover_all_skills(work_dir: &Path) -> Vec<SkillDefinition> {
     let mut current_dir = work_dir.to_path_buf();
     loop {
         let local_skills_path = current_dir.join(".kezen").join("skills");
-        if tokio::fs::metadata(&local_skills_path).await.map(|m| m.is_dir()).unwrap_or(false) {
+        if tokio::fs::metadata(&local_skills_path)
+            .await
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+        {
             tracing::debug!(path = %local_skills_path.display(), "Scanning project skills directory");
             let local_skills = load_skills_from_dir(&local_skills_path, SkillSource::Project).await;
             for skill in local_skills {
                 if let Ok(canon) = tokio::fs::canonicalize(&skill.base_dir).await
-                    && seen_canonical_paths.insert(canon) {
-                        skills.push(skill);
+                    && seen_canonical_paths.insert(canon)
+                {
+                    skills.push(skill);
                 }
             }
             tracing::debug!(path = %local_skills_path.display(), "Stopping traversal — found project skills directory");
@@ -45,7 +56,10 @@ pub async fn discover_all_skills(work_dir: &Path) -> Vec<SkillDefinition> {
         }
 
         // Stop at git root if one exists
-        if tokio::fs::try_exists(current_dir.join(".git")).await.unwrap_or(false) {
+        if tokio::fs::try_exists(current_dir.join(".git"))
+            .await
+            .unwrap_or(false)
+        {
             break;
         }
 
@@ -83,14 +97,19 @@ pub async fn load_skills_from_dir(base_path: &Path, source: SkillSource) -> Vec<
         }
 
         let skill_file_path = path.join("SKILL.md");
-        if !tokio::fs::metadata(&skill_file_path).await.map(|m| m.is_file()).unwrap_or(false) {
+        if !tokio::fs::metadata(&skill_file_path)
+            .await
+            .map(|m| m.is_file())
+            .unwrap_or(false)
+        {
             continue;
         }
 
         match tokio::fs::read_to_string(&skill_file_path).await {
             Ok(content) => {
                 let (frontmatter, body_length) = parse_skill_frontmatter(&content);
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown")
                     .to_string();
@@ -162,9 +181,9 @@ pub async fn prepare_skill_content(
     }
 
     // Load the full content lazily.
-    let mut content = load_skill_content(skill).await.map_err(|e| {
-        format!("Failed to load skill content: {}", e)
-    })?;
+    let mut content = load_skill_content(skill)
+        .await
+        .map_err(|e| format!("Failed to load skill content: {}", e))?;
 
     // Variable substitution.
     let base_dir = skill.base_dir.display().to_string();
@@ -223,7 +242,11 @@ pub fn parse_skill_frontmatter(text: &str) -> (SkillFrontmatter, usize) {
 
         if trimmed.starts_with("- ") {
             if let Some(arr) = &mut current_array {
-                let val = trimmed.strip_prefix("- ").unwrap().trim().trim_matches(|c| c == '"' || c == '\'');
+                let val = trimmed
+                    .strip_prefix("- ")
+                    .unwrap()
+                    .trim()
+                    .trim_matches(|c| c == '"' || c == '\'');
                 if !val.is_empty() {
                     arr.push(val.to_string());
                 }
@@ -238,11 +261,41 @@ pub fn parse_skill_frontmatter(text: &str) -> (SkillFrontmatter, usize) {
             current_array = None;
 
             match key {
-                "name" => fm.name = if value.is_empty() { None } else { Some(value.to_string()) },
-                "description" => fm.description = if value.is_empty() { None } else { Some(value.to_string()) },
-                "when_to_use" => fm.when_to_use = if value.is_empty() { None } else { Some(value.to_string()) },
-                "model" => fm.model = if value.is_empty() { None } else { Some(value.to_string()) },
-                "argument_hint" => fm.argument_hint = if value.is_empty() { None } else { Some(value.to_string()) },
+                "name" => {
+                    fm.name = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    }
+                }
+                "description" => {
+                    fm.description = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    }
+                }
+                "when_to_use" => {
+                    fm.when_to_use = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    }
+                }
+                "model" => {
+                    fm.model = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    }
+                }
+                "argument_hint" => {
+                    fm.argument_hint = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_string())
+                    }
+                }
                 "disable_model_invocation" => {
                     fm.disable_model_invocation = value.eq_ignore_ascii_case("true");
                 }
@@ -271,8 +324,10 @@ pub fn parse_skill_frontmatter(text: &str) -> (SkillFrontmatter, usize) {
                         paths.extend(
                             inner
                                 .split(',')
-                                .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
-                                .filter(|s| !s.is_empty())
+                                .map(|s| {
+                                    s.trim().trim_matches(|c| c == '"' || c == '\'').to_string()
+                                })
+                                .filter(|s| !s.is_empty()),
                         );
                     } else {
                         current_array = fm.paths.as_mut();
@@ -348,7 +403,10 @@ argument_hint: <environment>\n\
 Instructions here.\n";
         let (fm, _) = parse_skill_frontmatter(content);
         assert_eq!(fm.name.unwrap(), "deploy");
-        assert_eq!(fm.when_to_use.unwrap(), "When the user wants to deploy to production");
+        assert_eq!(
+            fm.when_to_use.unwrap(),
+            "When the user wants to deploy to production"
+        );
         assert_eq!(fm.argument_hint.unwrap(), "<environment>");
     }
 
@@ -433,12 +491,16 @@ Body.\n";
         std::fs::write(
             skill_dir.join("SKILL.md"),
             "---\nname: my-skill\ndescription: Test skill\n---\nInstructions here.\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let skills = load_skills_from_dir(dir.path(), SkillSource::Project).await;
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "my-skill");
-        assert_eq!(skills[0].frontmatter.description.as_deref(), Some("Test skill"));
+        assert_eq!(
+            skills[0].frontmatter.description.as_deref(),
+            Some("Test skill")
+        );
         assert_eq!(skills[0].source, SkillSource::Project);
     }
 
@@ -472,8 +534,12 @@ Body.\n";
             std::fs::create_dir(&skill_dir).unwrap();
             std::fs::write(
                 skill_dir.join("SKILL.md"),
-                format!("---\nname: {}\ndescription: Skill {}\n---\nBody.\n", name, name),
-            ).unwrap();
+                format!(
+                    "---\nname: {}\ndescription: Skill {}\n---\nBody.\n",
+                    name, name
+                ),
+            )
+            .unwrap();
         }
 
         let skills = load_skills_from_dir(dir.path(), SkillSource::UserGlobal).await;
@@ -654,7 +720,11 @@ Scoped skill.\n";
     #[tokio::test]
     async fn test_prepare_skill_content_model_can_call_non_user_invocable() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("SKILL.md"), "---\nname: auto\n---\nAuto instructions.\n").unwrap();
+        std::fs::write(
+            dir.path().join("SKILL.md"),
+            "---\nname: auto\n---\nAuto instructions.\n",
+        )
+        .unwrap();
 
         let skill = SkillDefinition {
             name: "auto".to_string(),
@@ -669,6 +739,10 @@ Scoped skill.\n";
 
         // Model invocation (is_model_invocation=true) bypasses user_invocable check
         let result = prepare_skill_content(&skill, "", true).await;
-        assert!(result.is_ok(), "Model should bypass user_invocable: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "Model should bypass user_invocable: {}",
+            result.unwrap_err()
+        );
     }
 }

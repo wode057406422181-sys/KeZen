@@ -2,17 +2,17 @@ use async_trait::async_trait;
 
 use crate::api::types::Usage;
 
-pub mod registry;
 pub mod bash;
+pub mod file_edit;
 pub mod file_read;
 pub mod file_write;
-pub mod file_edit;
-pub mod grep;
 pub mod glob;
-pub mod web_cache;
-pub mod web_search;
-pub mod web_fetch;
+pub mod grep;
+pub mod registry;
 pub mod skill_tool;
+pub mod web_cache;
+pub mod web_fetch;
+pub mod web_search;
 
 use crate::permissions::PermissionResult;
 
@@ -31,12 +31,20 @@ pub struct ToolResult {
 impl ToolResult {
     /// Create a successful tool result.
     pub fn ok(content: String) -> Self {
-        Self { content, is_error: false, extraction_usage: None }
+        Self {
+            content,
+            is_error: false,
+            extraction_usage: None,
+        }
     }
 
     /// Create an error tool result.
     pub fn err(content: String) -> Self {
-        Self { content, is_error: true, extraction_usage: None }
+        Self {
+            content,
+            is_error: true,
+            extraction_usage: None,
+        }
     }
 
     /// Attach extraction usage (from a secondary LLM sub-call) to this result.
@@ -95,7 +103,10 @@ pub trait Tool: Send + Sync {
     ///
     /// Returns `None` by default (no content-level matching).
     #[allow(clippy::type_complexity)]
-    fn permission_matcher(&self, _input: &serde_json::Value) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
+    fn permission_matcher(
+        &self,
+        _input: &serde_json::Value,
+    ) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
         None
     }
 

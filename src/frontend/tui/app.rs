@@ -5,7 +5,6 @@ use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModi
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::{broadcast, mpsc};
 
-
 use crate::config::AppConfig;
 use crate::constants::limits::*;
 use crate::engine::events::{EngineEvent, UserAction};
@@ -147,9 +146,8 @@ impl App {
             session_cache_creation_tokens: 0,
             session_cache_read_tokens: 0,
             pricing,
-            context_window: config.context_window.unwrap_or_else(|| {
-                crate::engine::compact::context_window_for_model(&model)
-            }),
+            context_window: config
+                .context_window(),
 
             should_quit: false,
         }
@@ -391,7 +389,11 @@ impl App {
                                 };
                                 text_parts.push(preview);
                             }
-                            crate::api::types::ContentBlock::ToolResult { content, is_error, .. } => {
+                            crate::api::types::ContentBlock::ToolResult {
+                                content,
+                                is_error,
+                                ..
+                            } => {
                                 let symbol = if *is_error { "✖" } else { "✓" };
                                 let preview = if content.chars().count() > UI_MAX_TOOL_RESULT_HISTORY_CHARS {
                                     let truncated: String = content.chars().take(UI_MAX_TOOL_RESULT_HISTORY_CHARS).collect();
@@ -454,11 +456,7 @@ impl App {
 
     // ── Terminal event handling ──────────────────────────────────────────
 
-    pub async fn handle_key_event(
-        &mut self,
-        key: KeyEvent,
-        action_tx: &mpsc::Sender<UserAction>,
-    ) {
+    pub async fn handle_key_event(&mut self, key: KeyEvent, action_tx: &mpsc::Sender<UserAction>) {
         // ── Permission dialog intercepts all keys ───────────────────
         if self.pending_permission.is_some() {
             match key.code {
@@ -528,7 +526,7 @@ impl App {
             (_, KeyCode::Enter) => {
                 if !self.input.is_empty() {
                     let content = self.input.clone();
-                    
+
                     if content.trim() == "/quit" || content.trim() == "/exit" {
                         self.should_quit = true;
                         return;
@@ -573,9 +571,7 @@ impl App {
                             content: content.clone(),
                         });
                         self.waiting_for_response = true;
-                        let _ = action_tx
-                            .send(UserAction::SendMessage { content })
-                            .await;
+                        let _ = action_tx.send(UserAction::SendMessage { content }).await;
                     }
                 }
             }
@@ -697,9 +693,7 @@ impl App {
             self.waiting_for_response = true;
             self.last_queued_send = Some(Instant::now());
             if let Err(e) = action_tx
-                .send(UserAction::SendMessage {
-                    content: next_msg,
-                })
+                .send(UserAction::SendMessage { content: next_msg })
                 .await
             {
                 self.queue_toast = Some((
@@ -725,12 +719,13 @@ fn spawn_terminal_event_reader() -> mpsc::Receiver<CrosstermEvent> {
             // Poll with a short timeout so the thread can detect channel closure.
             match event::poll(Duration::from_millis(50)) {
                 Ok(true) => {
-                    if let Ok(evt) = event::read() 
-                        && tx.blocking_send(evt).is_err() {
+                    if let Ok(evt) = event::read()
+                        && tx.blocking_send(evt).is_err()
+                    {
                         break; // Receiver dropped → app is shutting down.
                     }
                 }
-                Ok(false) => {} // No event within 50 ms, loop back.
+                Ok(false) => {}  // No event within 50 ms, loop back.
                 Err(_) => break, // Terminal error, exit.
             }
         }
@@ -766,8 +761,6 @@ pub async fn run_app(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     terminal.draw(|f| ui::draw(f, &app))?;
-
-
 
     loop {
         tokio::select! {
@@ -834,4 +827,3 @@ pub async fn run_app(
 
     Ok(())
 }
-

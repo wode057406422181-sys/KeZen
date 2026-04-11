@@ -6,8 +6,6 @@ use std::num::NonZeroUsize;
 
 use crate::constants::limits::{WEB_CACHE_MAX_ENTRIES, WEB_CACHE_TTL};
 
-
-
 /// A single cached web page result.
 #[derive(Clone)]
 pub struct CacheEntry {
@@ -162,7 +160,12 @@ mod tests {
             let c = cache.clone();
             handles.push(thread::spawn(move || {
                 let url = format!("https://example.com/{}", i);
-                c.insert(url.clone(), format!("content-{}", i), "text/html".into(), 200);
+                c.insert(
+                    url.clone(),
+                    format!("content-{}", i),
+                    "text/html".into(),
+                    200,
+                );
                 assert!(c.get(&url).is_some());
             }));
         }
@@ -213,7 +216,12 @@ mod tests {
     #[test]
     fn test_cache_entry_preserves_status_and_content_type() {
         let cache = WebCache::new();
-        cache.insert("https://a.com".into(), "body".into(), "application/json".into(), 404);
+        cache.insert(
+            "https://a.com".into(),
+            "body".into(),
+            "application/json".into(),
+            404,
+        );
         let entry = cache.get("https://a.com").unwrap();
         assert_eq!(entry.content_type, "application/json");
         assert_eq!(entry.status, 404);

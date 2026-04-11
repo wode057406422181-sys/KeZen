@@ -31,7 +31,10 @@ mod tests {
 
     #[test]
     fn parse_command_with_multi_word_args() {
-        assert_eq!(parse("/compact custom prompt here"), Some(("compact", "custom prompt here")));
+        assert_eq!(
+            parse("/compact custom prompt here"),
+            Some(("compact", "custom prompt here"))
+        );
     }
 
     #[test]
@@ -69,4 +72,3 @@ mod tests {
         assert_eq!(parse("/cmd\targ1"), Some(("cmd", "arg1")));
     }
 }
-

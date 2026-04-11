@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue};
+use secrecy::ExposeSecret;
 use serde_json::json;
 
 use crate::api::debug_logger;
@@ -9,7 +10,6 @@ use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{BoxStream, CacheHints, LlmClient, StreamOptions};
 use crate::config::AppConfig;
 use crate::constants::api::{ANTHROPIC_VERSION, CONTENT_TYPE_JSON};
-use crate::constants::api::DEFAULT_MAX_TOKENS;
 use crate::error::KezenError;
 
 /// Anthropic Messages API streaming client.
@@ -22,7 +22,7 @@ pub struct AnthropicClient {
 
 impl AnthropicClient {
     pub fn new(config: &AppConfig) -> Result<Self, KezenError> {
-        let api_key = config.api_key.as_deref().ok_or(KezenError::NoApiKey)?;
+        let api_key = config.api_key().map(|s| s.expose_secret().to_string()).ok_or(KezenError::NoApiKey)?;
         let model = config
             .model
             .as_deref()
@@ -32,7 +32,7 @@ impl AnthropicClient {
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-api-key",
-            HeaderValue::from_str(api_key)
+            HeaderValue::from_str(&api_key)
                 .map_err(|e| KezenError::Config(format!("Invalid API key format: {}", e)))?,
         );
         headers.insert(
@@ -61,12 +61,11 @@ impl AnthropicClient {
         Ok(Self {
             client,
             model,
-            max_tokens: config.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
+            max_tokens: config.max_tokens(),
             base_url,
         })
     }
 }
-
 
 /// Normalise an Anthropic-compatible base URL to the messages endpoint.
 ///
@@ -117,22 +116,22 @@ impl LlmClient for AnthropicClient {
                         ContentBlock::Text { text } => {
                             Some(serde_json::json!({"type": "text", "text": text}))
                         }
-                        ContentBlock::ToolUse { id, name, input } => {
-                            Some(serde_json::json!({
-                                "type": "tool_use",
-                                "id": id,
-                                "name": name,
-                                "input": input,
-                            }))
-                        }
-                        ContentBlock::ToolResult { tool_use_id, content: result_content, is_error } => {
-                            Some(serde_json::json!({
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": result_content,
-                                "is_error": is_error,
-                            }))
-                        }
+                        ContentBlock::ToolUse { id, name, input } => Some(serde_json::json!({
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": input,
+                        })),
+                        ContentBlock::ToolResult {
+                            tool_use_id,
+                            content: result_content,
+                            is_error,
+                        } => Some(serde_json::json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_use_id,
+                            "content": result_content,
+                            "is_error": is_error,
+                        })),
                     })
                     .collect();
                 serde_json::json!({"role": role_str, "content": content})
@@ -171,10 +170,7 @@ impl LlmClient for AnthropicClient {
                 {
                     if let Some(last) = tools_vec.last_mut() {
                         if let serde_json::Value::Object(map) = last {
-                            map.insert(
-                                "cache_control".to_string(),
-                                json!({"type": "ephemeral"}),
-                            );
+                            map.insert("cache_control".to_string(), json!({"type": "ephemeral"}));
                         }
                     }
                 }
@@ -187,8 +183,6 @@ impl LlmClient for AnthropicClient {
             // Default to `auto` tool choice unless otherwise constrained
             body["tool_choice"] = json!({"type": "auto"});
         }
-
-
 
         // TODO: Anthropic native web search / web fetch support.
         // When `options.enable_server_search` is true, inject server-side tools:

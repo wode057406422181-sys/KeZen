@@ -7,7 +7,10 @@ use tokio::sync::{broadcast, mpsc};
 use crate::config::AppConfig;
 use crate::engine::events::{EngineEvent, UserAction};
 
-use super::render::{print_ai_prefix, print_cost, print_error, print_thinking, print_welcome, print_tool_use, print_tool_result, render_markdown, render_restored_messages};
+use super::render::{
+    print_ai_prefix, print_cost, print_error, print_thinking, print_tool_result, print_tool_use,
+    print_welcome, render_markdown, render_restored_messages,
+};
 
 /// Run the interactive REPL loop.
 ///
@@ -34,10 +37,32 @@ pub async fn run_repl(
             .send(UserAction::SendMessage { content: prompt })
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send message: {}", e))?;
-        handle_engine_events(&action_tx, &mut event_rx, &mut session_in_tokens, &mut session_out_tokens, &mut session_cache_creation_tokens, &mut session_cache_read_tokens).await;
-        
-        let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, &pricing);
-        println!("\n  {} Session Usage: {} in | {} out | {} cache creation | {} cache read | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, cost);
+        handle_engine_events(
+            &action_tx,
+            &mut event_rx,
+            &mut session_in_tokens,
+            &mut session_out_tokens,
+            &mut session_cache_creation_tokens,
+            &mut session_cache_read_tokens,
+        )
+        .await;
+
+        let cost = crate::cost::calculate_cost(
+            session_in_tokens,
+            session_out_tokens,
+            session_cache_creation_tokens,
+            session_cache_read_tokens,
+            &pricing,
+        );
+        println!(
+            "\n  {} Session Usage: {} in | {} out | {} cache creation | {} cache read | cost: ${:.4}",
+            "ℹ".blue(),
+            session_in_tokens,
+            session_out_tokens,
+            session_cache_creation_tokens,
+            session_cache_read_tokens,
+            cost
+        );
         return Ok(());
     }
 
@@ -60,8 +85,22 @@ pub async fn run_repl(
                 // via handle_slash_command(), which returns results as
                 // SlashCommandResult events.
                 if trimmed == "/quit" || trimmed == "/exit" {
-                    let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, &pricing);
-                    println!("\n  {} Session Usage: {} in | {} out | {} cache creation | {} cache read | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, cost);
+                    let cost = crate::cost::calculate_cost(
+                        session_in_tokens,
+                        session_out_tokens,
+                        session_cache_creation_tokens,
+                        session_cache_read_tokens,
+                        &pricing,
+                    );
+                    println!(
+                        "\n  {} Session Usage: {} in | {} out | {} cache creation | {} cache read | cost: ${:.4}",
+                        "ℹ".blue(),
+                        session_in_tokens,
+                        session_out_tokens,
+                        session_cache_creation_tokens,
+                        session_cache_read_tokens,
+                        cost
+                    );
                     println!("\n  👋 {}\n", "Goodbye!".dimmed());
                     break;
                 }
@@ -79,7 +118,15 @@ pub async fn run_repl(
                 }
 
                 // Handle the streaming response
-                handle_engine_events(&action_tx, &mut event_rx, &mut session_in_tokens, &mut session_out_tokens, &mut session_cache_creation_tokens, &mut session_cache_read_tokens).await;
+                handle_engine_events(
+                    &action_tx,
+                    &mut event_rx,
+                    &mut session_in_tokens,
+                    &mut session_out_tokens,
+                    &mut session_cache_creation_tokens,
+                    &mut session_cache_read_tokens,
+                )
+                .await;
             }
             Err(rustyline::error::ReadlineError::Interrupted) => {
                 // Ctrl-C at the prompt: just print and continue
@@ -87,8 +134,22 @@ pub async fn run_repl(
             }
             Err(rustyline::error::ReadlineError::Eof) => {
                 // Ctrl-D: exit
-                let cost = crate::cost::calculate_cost(session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, &pricing);
-                println!("\n  {} Session Usage: {} in | {} out | {} cache creation | {} cache read | cost: ${:.4}", "ℹ".blue(), session_in_tokens, session_out_tokens, session_cache_creation_tokens, session_cache_read_tokens, cost);
+                let cost = crate::cost::calculate_cost(
+                    session_in_tokens,
+                    session_out_tokens,
+                    session_cache_creation_tokens,
+                    session_cache_read_tokens,
+                    &pricing,
+                );
+                println!(
+                    "\n  {} Session Usage: {} in | {} out | {} cache creation | {} cache read | cost: ${:.4}",
+                    "ℹ".blue(),
+                    session_in_tokens,
+                    session_out_tokens,
+                    session_cache_creation_tokens,
+                    session_cache_read_tokens,
+                    cost
+                );
                 println!("\n  👋 {}\n", "Goodbye!".dimmed());
                 break;
             }
@@ -182,7 +243,7 @@ async fn handle_engine_events(
                             in_thinking = false;
                             println!();
                         }
-                        
+
                         // Display risk level indicator
                         let risk_indicator = match risk_level {
                             crate::permissions::RiskLevel::Low => "○".dimmed(),
@@ -190,9 +251,9 @@ async fn handle_engine_events(
                             crate::permissions::RiskLevel::High => "●".red(),
                         };
                         println!("  {} {} {}", risk_indicator, "Permission required".bold(), format!("[{}]", tool).dimmed());
-                        
+
                         super::render::print_permission_request(&tool, &description);
-                        
+
                         let (tx, rx) = tokio::sync::oneshot::channel();
                         let tool_name = tool.clone();
                         let suggestion_display = suggestion.clone();
@@ -219,7 +280,7 @@ async fn handle_engine_events(
                                 }
                             }
                         });
-                        
+
                         let (allowed, always_allow) = rx.await.unwrap_or((false, false));
                         let _ = action_tx.send(UserAction::PermissionResponse {
                             id,

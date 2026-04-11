@@ -34,7 +34,13 @@ pub async fn collect_git_context(work_dir: &Path) -> Option<GitContext> {
         git_user_name(&cwd),
     );
 
-    Some(GitContext { branch, default_branch, status, recent_commits, user_name })
+    Some(GitContext {
+        branch,
+        default_branch,
+        status,
+        recent_commits,
+        user_name,
+    })
 }
 
 // ── Individual queries ──────────────────────────────────────────────
@@ -51,7 +57,11 @@ async fn git_default_branch(cwd: &Path) -> String {
 
     let full = git(
         cwd,
-        &["symbolic-ref", "--short", &format!("refs/remotes/{first_remote}/HEAD")],
+        &[
+            "symbolic-ref",
+            "--short",
+            &format!("refs/remotes/{first_remote}/HEAD"),
+        ],
     )
     .await
     .unwrap_or_default();

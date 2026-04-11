@@ -24,15 +24,15 @@ fn parse_frontmatter(text: &str) -> (Option<Vec<String>>, String) {
     }
 
     let start_idx = text.find('\n').unwrap() + 1;
-    
+
     let end_relative_idx = match text[start_idx..].find("\n---") {
         Some(i) => i,
         None => return (None, text.to_string()),
     };
-    
+
     let end_idx = start_idx + end_relative_idx;
     let frontmatter = &text[start_idx..end_idx];
-    
+
     let mut content_start = end_idx + 4;
     if text[content_start..].starts_with("\r\n") {
         content_start += 2;
@@ -95,9 +95,10 @@ pub async fn load_memory_files(work_dir: &std::path::Path) -> Vec<MemoryFile> {
     if let Some(home) = dirs::home_dir() {
         let user_mem = home.join(".kezen").join(".kezen.md");
         if tokio::fs::try_exists(&user_mem).await.unwrap_or(false)
-            && let Some(mf) = load_memory_file(user_mem, MemoryType::User).await {
-                results.push(mf);
-            }
+            && let Some(mf) = load_memory_file(user_mem, MemoryType::User).await
+        {
+            results.push(mf);
+        }
     }
 
     // 2. Project Layers
@@ -136,29 +137,33 @@ pub async fn load_memory_files(work_dir: &std::path::Path) -> Vec<MemoryFile> {
         // Project: .kezen.md
         let prj_md = dir.join(".kezen.md");
         if tokio::fs::try_exists(&prj_md).await.unwrap_or(false)
-            && let Some(mf) = load_memory_file(prj_md, MemoryType::Project).await {
-                results.push(mf);
-            }
+            && let Some(mf) = load_memory_file(prj_md, MemoryType::Project).await
+        {
+            results.push(mf);
+        }
 
         // Project Rules: .kezen/rules/*.md
         let rules_dir = dir.join(".kezen").join("rules");
         if tokio::fs::try_exists(&rules_dir).await.unwrap_or(false)
-            && let Ok(mut entries) = tokio::fs::read_dir(&rules_dir).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|e| e == "md")
-                        && let Some(mf) = load_memory_file(path, MemoryType::Project).await {
-                            results.push(mf);
-                        }
+            && let Ok(mut entries) = tokio::fs::read_dir(&rules_dir).await
+        {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "md")
+                    && let Some(mf) = load_memory_file(path, MemoryType::Project).await
+                {
+                    results.push(mf);
                 }
             }
+        }
 
         // Local: .kezen.local.md
         let local_md = dir.join(".kezen.local.md");
         if tokio::fs::try_exists(&local_md).await.unwrap_or(false)
-            && let Some(mf) = load_memory_file(local_md, MemoryType::Local).await {
-                results.push(mf);
-            }
+            && let Some(mf) = load_memory_file(local_md, MemoryType::Local).await
+        {
+            results.push(mf);
+        }
     }
 
     results
@@ -214,7 +219,10 @@ mod tests {
     fn test_parse_frontmatter_with_paths() {
         let text = "---\npaths:\n- \"src/**/*.rs\"\n- tests/\n---\nBody content here.";
         let (globs, content) = parse_frontmatter(text);
-        assert_eq!(globs, Some(vec!["src/**/*.rs".to_string(), "tests/".to_string()]));
+        assert_eq!(
+            globs,
+            Some(vec!["src/**/*.rs".to_string(), "tests/".to_string()])
+        );
         assert_eq!(content, "Body content here.");
     }
 
@@ -245,14 +253,12 @@ mod tests {
 
     #[test]
     fn test_format_global_files_only() {
-        let files = vec![
-            MemoryFile {
-                path: PathBuf::from("/home/user/.kezen.md"),
-                memory_type: MemoryType::User,
-                content: "Always use tabs.".into(),
-                globs: None,
-            },
-        ];
+        let files = vec![MemoryFile {
+            path: PathBuf::from("/home/user/.kezen.md"),
+            memory_type: MemoryType::User,
+            content: "Always use tabs.".into(),
+            globs: None,
+        }];
         let result = format_memory_prompt(&files).unwrap();
         assert!(result.contains("Always use tabs."));
         assert!(result.contains("user's private global instructions"));
@@ -261,14 +267,12 @@ mod tests {
     #[test]
     fn test_format_filters_out_conditional() {
         // File with globs should be excluded
-        let files = vec![
-            MemoryFile {
-                path: PathBuf::from("/project/.kezen/rules/rust.md"),
-                memory_type: MemoryType::Project,
-                content: "Use unwrap sparingly.".into(),
-                globs: Some(vec!["src/**/*.rs".into()]),
-            },
-        ];
+        let files = vec![MemoryFile {
+            path: PathBuf::from("/project/.kezen/rules/rust.md"),
+            memory_type: MemoryType::Project,
+            content: "Use unwrap sparingly.".into(),
+            globs: Some(vec!["src/**/*.rs".into()]),
+        }];
         assert_eq!(format_memory_prompt(&files), None);
     }
 
@@ -295,28 +299,24 @@ mod tests {
 
     #[test]
     fn test_format_project_type_label() {
-        let files = vec![
-            MemoryFile {
-                path: PathBuf::from("/project/.kezen.md"),
-                memory_type: MemoryType::Project,
-                content: "Project rules.".into(),
-                globs: None,
-            },
-        ];
+        let files = vec![MemoryFile {
+            path: PathBuf::from("/project/.kezen.md"),
+            memory_type: MemoryType::Project,
+            content: "Project rules.".into(),
+            globs: None,
+        }];
         let result = format_memory_prompt(&files).unwrap();
         assert!(result.contains("project instructions, checked into the codebase"));
     }
 
     #[test]
     fn test_format_local_type_label() {
-        let files = vec![
-            MemoryFile {
-                path: PathBuf::from("/project/.kezen.local.md"),
-                memory_type: MemoryType::Local,
-                content: "Local rules.".into(),
-                globs: None,
-            },
-        ];
+        let files = vec![MemoryFile {
+            path: PathBuf::from("/project/.kezen.local.md"),
+            memory_type: MemoryType::Local,
+            content: "Local rules.".into(),
+            globs: None,
+        }];
         let result = format_memory_prompt(&files).unwrap();
         assert!(result.contains("user's private project instructions, not checked in"));
     }
@@ -329,7 +329,9 @@ mod tests {
         let path = dir.path().join(".kezen.md");
         std::fs::write(&path, "Use Rust best practices.").unwrap();
 
-        let mf = load_memory_file(path.clone(), MemoryType::User).await.unwrap();
+        let mf = load_memory_file(path.clone(), MemoryType::User)
+            .await
+            .unwrap();
         assert_eq!(mf.memory_type, MemoryType::User);
         assert_eq!(mf.content, "Use Rust best practices.");
         assert!(mf.globs.is_none());
@@ -348,7 +350,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_memory_file_nonexistent() {
-        let result = load_memory_file(PathBuf::from("/nonexistent/path.md"), MemoryType::User).await;
+        let result =
+            load_memory_file(PathBuf::from("/nonexistent/path.md"), MemoryType::User).await;
         assert!(result.is_none());
     }
 
@@ -361,6 +364,9 @@ mod tests {
 
         let mf = load_memory_file(path, MemoryType::User).await.unwrap();
         assert!(mf.content.len() < 50_000);
-        assert!(mf.content.contains("[Warning: Memory file exceeded 40k characters and was truncated]"));
+        assert!(
+            mf.content
+                .contains("[Warning: Memory file exceeded 40k characters and was truncated]")
+        );
     }
 }

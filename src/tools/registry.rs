@@ -39,19 +39,24 @@ impl ToolRegistry {
     /// is not found. Returns `None` only if neither matches.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
         self.tools.get(name).cloned().or_else(|| {
-            self.aliases.get(name).and_then(|canonical| self.tools.get(canonical).cloned())
+            self.aliases
+                .get(name)
+                .and_then(|canonical| self.tools.get(canonical).cloned())
         })
     }
 
     /// Generate the JSON tool schemas array for the LLM API request.
     pub fn schemas(&self) -> Vec<serde_json::Value> {
-        self.tools.values().map(|t| {
-            serde_json::json!({
-                "name": t.name(),
-                "description": t.description(),
-                "input_schema": t.input_schema()
+        self.tools
+            .values()
+            .map(|t| {
+                serde_json::json!({
+                    "name": t.name(),
+                    "description": t.description(),
+                    "input_schema": t.input_schema()
+                })
             })
-        }).collect()
+            .collect()
     }
 }
 
@@ -60,7 +65,6 @@ impl Default for ToolRegistry {
         Self::new()
     }
 }
-
 
 /// Create a registry pre-loaded with all built-in tools.
 ///
@@ -75,33 +79,43 @@ pub fn create_default_registry(config: &AppConfig, work_dir: PathBuf) -> ToolReg
     let mut registry = ToolRegistry::new();
     registry.register(Arc::new(super::bash::BashTool));
     registry.register(Arc::new(super::file_read::FileReadTool));
-    registry.register(Arc::new(super::file_write::FileWriteTool { work_dir: work_dir.clone() }));
-    registry.register(Arc::new(super::file_edit::FileEditTool { work_dir: work_dir.clone() }));
-    registry.register(Arc::new(super::grep::GrepTool { work_dir: work_dir.clone() }));
+    registry.register(Arc::new(super::file_write::FileWriteTool {
+        work_dir: work_dir.clone(),
+    }));
+    registry.register(Arc::new(super::file_edit::FileEditTool {
+        work_dir: work_dir.clone(),
+    }));
+    registry.register(Arc::new(super::grep::GrepTool {
+        work_dir: work_dir.clone(),
+    }));
     registry.register(Arc::new(super::glob::GlobTool { work_dir }));
 
     // Resolve effective modes.
     // No [search] section: search_mode defaults to "off", fetch_mode defaults to "client".
-    let search_mode = config.search.as_ref()
+    let search_mode = config
+        .search
+        .as_ref()
         .map(|s| s.search_mode.as_str())
         .unwrap_or("off");
-    let fetch_mode = config.search.as_ref()
+    let fetch_mode = config
+        .search
+        .as_ref()
         .map(|s| s.fetch_mode.as_str())
         .unwrap_or("client");
 
     // WebSearchTool: only for explicit client-side backends (not "off" or "native").
     // In native mode, Dashscope handles search internally, so we MUST hide the tool schema.
     if search_mode != "off" && search_mode != "native" {
-        registry.register(Arc::new(
-            super::web_search::WebSearchTool::new(config.search.clone()),
-        ));
+        registry.register(Arc::new(super::web_search::WebSearchTool::new(
+            config.search.clone(),
+        )));
     }
 
     // WebFetchTool: registered by default ("client"), skipped only for "native".
     if fetch_mode != "native" {
-        registry.register(Arc::new(
-            super::web_fetch::WebFetchTool::new(Some(config.clone())),
-        ));
+        registry.register(Arc::new(super::web_fetch::WebFetchTool::new(Some(
+            config.clone(),
+        ))));
     }
 
     // Register common aliases so that models emitting "Read" / "Write"

@@ -1,10 +1,9 @@
-use std::path::PathBuf;
 use async_trait::async_trait;
-use serde_json::json;
 use regex::RegexBuilder;
+use serde_json::json;
+use std::path::PathBuf;
 
 use super::{Tool, ToolResult};
-
 
 pub struct GrepTool {
     pub work_dir: PathBuf,
@@ -44,16 +43,18 @@ impl Tool for GrepTool {
     async fn call(&self, input: serde_json::Value) -> ToolResult {
         let pattern_str = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p.to_string(),
-            None => {
-                return ToolResult::err("Error: missing or invalid 'pattern'".to_string())
-            }
+            None => return ToolResult::err("Error: missing or invalid 'pattern'".to_string()),
         };
 
         let default_dir = self.work_dir.to_string_lossy().to_string();
-        let path_str = input.get("path").and_then(|v| v.as_str())
+        let path_str = input
+            .get("path")
+            .and_then(|v| v.as_str())
             .unwrap_or(&default_dir)
             .to_string();
-        let include_pat = input.get("include").and_then(|v| v.as_str())
+        let include_pat = input
+            .get("include")
+            .and_then(|v| v.as_str())
             .unwrap_or("**/*")
             .to_string();
 
@@ -75,7 +76,10 @@ impl Tool for GrepTool {
             if let Ok(paths) = glob::glob(&search_pattern) {
                 for entry in paths.filter_map(Result::ok) {
                     let p = entry.to_string_lossy().to_string();
-                    if p.contains("/.git/") || p.contains("/node_modules/") || p.contains("/target/") {
+                    if p.contains("/.git/")
+                        || p.contains("/node_modules/")
+                        || p.contains("/target/")
+                    {
                         continue;
                     }
 
@@ -110,7 +114,8 @@ impl Tool for GrepTool {
             }
 
             ToolResult::ok(results)
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(r) => r,
@@ -125,7 +130,10 @@ impl Tool for GrepTool {
         true
     }
 
-    async fn check_permissions(&self, _input: &serde_json::Value) -> crate::permissions::PermissionResult {
+    async fn check_permissions(
+        &self,
+        _input: &serde_json::Value,
+    ) -> crate::permissions::PermissionResult {
         crate::permissions::PermissionResult::Allow
     }
 }
@@ -142,13 +150,17 @@ mod tests {
         std::fs::write(&path, "hello world\nignore this\nhello rust").unwrap();
         let dir_str = dir.path().to_str().unwrap().to_string();
 
-        let tool = GrepTool { work_dir: std::env::current_dir().unwrap() };
-        let result = tool.call(json!({
-            "pattern": "hello",
-            "path": dir_str,
-            "include": "*.txt"
-        })).await;
-        
+        let tool = GrepTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let result = tool
+            .call(json!({
+                "pattern": "hello",
+                "path": dir_str,
+                "include": "*.txt"
+            }))
+            .await;
+
         assert!(!result.is_error);
         assert!(result.content.contains("match.txt:1: hello world"));
         assert!(result.content.contains("match.txt:3: hello rust"));
@@ -159,24 +171,32 @@ mod tests {
         let dir = tempdir().unwrap();
         let dir_str = dir.path().to_str().unwrap().to_string();
 
-        let tool = GrepTool { work_dir: std::env::current_dir().unwrap() };
-        let result = tool.call(json!({
-            "pattern": "impossible_string",
-            "path": dir_str
-        })).await;
-        
+        let tool = GrepTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let result = tool
+            .call(json!({
+                "pattern": "impossible_string",
+                "path": dir_str
+            }))
+            .await;
+
         assert!(!result.is_error);
         assert!(result.content.contains("No matches found"));
     }
 
     #[tokio::test]
     async fn test_grep_invalid_regex() {
-        let tool = GrepTool { work_dir: std::env::current_dir().unwrap() };
-        let result = tool.call(json!({
-            "pattern": "[invalid_regex",
-            "path": "."
-        })).await;
-        
+        let tool = GrepTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let result = tool
+            .call(json!({
+                "pattern": "[invalid_regex",
+                "path": "."
+            }))
+            .await;
+
         assert!(result.is_error);
         assert!(result.content.contains("Invalid Regex pattern"));
     }
