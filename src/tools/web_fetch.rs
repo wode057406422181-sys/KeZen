@@ -5,14 +5,14 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-use super::{Tool, ToolResult};
 use super::web_cache;
+use super::{Tool, ToolResult};
 use crate::api;
 use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::config::AppConfig;
 
 use crate::constants::limits::{
-    FETCH_MAX_MARKDOWN_LENGTH, FETCH_TIMEOUT, FETCH_MAX_CONTENT_LENGTH, FETCH_MAX_URL_LENGTH,
+    FETCH_MAX_CONTENT_LENGTH, FETCH_MAX_MARKDOWN_LENGTH, FETCH_MAX_URL_LENGTH, FETCH_TIMEOUT,
 };
 
 /// Web page fetch tool with HTML→Markdown conversion and optional
@@ -45,7 +45,11 @@ impl WebFetchTool {
     }
 
     /// Fetch URL content, convert to markdown, optionally extract via LLM.
-    async fn fetch_and_process(&self, url: &str, prompt: Option<&str>) -> Result<(String, Option<Usage>), String> {
+    async fn fetch_and_process(
+        &self,
+        url: &str,
+        prompt: Option<&str>,
+    ) -> Result<(String, Option<Usage>), String> {
         // 1. Validate URL
         validate_url(url)?;
 
@@ -89,10 +93,7 @@ impl WebFetchTool {
         }
 
         if !resp.status().is_success() {
-            return Err(format!(
-                "HTTP {} fetching {}",
-                status, &url
-            ));
+            return Err(format!("HTTP {} fetching {}", status, &url));
         }
 
         let body = resp
@@ -118,12 +119,7 @@ impl WebFetchTool {
         };
 
         // 6. Cache the result
-        web_cache::global_cache().insert(
-            url.to_string(),
-            markdown.clone(),
-            content_type,
-            status,
-        );
+        web_cache::global_cache().insert(url.to_string(), markdown.clone(), content_type, status);
 
         // 7. Optionally extract content via LLM
         self.maybe_extract(&markdown, prompt).await
@@ -168,7 +164,14 @@ impl WebFetchTool {
         let system = "You are a helpful assistant that extracts and summarizes web page content. Be concise and accurate. Include code examples when relevant.";
 
         let stream_result = client
-            .stream(&messages, Some(system), None, &crate::api::StreamOptions::default(), None, None)
+            .stream(
+                &messages,
+                Some(system),
+                None,
+                &crate::api::StreamOptions::default(),
+                None,
+                None,
+            )
             .await
             .map_err(|e| format!("LLM extraction call failed: {}", e))?;
 
@@ -186,8 +189,12 @@ impl WebFetchTool {
                     extraction_usage.input_tokens = u.input_tokens;
                 }
                 Ok(StreamEvent::MessageDelta { usage: Some(u), .. }) => {
-                    if u.output_tokens > 0 { extraction_usage.output_tokens = u.output_tokens; }
-                    if u.input_tokens > 0 { extraction_usage.input_tokens = u.input_tokens; }
+                    if u.output_tokens > 0 {
+                        extraction_usage.output_tokens = u.output_tokens;
+                    }
+                    if u.input_tokens > 0 {
+                        extraction_usage.input_tokens = u.input_tokens;
+                    }
                 }
                 Ok(StreamEvent::MessageStop) => break,
                 Ok(_) => {} // Skip other events
@@ -201,9 +208,23 @@ impl WebFetchTool {
         let has_usage = extraction_usage.input_tokens > 0 || extraction_usage.output_tokens > 0;
 
         if result_text.is_empty() {
-            Ok((markdown.to_string(), if has_usage { Some(extraction_usage) } else { None }))
+            Ok((
+                markdown.to_string(),
+                if has_usage {
+                    Some(extraction_usage)
+                } else {
+                    None
+                },
+            ))
         } else {
-            Ok((result_text, if has_usage { Some(extraction_usage) } else { None }))
+            Ok((
+                result_text,
+                if has_usage {
+                    Some(extraction_usage)
+                } else {
+                    None
+                },
+            ))
         }
     }
 }
@@ -217,15 +238,23 @@ impl WebFetchTool {
 /// - Private / loopback / link-local IP addresses (SSRF prevention)
 fn validate_url(url: &str) -> Result<(), String> {
     if url.len() > FETCH_MAX_URL_LENGTH {
-        return Err(format!("URL too long: {} chars (max {})", url.len(), FETCH_MAX_URL_LENGTH));
+        return Err(format!(
+            "URL too long: {} chars (max {})",
+            url.len(),
+            FETCH_MAX_URL_LENGTH
+        ));
     }
 
-    let parsed = url::Url::parse(url)
-        .map_err(|e| format!("Invalid URL: {}", e))?;
+    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
 
     match parsed.scheme() {
         "http" | "https" => {}
-        s => return Err(format!("Unsupported URL scheme: '{}'. Only http/https allowed.", s)),
+        s => {
+            return Err(format!(
+                "Unsupported URL scheme: '{}'. Only http/https allowed.",
+                s
+            ));
+        }
     }
 
     if parsed.username() != "" || parsed.password().is_some() {
@@ -245,7 +274,10 @@ fn validate_url(url: &str) -> Result<(), String> {
 
         let parts: Vec<&str> = host.split('.').collect();
         if parts.len() < 2 {
-            return Err(format!("Invalid hostname: '{}' (must have at least 2 parts)", host));
+            return Err(format!(
+                "Invalid hostname: '{}' (must have at least 2 parts)",
+                host
+            ));
         }
     } else {
         return Err("URL has no hostname".to_string());
@@ -385,9 +417,7 @@ impl Tool for WebFetchTool {
     async fn call(&self, input: serde_json::Value) -> ToolResult {
         let url = match input.get("url").and_then(|v| v.as_str()) {
             Some(u) if !u.is_empty() => u,
-            _ => {
-                return ToolResult::err("Error: missing or empty 'url' parameter".to_string())
-            }
+            _ => return ToolResult::err("Error: missing or empty 'url' parameter".to_string()),
         };
 
         let prompt = input.get("prompt").and_then(|v| v.as_str());
@@ -618,7 +648,10 @@ mod tests {
         let tool = WebFetchTool::new(None);
         let input = json!({"url": "https://doc.rust-lang.org/book/"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Allow));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Allow
+        ));
     }
 
     #[tokio::test]
@@ -627,7 +660,10 @@ mod tests {
         let input = json!({"url": "https://unknown-site.com/page"});
         let result = tool.check_permissions(&input).await;
         // Non-preapproved domains should NOT auto-allow
-        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Passthrough
+        ));
     }
 
     #[tokio::test]
@@ -635,7 +671,10 @@ mod tests {
         let tool = WebFetchTool::new(None);
         let input = json!({"url": "not-a-url"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Ask { .. }
+        ));
     }
 
     #[tokio::test]
@@ -643,7 +682,10 @@ mod tests {
         let tool = WebFetchTool::new(None);
         let input = json!({"url": ""});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Ask { .. }
+        ));
     }
 
     #[tokio::test]
@@ -651,7 +693,10 @@ mod tests {
         let tool = WebFetchTool::new(None);
         let input = json!({});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Ask { .. }));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Ask { .. }
+        ));
     }
 
     // ── Permission matcher / suggestion ──────────────────────────────

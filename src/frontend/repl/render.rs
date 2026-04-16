@@ -14,7 +14,7 @@ pub fn print_welcome(config: &AppConfig) {
     );
     println!(
         "  Provider: {} | Model: {}",
-        config.provider,
+        config.provider(),
         config.model.as_deref().unwrap_or("(not set)")
     );
     println!();
@@ -84,7 +84,11 @@ pub fn print_tool_result(output: &str, is_error: bool) {
 
 /// Print permission request
 pub fn print_permission_request(tool: &str, desc: &str) {
-    println!("\n  {} {} wants to execute:", "⚠".yellow().bold(), tool.bold());
+    println!(
+        "\n  {} {} wants to execute:",
+        "⚠".yellow().bold(),
+        tool.bold()
+    );
     println!("     {}", desc);
 }
 
@@ -152,7 +156,9 @@ pub fn render_restored_messages(messages: &[Message]) {
                     };
                     println!("  {} {} {}", "🔧".blue(), name.bold(), preview.dimmed());
                 }
-                ContentBlock::ToolResult { content, is_error, .. } => {
+                ContentBlock::ToolResult {
+                    content, is_error, ..
+                } => {
                     let preview = if content.chars().count() > UI_MAX_TOOL_RESULT_HISTORY_CHARS {
                         let byte_end = content
                             .char_indices()

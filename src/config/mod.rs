@@ -2,29 +2,14 @@ use std::fmt;
 use std::path::PathBuf;
 
 use anyhow::Result;
+
 use serde::{Deserialize, Serialize};
 
-use crate::constants::api::DEFAULT_MAX_TOKENS;
-use crate::constants::api::{
-    DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT,
-};
+pub mod keys;
+pub mod mcp;
+pub mod model;
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Provider {
-    #[default]
-    Anthropic,
-    OpenAi,
-}
-
-impl fmt::Display for Provider {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Provider::Anthropic => write!(f, "anthropic"),
-            Provider::OpenAi => write!(f, "openai"),
-        }
-    }
-}
+pub use self::model::{ModelProfile, Provider};
 
 /// Configuration for web search and fetch capabilities.
 ///
@@ -85,69 +70,41 @@ impl Default for SearchConfig {
 /// 1. CLI arguments (--model, --api-key, etc.)
 /// 2. KEZEN_* environment variables
 /// 3. ANTHROPIC_API_KEY / OPENAI_API_KEY (auto-detect provider)
-/// 4. Config file (~/.kezen/config/config.toml)
-/// 5. Defaults (only max_tokens = 8192; model has no default)
+/// 4. Config file (~/.kezen/config/kezen.toml)
+/// 5. Model dictionary (~/.kezen/config/model.toml)
 #[derive(Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
-    pub provider: Provider,
-
-    /// Custom API endpoint URL
-    pub api_url: Option<String>,
-
-    /// API key
-    pub api_key: Option<String>,
-
-    /// Model to use (no default; user must specify)
+    pub multiagent: bool,
+    /// Model profile name (points to `[models.<name>]`) or raw model ID.
     pub model: Option<String>,
 
-    /// Maximum tokens for responses
-    pub max_tokens: Option<u32>,
-
-    /// Override the context window size
-    pub context_window: Option<u64>,
-
-    /// Enable extended thinking (Anthropic only)
-    #[serde(default)]
-    pub thinking: bool,
-
-    /// Custom User-Agent header (useful for Coding Plan endpoints)
-    pub user_agent: Option<String>,
-
-    /// Disable MCP server connections
     #[serde(default)]
     pub no_mcp: bool,
 
-    /// Send stream_options.include_usage in OpenAI streaming requests.
-    ///
-    /// Set to `false` for endpoints that don't support this field (DashScope,
-    /// Ollama, vLLM, etc.). Defaults to `true` for the official OpenAI API.
-    #[serde(default = "default_true")]
-    pub include_stream_usage: bool,
-
-    /// Enable LLM Prompt Caching (e.g. Anthropic cache_control)
-    #[serde(default = "default_true")]
-    pub enable_cache: bool,
-
-    /// Web search configuration (loaded from [search] section).
+    #[serde(default)]
+    pub models: std::collections::HashMap<String, ModelProfile>,
     pub search: Option<SearchConfig>,
+
+    /// Effective runtime model profile — the single source of truth for
+    /// `provider`, `api_url`, `api_key`, `thinking`, `include_stream_usage`,
+    /// `enable_cache`, `max_tokens`, `context_window`, and `user_agent`.
+    ///
+    /// Populated by `resolve_model_profile()`, ENV overrides, and CLI
+    /// overrides. Consumers read through accessor methods.
+    #[serde(skip)]
+    pub runtime_profile: ModelProfile,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            provider: Provider::Anthropic,
-            api_url: None,
-            api_key: None,
+            multiagent: false,
             model: None,
-            max_tokens: Some(DEFAULT_MAX_TOKENS),
-            context_window: None,
-            thinking: false,
-            user_agent: None,
             no_mcp: false,
-            include_stream_usage: true,
-            enable_cache: true,
+            models: std::collections::HashMap::new(),
             search: None,
+            runtime_profile: ModelProfile::default(),
         }
     }
 }
@@ -182,64 +139,78 @@ impl AppConfig {
             match toml::from_str::<AppConfig>(&content) {
                 Ok(file_config) => {
                     config = file_config;
-                    // Ensure defaults for missing optional fields
-                    if config.max_tokens.is_none() {
-                        config.max_tokens = Some(DEFAULT_MAX_TOKENS);
-                    }
                 }
                 Err(e) => {
-                    return Err(anyhow::anyhow!("Failed to parse config file at {}: {}", path.display(), e));
+                    return Err(anyhow::anyhow!(
+                        "Failed to parse config file at {}: {}",
+                        path.display(),
+                        e
+                    ));
                 }
+            }
+        }
+
+        // Layer 3.5: merge additional models from model.toml
+        if let Ok(models_config) = crate::config::model::ModelsConfig::load() {
+            for (k, v) in models_config.models {
+                config.models.entry(k).or_insert(v);
             }
         }
 
         // Layer 3: fallback provider-specific env vars (lower priority)
         if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-            if config.api_key.is_none() {
-                config.api_key = Some(key);
-                config.provider = Provider::Anthropic;
+            if config.runtime_profile.api_key.is_none() {
+                config.runtime_profile.api_key = keys::resolve_key(Some(key));
+                config.runtime_profile.provider = Provider::Anthropic;
             }
         } else if let Ok(key) = std::env::var("OPENAI_API_KEY")
-            && config.api_key.is_none()
+            && config.runtime_profile.api_key.is_none()
         {
-            config.api_key = Some(key);
-            config.provider = Provider::OpenAi;
+            config.runtime_profile.api_key = keys::resolve_key(Some(key));
+            config.runtime_profile.provider = Provider::OpenAi;
         }
 
         // Layer 2: KEZEN_* env vars (higher priority, override everything above)
         if let Ok(val) = std::env::var("KEZEN_PROVIDER") {
-            config.provider = match val.to_lowercase().as_str() {
+            config.runtime_profile.provider = match val.to_lowercase().as_str() {
                 "openai" => Provider::OpenAi,
                 _ => Provider::Anthropic,
             };
         }
         if let Ok(val) = std::env::var("KEZEN_API_KEY") {
-            config.api_key = Some(val);
+            config.runtime_profile.api_key = keys::resolve_key(Some(val));
         }
         if let Ok(val) = std::env::var("KEZEN_BASE_URL") {
-            config.api_url = Some(val);
+            config.runtime_profile.api_url = Some(val);
         }
         if let Ok(val) = std::env::var("KEZEN_MODEL") {
             config.model = Some(val);
         }
-        if let Ok(val) = std::env::var("KEZEN_MAX_TOKENS") {
-            if let Ok(parsed) = val.parse::<u32>() {
-                config.max_tokens = Some(parsed);
-            }
-        }
 
         // Search-specific env overrides
         if let Ok(val) = std::env::var("KEZEN_SEARCH_MODE") {
-            config.search.get_or_insert_with(SearchConfig::default).search_mode = val;
+            config
+                .search
+                .get_or_insert_with(SearchConfig::default)
+                .search_mode = val;
         }
         if let Ok(val) = std::env::var("KEZEN_FETCH_MODE") {
-            config.search.get_or_insert_with(SearchConfig::default).fetch_mode = val;
+            config
+                .search
+                .get_or_insert_with(SearchConfig::default)
+                .fetch_mode = val;
         }
         if let Ok(val) = std::env::var("KEZEN_SEARCH_API_KEY") {
-            config.search.get_or_insert_with(SearchConfig::default).api_key = Some(val);
+            config
+                .search
+                .get_or_insert_with(SearchConfig::default)
+                .api_key = Some(val);
         }
         if let Ok(val) = std::env::var("KEZEN_SEARCH_STRATEGY") {
-            config.search.get_or_insert_with(SearchConfig::default).search_strategy = Some(val);
+            config
+                .search
+                .get_or_insert_with(SearchConfig::default)
+                .search_strategy = Some(val);
         }
 
         Ok(config)
@@ -266,39 +237,72 @@ impl AppConfig {
     pub fn config_path() -> Result<PathBuf> {
         let home =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        Ok(home.join(".kezen").join("config").join("config.toml"))
+        Ok(home.join(".kezen").join("config").join("kezen.toml"))
     }
 
-    /// Get the base URL for the configured provider
-    pub fn base_url(&self) -> &str {
-        self.api_url.as_deref().unwrap_or(match self.provider {
-            Provider::Anthropic => DEFAULT_ANTHROPIC_BASE_URL,
-            Provider::OpenAi => DEFAULT_OPENAI_BASE_URL,
-        })
-    }
+    /// Merge AppConfig with multi-agent topology configs.
+    /// Priority: CLI > env > kezen.toml(AppConfig Root) > kezen.toml(Agent List) > kezen.toml([defaults])
+    /// Because AppConfig is already loaded with kezen.toml(AppConfig Root) + env,
+    /// we only applying Agent/Cluster fields if the AppConfig field is currently None or default.
+    pub fn merge_with_toml(
+        &mut self,
+        agent: &crate::control::topology::AgentConfig,
+        cluster: &crate::control::topology::ClusterConfig,
+    ) {
+        // Model resolution
+        let mut model_str = None;
+        if self.model.is_none() {
+            if let Some(m) = &agent.model {
+                model_str = Some(m.clone());
+            } else if let Some(m) = &cluster.defaults.model {
+                model_str = Some(m.clone());
+            }
+        } else {
+            // Already set by base config, but let's see if it's a profile we need to resolve
+            model_str = self.model.clone();
+        }
 
-    /// Get User-Agent string (configurable, defaults to kezen/<version>)
-    pub fn user_agent(&self) -> &str {
-        self.user_agent.as_deref().unwrap_or(DEFAULT_USER_AGENT)
+        if let Some(m) = model_str {
+            // Try resolving as a profile from ClusterConfig first, then AppConfig
+            if let Some(profile) = cluster.models.get(&m).or_else(|| self.models.get(&m)) {
+                self.runtime_profile.provider = profile.provider;
+                self.model = Some(profile.model.clone());
+                if profile.api_key.is_some() {
+                    self.runtime_profile.api_key = profile.api_key.clone();
+                }
+                if let Some(ref url) = profile.api_url {
+                    self.runtime_profile.api_url = Some(url.clone());
+                }
+            } else {
+                // Not a profile, treat as raw model name
+                self.model = Some(m);
+            }
+        }
+
+        // no_mcp: set to true if agent explicitly has empty mcp_servers
+        if !self.no_mcp {
+            if let Some(mcp) = &agent.mcp_servers {
+                if mcp.is_empty() {
+                    self.no_mcp = true;
+                }
+            }
+        }
     }
 }
 
 impl fmt::Debug for AppConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AppConfig")
-            .field("provider", &self.provider)
-            .field("api_url", &self.api_url)
+            .field("provider", &self.provider())
+            .field("api_url", &self.runtime_profile.api_url)
             // Redact the API key — never print credentials to the terminal.
-            .field(
-                "api_key",
-                &self.api_key.as_deref().map(|_| "[REDACTED]"),
-            )
+            .field("api_key", &self.api_key().map(|_| "[REDACTED]"))
             .field("model", &self.model)
-            .field("max_tokens", &self.max_tokens)
-            .field("thinking", &self.thinking)
-            .field("user_agent", &self.user_agent)
-            .field("include_stream_usage", &self.include_stream_usage)
-            .field("enable_cache", &self.enable_cache)
+            .field("max_tokens", &self.max_tokens())
+            .field("thinking", &self.thinking())
+            .field("user_agent", &self.user_agent())
+            .field("include_stream_usage", &self.include_stream_usage())
+            .field("enable_cache", &self.enable_cache())
             .field("search", &self.search)
             .finish()
     }
@@ -307,6 +311,10 @@ impl fmt::Debug for AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::api::{
+        DEFAULT_ANTHROPIC_BASE_URL, DEFAULT_MAX_TOKENS, DEFAULT_OPENAI_BASE_URL, DEFAULT_USER_AGENT,
+    };
+    use secrecy::SecretString;
 
     fn default_config() -> AppConfig {
         AppConfig::default()
@@ -316,22 +324,22 @@ mod tests {
 
     #[test]
     fn default_provider_is_anthropic() {
-        assert_eq!(default_config().provider, Provider::Anthropic);
+        assert_eq!(default_config().provider(), Provider::Anthropic);
     }
 
     #[test]
     fn default_max_tokens_is_correct() {
-        assert_eq!(default_config().max_tokens, Some(DEFAULT_MAX_TOKENS));
+        assert_eq!(default_config().max_tokens(), DEFAULT_MAX_TOKENS);
     }
 
     #[test]
     fn default_thinking_is_false() {
-        assert!(!default_config().thinking);
+        assert!(!default_config().thinking());
     }
 
     #[test]
     fn default_include_stream_usage_is_true() {
-        assert!(default_config().include_stream_usage);
+        assert!(default_config().include_stream_usage());
     }
 
     // ── base_url resolution ───────────────────────────────────────────────────
@@ -339,7 +347,10 @@ mod tests {
     #[test]
     fn base_url_returns_anthropic_default_when_no_override() {
         let config = AppConfig {
-            provider: Provider::Anthropic,
+            runtime_profile: ModelProfile {
+                provider: Provider::Anthropic,
+                ..ModelProfile::default()
+            },
             ..AppConfig::default()
         };
         assert_eq!(config.base_url(), DEFAULT_ANTHROPIC_BASE_URL);
@@ -348,7 +359,10 @@ mod tests {
     #[test]
     fn base_url_returns_openai_default_for_openai_provider() {
         let config = AppConfig {
-            provider: Provider::OpenAi,
+            runtime_profile: ModelProfile {
+                provider: Provider::OpenAi,
+                ..ModelProfile::default()
+            },
             ..AppConfig::default()
         };
         assert_eq!(config.base_url(), DEFAULT_OPENAI_BASE_URL);
@@ -357,8 +371,11 @@ mod tests {
     #[test]
     fn base_url_returns_custom_override_regardless_of_provider() {
         let config = AppConfig {
-            provider: Provider::Anthropic,
-            api_url: Some("https://my-proxy.example.com".to_string()),
+            runtime_profile: ModelProfile {
+                provider: Provider::Anthropic,
+                api_url: Some("https://my-proxy.example.com".to_string()),
+                ..ModelProfile::default()
+            },
             ..AppConfig::default()
         };
         assert_eq!(config.base_url(), "https://my-proxy.example.com");
@@ -368,20 +385,8 @@ mod tests {
 
     #[test]
     fn user_agent_falls_back_to_default() {
-        let config = AppConfig {
-            user_agent: None,
-            ..AppConfig::default()
-        };
+        let config = AppConfig::default();
         assert_eq!(config.user_agent(), DEFAULT_USER_AGENT);
-    }
-
-    #[test]
-    fn user_agent_returns_custom_value() {
-        let config = AppConfig {
-            user_agent: Some("my-bot/2.0".to_string()),
-            ..AppConfig::default()
-        };
-        assert_eq!(config.user_agent(), "my-bot/2.0");
     }
 
     // ── Debug redaction ───────────────────────────────────────────────────────
@@ -389,7 +394,10 @@ mod tests {
     #[test]
     fn debug_output_redacts_api_key() {
         let config = AppConfig {
-            api_key: Some("sk-secret-key-1234".to_string()),
+            runtime_profile: ModelProfile {
+                api_key: Some(SecretString::from("sk-secret-key-1234")),
+                ..ModelProfile::default()
+            },
             ..AppConfig::default()
         };
         let debug_str = format!("{:?}", config);
@@ -405,10 +413,7 @@ mod tests {
 
     #[test]
     fn debug_output_shows_none_for_missing_key() {
-        let config = AppConfig {
-            api_key: None,
-            ..AppConfig::default()
-        };
+        let config = AppConfig::default();
         let debug_str = format!("{:?}", config);
         // None api_key → map(|_| "[REDACTED]") → None, shown as "None"
         assert!(debug_str.contains("api_key: None"));
@@ -436,8 +441,8 @@ mod tests {
             api_key = "test"
         "#;
         let sc: SearchConfig = toml::from_str(toml_str).unwrap();
-        assert_eq!(sc.search_mode, "off");     // default
-        assert_eq!(sc.fetch_mode, "client");   // default
+        assert_eq!(sc.search_mode, "off"); // default
+        assert_eq!(sc.fetch_mode, "client"); // default
     }
 
     #[test]
@@ -513,5 +518,67 @@ mod tests {
         let search = config.search.unwrap();
         assert_eq!(search.search_mode, "off");
         assert_eq!(search.fetch_mode, "client");
+    }
+
+    // ── Multiagent merge_with_toml tests ─────────────────────────────────────
+
+    #[test]
+    fn multiagent_deserializes_to_false_by_default() {
+        let toml_str = r#"
+            provider = "anthropic"
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.multiagent);
+    }
+
+    #[test]
+    fn multiagent_deserializes_to_true_when_set() {
+        let toml_str = r#"
+            multiagent = true
+        "#;
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.multiagent);
+    }
+
+    #[test]
+    fn merge_with_toml_inherits_agent_over_cluster() {
+        let mut config = AppConfig::default();
+        config.model = None;
+
+        let cluster = crate::control::topology::ClusterConfig {
+            defaults: crate::control::topology::DefaultsConfig {
+                model: Some("cluster-model".to_string()),
+            },
+            ..Default::default()
+        };
+
+        let agent = crate::control::topology::AgentConfig {
+            model: Some("agent-model".to_string()),
+            ..Default::default()
+        };
+
+        config.merge_with_toml(&agent, &cluster);
+        assert_eq!(config.model.as_deref(), Some("agent-model"));
+    }
+
+    #[test]
+    fn merge_with_toml_does_not_override_existing_values() {
+        // Simulate existing values from config.toml or env
+        let mut config = AppConfig::default();
+        config.model = Some("existing-model".to_string());
+
+        let cluster = crate::control::topology::ClusterConfig {
+            defaults: crate::control::topology::DefaultsConfig {
+                model: Some("cluster-model".to_string()),
+            },
+            ..Default::default()
+        };
+
+        let agent = crate::control::topology::AgentConfig::default();
+
+        config.merge_with_toml(&agent, &cluster);
+
+        // config should retain the higher priority "existing-model"
+        assert_eq!(config.model.as_deref(), Some("existing-model"));
     }
 }

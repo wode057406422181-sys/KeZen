@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
 use reqwest::header::{HeaderMap, HeaderValue};
+use secrecy::ExposeSecret;
 use serde_json::json;
 
 use crate::api::debug_logger;
@@ -9,7 +10,6 @@ use crate::api::types::{ContentBlock, Message, Role, StreamEvent, Usage};
 use crate::api::{BoxStream, CacheHints, LlmClient, StreamOptions};
 use crate::config::AppConfig;
 use crate::constants::api::CONTENT_TYPE_JSON;
-use crate::constants::api::DEFAULT_MAX_TOKENS;
 use crate::error::KezenError;
 
 /// OpenAI Chat Completions API streaming client.
@@ -29,7 +29,10 @@ pub struct OpenAiClient {
 
 impl OpenAiClient {
     pub fn new(config: &AppConfig) -> Result<Self, KezenError> {
-        let api_key = config.api_key.as_deref().ok_or(KezenError::NoApiKey)?;
+        let api_key = config
+            .api_key()
+            .map(|s| s.expose_secret().to_string())
+            .ok_or(KezenError::NoApiKey)?;
         let model = config
             .model
             .as_deref()
@@ -44,7 +47,7 @@ impl OpenAiClient {
         );
         headers.insert(
             "x-api-key",
-            HeaderValue::from_str(api_key)
+            HeaderValue::from_str(&api_key)
                 .map_err(|e| KezenError::Config(format!("Invalid API key format: {}", e)))?,
         );
         headers.insert("content-type", HeaderValue::from_static(CONTENT_TYPE_JSON));
@@ -63,9 +66,9 @@ impl OpenAiClient {
         Ok(Self {
             client,
             model,
-            max_tokens: config.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
+            max_tokens: config.max_tokens(),
             base_url,
-            include_stream_usage: config.include_stream_usage,
+            include_stream_usage: config.include_stream_usage(),
         })
     }
 }
@@ -136,7 +139,11 @@ impl LlmClient for OpenAiClient {
                             }
                         }));
                     }
-                    ContentBlock::ToolResult { tool_use_id, content: result_content, is_error } => {
+                    ContentBlock::ToolResult {
+                        tool_use_id,
+                        content: result_content,
+                        is_error,
+                    } => {
                         let prefixed = if *is_error {
                             format!("Error: {}", result_content)
                         } else {
@@ -180,8 +187,11 @@ impl LlmClient for OpenAiClient {
         });
 
         if let Some(t) = tools
-            && !t.is_empty() {
-                let functions: Vec<_> = t.iter().map(|s| {
+            && !t.is_empty()
+        {
+            let functions: Vec<_> = t
+                .iter()
+                .map(|s| {
                     json!({
                         "type": "function",
                         "function": {
@@ -190,9 +200,10 @@ impl LlmClient for OpenAiClient {
                             "parameters": s["input_schema"]
                         }
                     })
-                }).collect();
-                body["tools"] = json!(functions);
-            }
+                })
+                .collect();
+            body["tools"] = json!(functions);
+        }
 
         // `stream_options.include_usage` is an OpenAI extension not supported by
         // all compatible endpoints (DashScope, Ollama, vLLM, etc.). Only send it
@@ -290,13 +301,23 @@ impl LlmClient for OpenAiClient {
                             for t in tool_calls {
                                 if let Some(f) = t.get("function") {
                                     if let Some(name) = f.get("name").and_then(|n| n.as_str()) {
-                                        let id = t.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                                        out.push(Ok(StreamEvent::ToolUseStart { id, name: name.to_string() }));
+                                        let id = t
+                                            .get("id")
+                                            .and_then(|i| i.as_str())
+                                            .unwrap_or("")
+                                            .to_string();
+                                        out.push(Ok(StreamEvent::ToolUseStart {
+                                            id,
+                                            name: name.to_string(),
+                                        }));
                                     }
                                     if let Some(args) = f.get("arguments").and_then(|a| a.as_str())
-                                        && !args.is_empty() {
-                                            out.push(Ok(StreamEvent::ToolUseInputDelta { text: args.to_string() }));
-                                        }
+                                        && !args.is_empty()
+                                    {
+                                        out.push(Ok(StreamEvent::ToolUseInputDelta {
+                                            text: args.to_string(),
+                                        }));
+                                    }
                                 }
                             }
                         }

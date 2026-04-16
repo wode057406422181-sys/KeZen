@@ -43,15 +43,14 @@ pub async fn list_sessions() -> anyhow::Result<Vec<SessionSnapshot>> {
     while let Some(entry) = entries.next_entry().await? {
         if entry.path().extension().is_some_and(|e| e == "json")
             && let Ok(c) = tokio::fs::read_to_string(entry.path()).await
-                && let Ok(snap) = serde_json::from_str::<SessionSnapshot>(&c) {
-                    snaps.push(snap);
-                }
+            && let Ok(snap) = serde_json::from_str::<SessionSnapshot>(&c)
+        {
+            snaps.push(snap);
+        }
     }
     snaps.sort_by(|a, b| b.updated_at.cmp(&a.updated_at)); // Descending
     Ok(snaps)
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -151,12 +150,12 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-04-03T12:00:00Z".to_string(),
             model_name: "gpt-4o".to_string(),
-            messages: vec![
-                crate::api::types::Message {
-                    role: crate::api::types::Role::User,
-                    content: vec![crate::api::types::ContentBlock::Text { text: "hello".into() }],
-                },
-            ],
+            messages: vec![crate::api::types::Message {
+                role: crate::api::types::Role::User,
+                content: vec![crate::api::types::ContentBlock::Text {
+                    text: "hello".into(),
+                }],
+            }],
             input_tokens: 500,
             output_tokens: 200,
             cache_creation_input_tokens: 0,

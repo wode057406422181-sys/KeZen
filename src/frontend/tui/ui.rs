@@ -7,8 +7,8 @@ use ratatui::{
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::permissions::RiskLevel;
 use super::app::App;
+use crate::permissions::RiskLevel;
 
 // ─── Colours ────────────────────────────────────────────────────────────────
 
@@ -18,7 +18,7 @@ const TOOL_COLOR: Color = Color::Yellow;
 const ERROR_COLOR: Color = Color::Red;
 const SYSTEM_COLOR: Color = Color::DarkGray;
 const ACCENT_COLOR: Color = Color::Rgb(180, 140, 255); // soft purple
-const STATUS_BG: Color = Color::Rgb(30, 30, 46);       // catppuccin-ish bg
+const STATUS_BG: Color = Color::Rgb(30, 30, 46); // catppuccin-ish bg
 const STATUS_FG: Color = Color::Rgb(166, 173, 200);
 
 // ─── Main draw ──────────────────────────────────────────────────────────────
@@ -34,17 +34,19 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let queued_height = if has_queued_panel {
         let mut h = 1u16; // separator line
         h += queued_count as u16;
-        if has_toast { h += 1; }
+        if has_toast {
+            h += 1;
+        }
         h
     } else {
         0
     };
 
     let chunks = Layout::vertical([
-        Constraint::Min(3),              // message list (fills remaining space)
+        Constraint::Min(3),                // message list (fills remaining space)
         Constraint::Length(queued_height), // queued panel (fixed, 0 when empty)
-        Constraint::Length(3),            // input box (fixed height)
-        Constraint::Length(1),            // status bar (1 line)
+        Constraint::Length(3),             // input box (fixed height)
+        Constraint::Length(1),             // status bar (1 line)
     ])
     .split(area);
 
@@ -86,10 +88,7 @@ fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
                             Span::raw(*line),
                         ]));
                     } else {
-                        lines.push(Line::from(vec![
-                            Span::raw("    "),
-                            Span::raw(*line),
-                        ]));
+                        lines.push(Line::from(vec![Span::raw("    "), Span::raw(*line)]));
                     }
                 }
                 lines.push(Line::from("")); // spacing
@@ -134,16 +133,18 @@ fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
                     Span::raw(*line),
                 ]));
             } else {
-                lines.push(Line::from(vec![
-                    Span::raw("    "),
-                    Span::raw(*line),
-                ]));
+                lines.push(Line::from(vec![Span::raw("    "), Span::raw(*line)]));
             }
         }
         // Blinking cursor at end of stream
         lines.push(Line::from(vec![
             Span::raw("    "),
-            Span::styled("▋", Style::default().fg(ACCENT_COLOR).add_modifier(Modifier::SLOW_BLINK)),
+            Span::styled(
+                "▋",
+                Style::default()
+                    .fg(ACCENT_COLOR)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            ),
         ]));
     }
 
@@ -151,10 +152,7 @@ fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
     for tool in &app.active_tools {
         let spinner = app.spinner_char();
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {} ", spinner),
-                Style::default().fg(ACCENT_COLOR),
-            ),
+            Span::styled(format!("  {} ", spinner), Style::default().fg(ACCENT_COLOR)),
             Span::styled(&tool.name, Style::default().fg(TOOL_COLOR).bold()),
             Span::styled(
                 format!(" {}", tool.input_preview),
@@ -185,18 +183,13 @@ fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
     if app.waiting_for_response && !app.is_streaming && app.active_tools.is_empty() {
         let spinner = app.spinner_char();
         lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {} ", spinner),
-                Style::default().fg(ACCENT_COLOR),
-            ),
+            Span::styled(format!("  {} ", spinner), Style::default().fg(ACCENT_COLOR)),
             Span::styled(
                 "Waiting for response…",
                 Style::default().fg(SYSTEM_COLOR).italic(),
             ),
         ]));
     }
-
-
 
     // Calculate scroll
     let total_lines = lines.len() as u16;
@@ -213,8 +206,7 @@ fn draw_messages(frame: &mut Frame, app: &App, area: Rect) {
         app.scroll_offset
     };
 
-    let block = Block::default()
-        .borders(Borders::NONE);
+    let block = Block::default().borders(Borders::NONE);
 
     let paragraph = Paragraph::new(lines)
         .block(block)
@@ -245,10 +237,7 @@ fn draw_queued_messages(frame: &mut Frame, app: &App, area: Rect) {
         };
         lines.push(Line::from(vec![
             Span::styled("  ◌ ", Style::default().fg(ACCENT_COLOR)),
-            Span::styled(
-                preview,
-                Style::default().fg(SYSTEM_COLOR).italic(),
-            ),
+            Span::styled(preview, Style::default().fg(SYSTEM_COLOR).italic()),
         ]));
     }
 
@@ -256,10 +245,7 @@ fn draw_queued_messages(frame: &mut Frame, app: &App, area: Rect) {
     if let Some((msg, _)) = &app.queue_toast {
         lines.push(Line::from(vec![
             Span::styled("  ❌ ", Style::default().fg(ERROR_COLOR)),
-            Span::styled(
-                msg.as_str(),
-                Style::default().fg(ERROR_COLOR).italic(),
-            ),
+            Span::styled(msg.as_str(), Style::default().fg(ERROR_COLOR).italic()),
         ]));
     }
 
@@ -290,9 +276,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(ACCENT_COLOR))
         .title(Span::styled(title, Style::default().fg(ACCENT_COLOR)));
 
-    let input_text = Paragraph::new(app.input.as_str())
-        .style(style)
-        .block(block);
+    let input_text = Paragraph::new(app.input.as_str()).style(style).block(block);
 
     frame.render_widget(input_text, area);
 
@@ -300,7 +284,10 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     if !app.is_busy() && app.pending_permission.is_none() {
         // Calculate display width of text before cursor using proper Unicode widths.
         // UnicodeWidthChar handles CJK fullwidth (2), combining marks (0), etc.
-        let display_cols: usize = app.input.chars().take(app.cursor_pos)
+        let display_cols: usize = app
+            .input
+            .chars()
+            .take(app.cursor_pos)
             .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
             .sum();
         // +1 for left border
@@ -365,10 +352,7 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     // ── Left section: model + cost ────────────────────────────────
-    let left_text = format!(
-        " {} │ ${:.4} ",
-        model_display, cost,
-    );
+    let left_text = format!(" {} │ ${:.4} ", model_display, cost,);
 
     // ── Right section: state indicator ────────────────────────────
     let queued_count = app.queued_user_messages.len();
@@ -396,18 +380,15 @@ fn draw_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let line = Line::from(vec![
         Span::styled(&left_text, Style::default().fg(STATUS_FG).bg(STATUS_BG)),
-        Span::styled(
-            &bar_str,
-            Style::default().fg(bar_color).bg(STATUS_BG),
-        ),
+        Span::styled(&bar_str, Style::default().fg(bar_color).bg(STATUS_BG)),
         Span::styled(
             ctx_label_span,
-            Style::default().fg(STATUS_FG).bg(STATUS_BG).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(STATUS_FG)
+                .bg(STATUS_BG)
+                .add_modifier(Modifier::DIM),
         ),
-        Span::styled(
-            " ".repeat(padding),
-            Style::default().bg(STATUS_BG),
-        ),
+        Span::styled(" ".repeat(padding), Style::default().bg(STATUS_BG)),
         Span::styled(
             right_text,
             Style::default()
@@ -475,10 +456,7 @@ fn draw_permission_dialog(frame: &mut Frame, app: &App) {
     // Wrap long descriptions
     let desc_lines: Vec<&str> = perm.description.lines().collect();
     for dl in &desc_lines {
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            Span::raw(*dl),
-        ]));
+        lines.push(Line::from(vec![Span::raw("  "), Span::raw(*dl)]));
     }
 
     lines.push(Line::from(""));
@@ -491,7 +469,10 @@ fn draw_permission_dialog(frame: &mut Frame, app: &App) {
     if let Some(suggestion) = &perm.suggestion {
         lines.push(Line::from(vec![
             Span::styled("  Hint: ", Style::default().fg(ACCENT_COLOR).bold()),
-            Span::styled(suggestion.as_str(), Style::default().fg(ACCENT_COLOR).italic()),
+            Span::styled(
+                suggestion.as_str(),
+                Style::default().fg(ACCENT_COLOR).italic(),
+            ),
         ]));
     }
 
@@ -507,8 +488,7 @@ fn draw_permission_dialog(frame: &mut Frame, app: &App) {
         Span::raw("Cancel"),
     ]));
 
-    let paragraph = Paragraph::new(lines)
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, inner);
 }

@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::config::{McpConfig, McpServerConfig};
-use super::transport::StdioTransport;
 use super::tool::McpTool;
+use super::transport::StdioTransport;
+use crate::config::mcp::{McpConfig, McpServerConfig};
 use crate::constants::api::MCP_PROTOCOL_VERSION;
 use crate::tools::Tool;
 
@@ -25,7 +25,8 @@ pub struct McpClient {
 impl McpClient {
     /// Connects to a server, performs handshake, and lists tools.
     pub async fn connect(name: &str, cfg: &McpServerConfig) -> Result<Self> {
-        let transport = StdioTransport::spawn(cfg).await
+        let transport = StdioTransport::spawn(cfg)
+            .await
             .with_context(|| format!("Failed to spawn MCP server '{}'", name))?;
 
         // 1. initialize
@@ -44,24 +45,29 @@ impl McpClient {
         // Use a timeout for initialize, as some servers might hang
         let _init_resp = tokio::time::timeout(
             Duration::from_secs(10),
-            transport.request("initialize", init_req)
-        ).await.context("Initialize request timed out")??;
+            transport.request("initialize", init_req),
+        )
+        .await
+        .context("Initialize request timed out")??;
 
         // 2. notifications/initialized
-        transport.notify("notifications/initialized", json!({})).await?;
+        transport
+            .notify("notifications/initialized", json!({}))
+            .await?;
 
         // 3. tools/list
         let tools_resp = transport.request("tools/list", json!({})).await?;
-        
+
         let mut tools = Vec::new();
         if let Some(tools_arr) = tools_resp.get("tools").and_then(|t| t.as_array()) {
             for t in tools_arr {
                 if let (Some(t_name), Some(t_desc), Some(t_schema)) = (
                     t.get("name").and_then(|n| n.as_str()),
                     t.get("description").and_then(|d| d.as_str()),
-                    t.get("inputSchema")
+                    t.get("inputSchema"),
                 ) {
-                    let read_only_hint = t.get("annotations")
+                    let read_only_hint = t
+                        .get("annotations")
                         .and_then(|a| a.get("readOnlyHint"))
                         .and_then(|r| r.as_bool())
                         .unwrap_or(false);
@@ -78,10 +84,7 @@ impl McpClient {
 
         tracing::debug!(server = name, tools = tools.len(), "MCP handshake complete");
 
-        Ok(Self {
-            transport,
-            tools,
-        })
+        Ok(Self { transport, tools })
     }
 
     /// Calls a specific tool on the server.
@@ -95,7 +98,7 @@ impl McpClient {
         });
 
         let resp = self.transport.request("tools/call", req).await?;
-        
+
         if let Some(err) = resp.get("isError").and_then(|e| e.as_bool()) {
             if err {
                 return Err(anyhow::anyhow!("Tool execution failed on server"));
@@ -115,7 +118,6 @@ impl McpClient {
             Ok(String::new())
         }
     }
-
 }
 
 /// Result of connecting to all configured MCP servers.
@@ -134,20 +136,28 @@ pub async fn connect_all_servers() -> Result<McpConnectResult> {
     tracing::info!("Starting MCP server connections");
     let mut mcp_tools: Vec<Arc<dyn Tool>> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
-    
+
     // Fix #6: Match on all arms instead of silently swallowing Err
     match McpConfig::load().await {
         Ok(Some(config)) => {
             for (server_name, server_cfg) in config.servers {
                 // Check deny list first
                 if config.denied_servers.contains(&server_name) {
-                    warnings.push(format!("[MCP] Skipping '{}': server is in denied list", server_name));
+                    warnings.push(format!(
+                        "[MCP] Skipping '{}': server is in denied list",
+                        server_name
+                    ));
                     continue;
                 }
-                
+
                 // Check allow list if it's not empty
-                if !config.allowed_servers.is_empty() && !config.allowed_servers.contains(&server_name) {
-                    warnings.push(format!("[MCP] Skipping '{}': server is not in allowed list", server_name));
+                if !config.allowed_servers.is_empty()
+                    && !config.allowed_servers.contains(&server_name)
+                {
+                    warnings.push(format!(
+                        "[MCP] Skipping '{}': server is not in allowed list",
+                        server_name
+                    ));
                     continue;
                 }
 
@@ -158,7 +168,7 @@ pub async fn connect_all_servers() -> Result<McpConnectResult> {
                         // and the transport is already concurrency-safe internally.
                         let client_arc = Arc::new(client);
                         let tools_info = client_arc.tools.clone();
-                        
+
                         for info in tools_info {
                             let wrapper = McpTool::new(&server_name, info, client_arc.clone());
                             mcp_tools.push(Arc::new(wrapper));
@@ -166,7 +176,10 @@ pub async fn connect_all_servers() -> Result<McpConnectResult> {
                     }
                     Err(e) => {
                         tracing::warn!(server = %server_name, error = %e, "MCP server connection failed");
-                        warnings.push(format!("Failed to connect to MCP server '{}': {}", server_name, e));
+                        warnings.push(format!(
+                            "Failed to connect to MCP server '{}': {}",
+                            server_name, e
+                        ));
                     }
                 }
             }
@@ -179,5 +192,8 @@ pub async fn connect_all_servers() -> Result<McpConnectResult> {
         }
     }
 
-    Ok(McpConnectResult { tools: mcp_tools, warnings })
+    Ok(McpConnectResult {
+        tools: mcp_tools,
+        warnings,
+    })
 }

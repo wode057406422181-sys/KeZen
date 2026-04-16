@@ -5,7 +5,6 @@ use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModi
 use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::{broadcast, mpsc};
 
-
 use crate::config::AppConfig;
 use crate::constants::limits::*;
 use crate::engine::events::{EngineEvent, UserAction};
@@ -147,9 +146,7 @@ impl App {
             session_cache_creation_tokens: 0,
             session_cache_read_tokens: 0,
             pricing,
-            context_window: config.context_window.unwrap_or_else(|| {
-                crate::engine::compact::context_window_for_model(&model)
-            }),
+            context_window: config.context_window(),
 
             should_quit: false,
         }
@@ -218,10 +215,12 @@ impl App {
                 }
                 self.flush_streaming();
 
-                let preview = serde_json::to_string(&input)
-                    .unwrap_or_else(|_| input.to_string());
+                let preview = serde_json::to_string(&input).unwrap_or_else(|_| input.to_string());
                 let preview_short = if preview.chars().count() > UI_MAX_TOOL_INPUT_CHARS {
-                    let truncated: String = preview.chars().take(UI_MAX_TOOL_INPUT_CHARS.saturating_sub(3)).collect();
+                    let truncated: String = preview
+                        .chars()
+                        .take(UI_MAX_TOOL_INPUT_CHARS.saturating_sub(3))
+                        .collect();
                     format!("{}…", truncated)
                 } else {
                     preview.clone()
@@ -254,7 +253,10 @@ impl App {
                     self.active_tools.remove(0);
                 }
                 let display = if output.chars().count() > UI_MAX_TOOL_RESULT_CHARS {
-                    let truncated: String = output.chars().take(UI_MAX_TOOL_RESULT_CHARS.saturating_sub(3)).collect();
+                    let truncated: String = output
+                        .chars()
+                        .take(UI_MAX_TOOL_RESULT_CHARS.saturating_sub(3))
+                        .collect();
                     format!("{}…", truncated)
                 } else {
                     output
@@ -365,7 +367,8 @@ impl App {
                         match block {
                             crate::api::types::ContentBlock::Text { text } => {
                                 let display = if text.chars().count() > UI_MAX_TEXT_CHARS {
-                                    let truncated: String = text.chars().take(UI_MAX_TEXT_CHARS).collect();
+                                    let truncated: String =
+                                        text.chars().take(UI_MAX_TEXT_CHARS).collect();
                                     format!("{}...", truncated)
                                 } else {
                                     text.clone()
@@ -374,7 +377,8 @@ impl App {
                             }
                             crate::api::types::ContentBlock::Thinking { thinking } => {
                                 let preview = if thinking.chars().count() > UI_MAX_THINKING_CHARS {
-                                    let truncated: String = thinking.chars().take(UI_MAX_THINKING_CHARS).collect();
+                                    let truncated: String =
+                                        thinking.chars().take(UI_MAX_THINKING_CHARS).collect();
                                     format!("💭 {}...", truncated)
                                 } else {
                                     format!("💭 {}", thinking)
@@ -383,22 +387,32 @@ impl App {
                             }
                             crate::api::types::ContentBlock::ToolUse { name, input, .. } => {
                                 let input_str = serde_json::to_string(input).unwrap_or_default();
-                                let preview = if input_str.chars().count() > UI_MAX_TOOL_INPUT_CHARS {
-                                    let truncated: String = input_str.chars().take(UI_MAX_TOOL_INPUT_CHARS).collect();
+                                let preview = if input_str.chars().count() > UI_MAX_TOOL_INPUT_CHARS
+                                {
+                                    let truncated: String =
+                                        input_str.chars().take(UI_MAX_TOOL_INPUT_CHARS).collect();
                                     format!("🔧 {} {}...", name, truncated)
                                 } else {
                                     format!("🔧 {} {}", name, input_str)
                                 };
                                 text_parts.push(preview);
                             }
-                            crate::api::types::ContentBlock::ToolResult { content, is_error, .. } => {
+                            crate::api::types::ContentBlock::ToolResult {
+                                content,
+                                is_error,
+                                ..
+                            } => {
                                 let symbol = if *is_error { "✖" } else { "✓" };
-                                let preview = if content.chars().count() > UI_MAX_TOOL_RESULT_HISTORY_CHARS {
-                                    let truncated: String = content.chars().take(UI_MAX_TOOL_RESULT_HISTORY_CHARS).collect();
-                                    format!("{} {}...", symbol, truncated)
-                                } else {
-                                    format!("{} {}", symbol, content)
-                                };
+                                let preview =
+                                    if content.chars().count() > UI_MAX_TOOL_RESULT_HISTORY_CHARS {
+                                        let truncated: String = content
+                                            .chars()
+                                            .take(UI_MAX_TOOL_RESULT_HISTORY_CHARS)
+                                            .collect();
+                                        format!("{} {}...", symbol, truncated)
+                                    } else {
+                                        format!("{} {}", symbol, content)
+                                    };
                                 text_parts.push(preview);
                             }
                         }
@@ -454,11 +468,7 @@ impl App {
 
     // ── Terminal event handling ──────────────────────────────────────────
 
-    pub async fn handle_key_event(
-        &mut self,
-        key: KeyEvent,
-        action_tx: &mpsc::Sender<UserAction>,
-    ) {
+    pub async fn handle_key_event(&mut self, key: KeyEvent, action_tx: &mpsc::Sender<UserAction>) {
         // ── Permission dialog intercepts all keys ───────────────────
         if self.pending_permission.is_some() {
             match key.code {
@@ -528,7 +538,7 @@ impl App {
             (_, KeyCode::Enter) => {
                 if !self.input.is_empty() {
                     let content = self.input.clone();
-                    
+
                     if content.trim() == "/quit" || content.trim() == "/exit" {
                         self.should_quit = true;
                         return;
@@ -573,9 +583,7 @@ impl App {
                             content: content.clone(),
                         });
                         self.waiting_for_response = true;
-                        let _ = action_tx
-                            .send(UserAction::SendMessage { content })
-                            .await;
+                        let _ = action_tx.send(UserAction::SendMessage { content }).await;
                     }
                 }
             }
@@ -697,9 +705,7 @@ impl App {
             self.waiting_for_response = true;
             self.last_queued_send = Some(Instant::now());
             if let Err(e) = action_tx
-                .send(UserAction::SendMessage {
-                    content: next_msg,
-                })
+                .send(UserAction::SendMessage { content: next_msg })
                 .await
             {
                 self.queue_toast = Some((
@@ -725,12 +731,13 @@ fn spawn_terminal_event_reader() -> mpsc::Receiver<CrosstermEvent> {
             // Poll with a short timeout so the thread can detect channel closure.
             match event::poll(Duration::from_millis(50)) {
                 Ok(true) => {
-                    if let Ok(evt) = event::read() 
-                        && tx.blocking_send(evt).is_err() {
+                    if let Ok(evt) = event::read()
+                        && tx.blocking_send(evt).is_err()
+                    {
                         break; // Receiver dropped → app is shutting down.
                     }
                 }
-                Ok(false) => {} // No event within 50 ms, loop back.
+                Ok(false) => {}  // No event within 50 ms, loop back.
                 Err(_) => break, // Terminal error, exit.
             }
         }
@@ -766,8 +773,6 @@ pub async fn run_app(
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     terminal.draw(|f| ui::draw(f, &app))?;
-
-
 
     loop {
         tokio::select! {
@@ -834,4 +839,3 @@ pub async fn run_app(
 
     Ok(())
 }
-

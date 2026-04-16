@@ -91,23 +91,68 @@ pub async fn is_within_working_directory(path: &str, working_dir: &str) -> bool 
 
 /// Common commands that are read-only and safe to auto-approve.
 const READ_ONLY_COMMANDS: &[&str] = &[
-    "ls", "ll", "la", "dir",
-    "cat", "head", "tail", "less", "more",
-    "grep", "egrep", "fgrep", "rg", "ag",
-    "find", "fd", "locate",
-    "wc", "sort", "uniq", "diff", "comm",
-    "echo", "printf", "date", "cal",
-    "pwd", "whoami", "hostname", "uname",
-    "env", "printenv",
-    "which", "where", "type", "file",
-    "du", "df", "free",
-    "ps", "top", "uptime",
-    "git status", "git log", "git diff", "git show", "git branch",
-    "git remote", "git tag", "git stash list",
-    "cargo check", "cargo clippy", "cargo test", "cargo bench",
-    "rustc --version", "cargo --version",
-    "node --version", "npm --version", "npx --version",
-    "python --version", "python3 --version", "pip --version",
+    "ls",
+    "ll",
+    "la",
+    "dir",
+    "cat",
+    "head",
+    "tail",
+    "less",
+    "more",
+    "grep",
+    "egrep",
+    "fgrep",
+    "rg",
+    "ag",
+    "find",
+    "fd",
+    "locate",
+    "wc",
+    "sort",
+    "uniq",
+    "diff",
+    "comm",
+    "echo",
+    "printf",
+    "date",
+    "cal",
+    "pwd",
+    "whoami",
+    "hostname",
+    "uname",
+    "env",
+    "printenv",
+    "which",
+    "where",
+    "type",
+    "file",
+    "du",
+    "df",
+    "free",
+    "ps",
+    "top",
+    "uptime",
+    "git status",
+    "git log",
+    "git diff",
+    "git show",
+    "git branch",
+    "git remote",
+    "git tag",
+    "git stash list",
+    "cargo check",
+    "cargo clippy",
+    "cargo test",
+    "cargo bench",
+    "rustc --version",
+    "cargo --version",
+    "node --version",
+    "npm --version",
+    "npx --version",
+    "python --version",
+    "python3 --version",
+    "pip --version",
 ];
 
 /// Returns `true` if the command is recognized as read-only.
@@ -116,16 +161,20 @@ const READ_ONLY_COMMANDS: &[&str] = &[
 /// matches `git status`).
 pub fn is_read_only_command(command: &str) -> bool {
     // Reject if it contains shell operators
-    if command.contains(';') || command.contains("&&") || command.contains("||") 
-        || command.contains('|') || command.contains('`') || command.contains("$(") {
+    if command.contains(';')
+        || command.contains("&&")
+        || command.contains("||")
+        || command.contains('|')
+        || command.contains('`')
+        || command.contains("$(")
+    {
         return false;
     }
 
     let trimmed = command.trim();
     READ_ONLY_COMMANDS.iter().any(|&ro| {
         // Exact match or prefix match (command starts with ro + space/end)
-        trimmed == ro
-            || trimmed.starts_with(&format!("{} ", ro))
+        trimmed == ro || trimmed.starts_with(&format!("{} ", ro))
     })
 }
 
@@ -192,7 +241,10 @@ pub fn extract_file_suggestion(file_path: &str, working_dir: &str) -> Option<Str
 /// - Rejects directory traversal attempts (`..`)
 /// - Asks for confirmation on critical system/project files
 /// - Asks for confirmation if the computed path escapes `work_dir`.
-pub async fn check_file_permissions(file_path: &str, work_dir: &Path) -> crate::permissions::PermissionResult {
+pub async fn check_file_permissions(
+    file_path: &str,
+    work_dir: &Path,
+) -> crate::permissions::PermissionResult {
     // Path traversal → deny
     if contains_path_traversal(file_path) {
         return crate::permissions::PermissionResult::Deny {
@@ -268,15 +320,27 @@ mod tests {
 
     #[test]
     fn test_bash_suggestion() {
-        assert_eq!(extract_bash_suggestion("git commit -m 'fix'"), Some("git commit:*".into()));
-        assert_eq!(extract_bash_suggestion("npm run build"), Some("npm run:*".into()));
+        assert_eq!(
+            extract_bash_suggestion("git commit -m 'fix'"),
+            Some("git commit:*".into())
+        );
+        assert_eq!(
+            extract_bash_suggestion("npm run build"),
+            Some("npm run:*".into())
+        );
         assert_eq!(extract_bash_suggestion("rm -rf /tmp"), Some("rm:*".into()));
         assert_eq!(extract_bash_suggestion("ls"), Some("ls:*".into()));
     }
 
     #[test]
     fn test_file_suggestion() {
-        assert_eq!(extract_file_suggestion("/project/src/main.rs", "/project"), Some("src/**".into()));
-        assert_eq!(extract_file_suggestion("/project/README.md", "/project"), None);
+        assert_eq!(
+            extract_file_suggestion("/project/src/main.rs", "/project"),
+            Some("src/**".into())
+        );
+        assert_eq!(
+            extract_file_suggestion("/project/README.md", "/project"),
+            None
+        );
     }
 }

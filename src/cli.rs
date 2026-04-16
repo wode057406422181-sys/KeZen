@@ -33,10 +33,6 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub api_key: Option<String>,
 
-    /// Override max tokens
-    #[arg(long, global = true)]
-    pub max_tokens: Option<u32>,
-
     /// Use TUI mode instead of REPL (experimental)
     #[arg(long, global = true)]
     pub tui: bool,
@@ -73,5 +69,22 @@ pub enum Command {
         key: Option<String>,
         #[arg(short, long)]
         set: Option<String>,
+    },
+
+    /// Manage API keys securely
+    Keys {
+        #[command(subcommand)]
+        command: KeysCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum KeysCommand {
+    /// Save an API key securely into the OS keychain
+    Set {
+        /// The profile identifier to bind the key to (e.g. qwen, anthropic)
+        profile: String,
+        /// The plaintext API string
+        key: String,
     },
 }

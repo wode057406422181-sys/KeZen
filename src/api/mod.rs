@@ -24,7 +24,8 @@ pub struct StreamOptions {
     /// Enable server-side web search (DashScope `enable_search`, etc.).
     pub enable_server_search: bool,
     /// Enable server-side web fetch (Anthropic `web_fetch_20250910`, etc.).
-    #[allow(dead_code)] // TODO: Implement server-side fetch in both Anthropic and OpenAI providers
+    #[allow(dead_code)]
+    // TODO: Implement server-side fetch in both Anthropic and OpenAI providers
     pub enable_server_fetch: bool,
     /// Search strategy hint for providers that support it.
     /// DashScope values: "turbo", "max", "agent", "agent_max".
@@ -66,7 +67,7 @@ pub trait LlmClient: Send + Sync {
 
 /// Factory function: create the appropriate LLM client based on config.
 pub fn create_client(config: &AppConfig) -> Result<Box<dyn LlmClient>, KezenError> {
-    match config.provider {
+    match config.provider() {
         Provider::Anthropic => Ok(Box::new(anthropic::AnthropicClient::new(config)?)),
         Provider::OpenAi => Ok(Box::new(openai::OpenAiClient::new(config)?)),
     }

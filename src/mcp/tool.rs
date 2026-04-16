@@ -1,13 +1,12 @@
-
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 
-use crate::tools::{Tool, ToolResult};
 use super::client::{McpClient, McpToolInfo};
+use crate::tools::{Tool, ToolResult};
 
 pub struct McpTool {
-    display_name: String,     // "mcp__filesystem__read_file"
+    display_name: String, // "mcp__filesystem__read_file"
     server_name: String,
     tool_name: String,
     description: String,
@@ -66,13 +65,19 @@ impl Tool for McpTool {
 
     fn permission_description(&self, input: &Value) -> String {
         // Show server, tool, and argument keys (not values, to avoid leaking secrets)
-        let keys: Vec<&str> = input.as_object()
+        let keys: Vec<&str> = input
+            .as_object()
             .map(|m| m.keys().map(|k| k.as_str()).collect())
             .unwrap_or_default();
         if keys.is_empty() {
             format!("MCP server '{}' → {}", self.server_name, self.tool_name)
         } else {
-            format!("MCP server '{}' → {}({})", self.server_name, self.tool_name, keys.join(", "))
+            format!(
+                "MCP server '{}' → {}({})",
+                self.server_name,
+                self.tool_name,
+                keys.join(", ")
+            )
         }
     }
 
@@ -100,8 +105,15 @@ impl Tool for McpTool {
 /// underscores, and strips leading/trailing underscores to avoid delimiter
 /// confusion.
 fn normalize_name(name: &str) -> String {
-    let replaced: String = name.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+    let replaced: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     // Collapse consecutive underscores
     let mut result = String::with_capacity(replaced.len());
@@ -122,7 +134,7 @@ fn normalize_name(name: &str) -> String {
 }
 
 pub fn build_mcp_tool_name(server: &str, tool: &str) -> String {
-    format!("mcp__{}__{}",  normalize_name(server), normalize_name(tool))
+    format!("mcp__{}__{}", normalize_name(server), normalize_name(tool))
 }
 
 #[cfg(test)]
@@ -131,9 +143,15 @@ mod tests {
 
     #[test]
     fn test_build_mcp_tool_name() {
-        assert_eq!(build_mcp_tool_name("filesystem", "read_file"), "mcp__filesystem__read_file");
+        assert_eq!(
+            build_mcp_tool_name("filesystem", "read_file"),
+            "mcp__filesystem__read_file"
+        );
         // Consecutive underscores collapsed, leading/trailing stripped
-        assert_eq!(build_mcp_tool_name("my-server!", "my.tool"), "mcp__my-server__my_tool");
+        assert_eq!(
+            build_mcp_tool_name("my-server!", "my.tool"),
+            "mcp__my-server__my_tool"
+        );
     }
 
     #[test]
@@ -158,15 +176,21 @@ mod tests {
         let server_name = "fs";
         let tool_name = "read";
         let input = serde_json::json!({"path": "foo.txt", "encoding": "utf8"});
-        
-        let keys: Vec<&str> = input.as_object()
+
+        let keys: Vec<&str> = input
+            .as_object()
             .map(|m| m.keys().map(|k| k.as_str()).collect())
             .unwrap_or_default();
-        
+
         let desc = if keys.is_empty() {
             format!("MCP server '{}' → {}", server_name, tool_name)
         } else {
-            format!("MCP server '{}' → {}({})", server_name, tool_name, keys.join(", "))
+            format!(
+                "MCP server '{}' → {}({})",
+                server_name,
+                tool_name,
+                keys.join(", ")
+            )
         };
 
         assert!(desc.contains("fs"));

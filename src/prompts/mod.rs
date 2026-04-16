@@ -120,10 +120,13 @@ pub async fn build_static_system_prompt(
 
 pub fn build_dynamic_context(git_ctx: Option<&crate::context::git::GitContext>) -> String {
     let mut context = String::new();
-    
+
     // ISO 8601 current time
     let now = chrono::Local::now();
-    context.push_str(&format!("Current Time: {}\n", now.format("%Y-%m-%dT%H:%M:%S%z")));
+    context.push_str(&format!(
+        "Current Time: {}\n",
+        now.format("%Y-%m-%dT%H:%M:%S%z")
+    ));
 
     if let Some(git) = git_ctx {
         context.push_str("\n# Git Context\n");
@@ -201,7 +204,9 @@ mod tests {
 
     #[tokio::test]
     async fn prompt_injects_model_name_when_provided() {
-        let prompt = build_static_system_prompt(std::path::Path::new("."), Some("claude-opus-4-5"), None).await;
+        let prompt =
+            build_static_system_prompt(std::path::Path::new("."), Some("claude-opus-4-5"), None)
+                .await;
         assert!(
             prompt.contains("claude-opus-4-5"),
             "Model name should appear in the Environment section"

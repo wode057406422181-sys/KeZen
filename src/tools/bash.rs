@@ -37,11 +37,16 @@ impl Tool for BashTool {
         let command = match input.get("command").and_then(|v| v.as_str()) {
             Some(cmd) => cmd,
             None => {
-                return ToolResult::err("Error: missing or invalid 'command' parameter".to_string())
+                return ToolResult::err(
+                    "Error: missing or invalid 'command' parameter".to_string(),
+                );
             }
         };
 
-        let timeout_ms = input.get("timeout").and_then(|v| v.as_u64()).unwrap_or(30_000);
+        let timeout_ms = input
+            .get("timeout")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30_000);
         let timeout_duration = std::time::Duration::from_millis(timeout_ms);
 
         let child = Command::new("bash")
@@ -56,7 +61,7 @@ impl Tool for BashTool {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!(error = %e, "Bash: failed to spawn shell");
-                return ToolResult::err(format!("Failed to spawn shell: {}", e))
+                return ToolResult::err(format!("Failed to spawn shell: {}", e));
             }
         };
 
@@ -77,24 +82,32 @@ impl Tool for BashTool {
                     content.push_str(&format!("Exit code {}", output.status.code().unwrap_or(1)));
                 }
 
-                ToolResult { content, is_error, extraction_usage: None }
+                ToolResult {
+                    content,
+                    is_error,
+                    extraction_usage: None,
+                }
             }
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "Bash: command execution failed");
                 ToolResult::err(format!("Failed to execute command: {}", e))
             }
-            Err(_) => {
-                ToolResult::err(format!("Command killed due to timeout of {}ms", timeout_ms))
-            }
+            Err(_) => ToolResult::err(format!("Command killed due to timeout of {}ms", timeout_ms)),
         }
     }
 
     fn permission_description(&self, input: &serde_json::Value) -> String {
-        let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let cmd = input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         format!("Run: `{}`", cmd)
     }
 
-    async fn check_permissions(&self, input: &serde_json::Value) -> crate::permissions::PermissionResult {
+    async fn check_permissions(
+        &self,
+        input: &serde_json::Value,
+    ) -> crate::permissions::PermissionResult {
         let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
         // Read-only commands are always safe
@@ -109,9 +122,15 @@ impl Tool for BashTool {
         crate::permissions::PermissionResult::Passthrough
     }
 
-
-    fn permission_matcher(&self, input: &serde_json::Value) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
-        let command = input.get("command").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    fn permission_matcher(
+        &self,
+        input: &serde_json::Value,
+    ) -> Option<Box<dyn Fn(&str) -> bool + '_>> {
+        let command = input
+            .get("command")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         Some(Box::new(move |pattern: &str| {
             // Support "git commit:*" prefix matching
             if let Some(prefix) = pattern.strip_suffix(":*") {
@@ -151,7 +170,9 @@ mod tests {
     #[tokio::test]
     async fn test_bash_timeout() {
         let tool = BashTool;
-        let result = tool.call(json!({"command": "sleep 1", "timeout": 10})).await;
+        let result = tool
+            .call(json!({"command": "sleep 1", "timeout": 10}))
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("timeout of 10ms"));
     }
@@ -171,7 +192,10 @@ mod tests {
         let tool = BashTool;
         let input = json!({"command": "ls -la"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Allow));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Allow
+        ));
     }
 
     #[tokio::test]
@@ -179,7 +203,10 @@ mod tests {
         let tool = BashTool;
         let input = json!({"command": "git status"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Allow));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Allow
+        ));
     }
 
     #[tokio::test]
@@ -187,7 +214,10 @@ mod tests {
         let tool = BashTool;
         let input = json!({"command": "cargo test --release"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Allow));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Allow
+        ));
     }
 
     #[tokio::test]
@@ -195,7 +225,10 @@ mod tests {
         let tool = BashTool;
         let input = json!({"command": "sed -i 's/old/new/g' /home/user/.bashrc"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Passthrough
+        ));
     }
 
     #[tokio::test]
@@ -203,7 +236,10 @@ mod tests {
         let tool = BashTool;
         let input = json!({"command": "cargo build --release"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Passthrough
+        ));
     }
 
     #[tokio::test]
@@ -211,9 +247,11 @@ mod tests {
         let tool = BashTool;
         let input = json!({"command": "git push origin main"});
         let result = tool.check_permissions(&input).await;
-        assert!(matches!(result, crate::permissions::PermissionResult::Passthrough));
+        assert!(matches!(
+            result,
+            crate::permissions::PermissionResult::Passthrough
+        ));
     }
-
 
     // ── permission_matcher tests ─────────────────────────────────────
 
@@ -251,7 +289,10 @@ mod tests {
     fn test_suggestion_multi_word() {
         let tool = BashTool;
         let input = json!({"command": "git commit -m 'fix'"});
-        assert_eq!(tool.permission_suggestion(&input), Some("git commit:*".into()));
+        assert_eq!(
+            tool.permission_suggestion(&input),
+            Some("git commit:*".into())
+        );
     }
 
     #[test]

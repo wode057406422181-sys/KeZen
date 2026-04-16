@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::control::topology::{AgentConfig, ClusterConfig, PermissionConfig};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -286,18 +288,17 @@ mod tests {
         };
         cluster.defaults = DefaultsConfig {
             model: Some("claude-sonnet".into()),
-            ..Default::default()
         };
 
         let mut gateway = AgentConfig::default();
         gateway.kind = Some(AgentKind::Gateway);
         gateway.name = Some("gateway".into());
 
-        let mut pod = AgentConfig::default();
-        pod.kind = Some(AgentKind::Pod);
-        pod.name = Some("pod".into());
-        pod.work_dir = Some(PathBuf::from("/pod"));
-        pod.permissions = Some(PermissionConfig {
+        let mut master_node = AgentConfig::default();
+        master_node.kind = Some(AgentKind::Master);
+        master_node.name = Some("master".into());
+        master_node.work_dir = Some(PathBuf::from("/master"));
+        master_node.permissions = Some(PermissionConfig {
             mode: Some(PermissionMode::DontAsk),
             allow_rules: Some(vec!["write".into()]),
             ..Default::default()
@@ -307,15 +308,15 @@ mod tests {
         let mut master = AgentConfig::default();
         master.name = Some("architect".into());
         master.model = Some("claude-opus".into());
-        pod.master = Some(Box::new(master));
+        master_node.master = Some(Box::new(master));
 
         // worker with no model → should fallback to defaults
         let mut worker = AgentConfig::default();
         worker.kind = Some(AgentKind::Worker);
         worker.name = Some("worker".into());
 
-        pod.workers.push(worker);
-        gateway.workers.push(pod);
+        master_node.workers.push(worker);
+        gateway.workers.push(master_node);
         cluster.agents.push(gateway);
 
         let resolved_tree = resolve_tree(&cluster);
@@ -332,35 +333,39 @@ mod tests {
         // But the resolved tree has the workers
         assert_eq!(gw.workers.len(), 1);
 
-        // Pod: explicit work_dir and permissions
-        let pod_r = &gw.workers[0];
-        assert_eq!(pod_r.resolved_work_dir, PathBuf::from("/pod"));
+        // MasterNode: explicit work_dir and permissions
+        let master_node_r = &gw.workers[0];
+        assert_eq!(master_node_r.resolved_work_dir, PathBuf::from("/master"));
         assert_eq!(
-            pod_r.resolved_permissions.mode,
+            master_node_r.resolved_permissions.mode,
             Some(PermissionMode::DontAsk)
         );
-        let allow = pod_r.resolved_permissions.allow_rules.as_ref().unwrap();
+        let allow = master_node_r
+            .resolved_permissions
+            .allow_rules
+            .as_ref()
+            .unwrap();
         assert_eq!(allow.len(), 2);
         assert!(allow.contains(&"read".into()));
         assert!(allow.contains(&"write".into()));
-        // Pod config.master should be cleared
-        assert!(pod_r.config.master.is_none());
+        // MasterNode config.master should be cleared
+        assert!(master_node_r.config.master.is_none());
         // But resolved master is present
-        assert!(pod_r.master.is_some());
+        assert!(master_node_r.master.is_some());
 
-        // Master: explicit model overrides defaults
-        let master_r = pod_r.master.as_ref().unwrap();
+        // SubMaster: explicit model overrides defaults
+        let master_r = master_node_r.master.as_ref().unwrap();
         assert_eq!(master_r.resolved_model.as_deref(), Some("claude-opus"));
-        // Master inherits pod's resolved work_dir and permissions
-        assert_eq!(master_r.resolved_work_dir, PathBuf::from("/pod"));
+        // SubMaster inherits master_node's resolved work_dir and permissions
+        assert_eq!(master_r.resolved_work_dir, PathBuf::from("/master"));
         assert_eq!(
             master_r.resolved_permissions.mode,
             Some(PermissionMode::DontAsk)
         );
 
-        // Worker: inherits pod's work_dir/permissions, defaults model
-        let worker_r = &pod_r.workers[0];
-        assert_eq!(worker_r.resolved_work_dir, PathBuf::from("/pod"));
+        // Worker: inherits master_node's work_dir/permissions, defaults model
+        let worker_r = &master_node_r.workers[0];
+        assert_eq!(worker_r.resolved_work_dir, PathBuf::from("/master"));
         assert_eq!(
             worker_r.resolved_permissions.mode,
             Some(PermissionMode::DontAsk)

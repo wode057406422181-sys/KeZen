@@ -1,9 +1,8 @@
-use std::path::PathBuf;
 use async_trait::async_trait;
 use serde_json::json;
+use std::path::PathBuf;
 
 use super::{Tool, ToolResult};
-
 
 pub struct GlobTool {
     pub work_dir: PathBuf,
@@ -39,13 +38,13 @@ impl Tool for GlobTool {
     async fn call(&self, input: serde_json::Value) -> ToolResult {
         let pattern = match input.get("pattern").and_then(|v| v.as_str()) {
             Some(p) => p.to_string(),
-            None => {
-                return ToolResult::err("Error: missing or invalid 'pattern'".to_string())
-            }
+            None => return ToolResult::err("Error: missing or invalid 'pattern'".to_string()),
         };
 
         let default_dir = self.work_dir.to_string_lossy().to_string();
-        let path_str = input.get("path").and_then(|v| v.as_str())
+        let path_str = input
+            .get("path")
+            .and_then(|v| v.as_str())
             .unwrap_or(&default_dir)
             .to_string();
 
@@ -81,15 +80,22 @@ impl Tool for GlobTool {
             }
 
             let count = results.len();
-            let mut content = format!("Found {} file{}:\n", count, if count == 1 { "" } else { "s" });
+            let mut content = format!(
+                "Found {} file{}:\n",
+                count,
+                if count == 1 { "" } else { "s" }
+            );
             content.push_str(&results.join("\n"));
 
             if count >= 100 {
-                content.push_str("\n(Results are truncated. Consider using a more specific path or pattern.)");
+                content.push_str(
+                    "\n(Results are truncated. Consider using a more specific path or pattern.)",
+                );
             }
 
             ToolResult::ok(content)
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(r) => r,
@@ -104,7 +110,10 @@ impl Tool for GlobTool {
         true
     }
 
-    async fn check_permissions(&self, _input: &serde_json::Value) -> crate::permissions::PermissionResult {
+    async fn check_permissions(
+        &self,
+        _input: &serde_json::Value,
+    ) -> crate::permissions::PermissionResult {
         crate::permissions::PermissionResult::Allow
     }
 }
@@ -119,13 +128,17 @@ mod tests {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("a.rs"), "fn main(){}").unwrap();
         std::fs::write(dir.path().join("b.txt"), "hello").unwrap();
-        
-        let tool = GlobTool { work_dir: std::env::current_dir().unwrap() };
-        let result = tool.call(json!({
-            "pattern": "*.rs",
-            "path": dir.path().to_str().unwrap()
-        })).await;
-        
+
+        let tool = GlobTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let result = tool
+            .call(json!({
+                "pattern": "*.rs",
+                "path": dir.path().to_str().unwrap()
+            }))
+            .await;
+
         assert!(!result.is_error);
         assert!(result.content.contains("a.rs"));
         assert!(!result.content.contains("b.txt"));
@@ -134,28 +147,38 @@ mod tests {
     #[tokio::test]
     async fn test_glob_no_match() {
         let dir = tempdir().unwrap();
-        
-        let tool = GlobTool { work_dir: std::env::current_dir().unwrap() };
-        let result = tool.call(json!({
-            "pattern": "*.rs",
-            "path": dir.path().to_str().unwrap()
-        })).await;
-        
+
+        let tool = GlobTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let result = tool
+            .call(json!({
+                "pattern": "*.rs",
+                "path": dir.path().to_str().unwrap()
+            }))
+            .await;
+
         assert!(!result.is_error);
         assert!(result.content.contains("No files found"));
     }
 
     #[tokio::test]
     async fn test_glob_invalid_pattern() {
-        let tool = GlobTool { work_dir: std::env::current_dir().unwrap() };
-        let _result = tool.call(json!({
-            "pattern": "***"
-        })).await;
-        
+        let tool = GlobTool {
+            work_dir: std::env::current_dir().unwrap(),
+        };
+        let _result = tool
+            .call(json!({
+                "pattern": "***"
+            }))
+            .await;
+
         // glob crate allows `***` but some invalid pattern like `[` without `]` will err
-        let result2 = tool.call(json!({
-            "pattern": "["
-        })).await;
+        let result2 = tool
+            .call(json!({
+                "pattern": "["
+            }))
+            .await;
         assert!(result2.is_error);
         assert!(result2.content.contains("Invalid glob pattern"));
     }

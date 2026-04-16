@@ -41,13 +41,14 @@ impl Tool for FileReadTool {
     async fn call(&self, input: serde_json::Value) -> ToolResult {
         let file_path_str = match input.get("file_path").and_then(|v| v.as_str()) {
             Some(path) => path,
-            None => {
-                return ToolResult::err("Error: missing or invalid 'file_path'".to_string())
-            }
+            None => return ToolResult::err("Error: missing or invalid 'file_path'".to_string()),
         };
 
         let offset = input.get("offset").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-        let limit = input.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+        let limit = input
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
 
         let path = PathBuf::from(file_path_str);
 
@@ -62,7 +63,10 @@ impl Tool for FileReadTool {
                 if let Ok(bytes) = fs::read(&path).await {
                     let check_len = bytes.len().min(8192);
                     if bytes[..check_len].contains(&0) {
-                        return ToolResult::err(format!("Cannot read binary file: {}", file_path_str));
+                        return ToolResult::err(format!(
+                            "Cannot read binary file: {}",
+                            file_path_str
+                        ));
                     }
                 }
                 tracing::warn!(path = %file_path_str, error = %e, "FileRead: failed");
@@ -75,13 +79,16 @@ impl Tool for FileReadTool {
 
         let start_idx = offset.saturating_sub(1);
         if start_idx >= total_lines && total_lines > 0 {
-            return ToolResult::ok(format!("<system-reminder>Warning: the file exists but is shorter than the provided offset ({}). The file has {} lines.</system-reminder>", offset, total_lines));
+            return ToolResult::ok(format!(
+                "<system-reminder>Warning: the file exists but is shorter than the provided offset ({}). The file has {} lines.</system-reminder>",
+                offset, total_lines
+            ));
         } else if total_lines == 0 {
             return ToolResult::ok("<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>".to_string());
         }
 
         let end_idx = limit.map_or(total_lines, |l| (start_idx + l).min(total_lines));
-        
+
         let mut result_content = String::new();
         for (i, line) in lines[start_idx..end_idx].iter().enumerate() {
             result_content.push_str(&format!("{}: {}\n", start_idx + i + 1, line));
@@ -94,7 +101,10 @@ impl Tool for FileReadTool {
         true
     }
 
-    async fn check_permissions(&self, _input: &serde_json::Value) -> crate::permissions::PermissionResult {
+    async fn check_permissions(
+        &self,
+        _input: &serde_json::Value,
+    ) -> crate::permissions::PermissionResult {
         crate::permissions::PermissionResult::Allow
     }
 }
@@ -121,7 +131,9 @@ mod tests {
     #[tokio::test]
     async fn test_read_nonexistent() {
         let tool = FileReadTool;
-        let result = tool.call(json!({"file_path": "/path/to/nonexistent/file_12345.txt"})).await;
+        let result = tool
+            .call(json!({"file_path": "/path/to/nonexistent/file_12345.txt"}))
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("File does not exist:"));
     }
@@ -133,11 +145,13 @@ mod tests {
         let path_str = file.path().to_str().unwrap().to_string();
 
         let tool = FileReadTool;
-        let result = tool.call(json!({
-            "file_path": path_str,
-            "offset": 2,
-            "limit": 2
-        })).await;
+        let result = tool
+            .call(json!({
+                "file_path": path_str,
+                "offset": 2,
+                "limit": 2
+            }))
+            .await;
         assert!(!result.is_error);
         assert!(!result.content.contains("1: L1"));
         assert!(result.content.contains("2: L2"));
